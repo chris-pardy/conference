@@ -8,8 +8,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@atproto/lexicon": "0.7.15",
+    "multiformats": "13.4.2",
+    "qrcode-generator": "2.0.4",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "react-router": "8.4.0"
   },
   "devDependencies": {
     "@types/react": "19.3.0",

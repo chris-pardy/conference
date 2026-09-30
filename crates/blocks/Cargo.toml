@@ -5,4 +5,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
-serde_json = "1"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+# Lexicon properties are checked in declaration order, as @atproto/lexicon does.
+serde_json = { version = "1", features = ["preserve_order"] }

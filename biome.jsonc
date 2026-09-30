@@ -2,7 +2,16 @@
   "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
   "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
   "files": {
-    "includes": ["**", "!**/dist", "!**/target", "!**/playwright-report", "!**/test-results", "!features", "!.claude"]
+    "includes": [
+      "**",
+      "!**/dist",
+      "!**/target",
+      "!**/playwright-report",
+      "!**/test-results",
+      "!features",
+      "!.claude",
+      "!web/src/lexicon"
+    ]
   },
   "formatter": {
     "indentStyle": "space",

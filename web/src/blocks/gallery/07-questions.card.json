@@ -1,0 +1,124 @@
+{
+  "title": "Lists: repeated over a collection, and empty",
+  "card": {
+    "$type": "app.gather.block.card",
+    "blocks": [
+      {
+        "$type": "app.gather.block.defs#header",
+        "text": "Vragen voor de keynote"
+      },
+      {
+        "$type": "app.gather.block.defs#list",
+        "items": {
+          "source": "questions",
+          "path": ""
+        },
+        "key": "/id",
+        "template": [
+          {
+            "$type": "app.gather.block.defs#section",
+            "blocks": [
+              {
+                "$type": "app.gather.block.defs#richText",
+                "bind": {
+                  "text": {
+                    "source": "$item",
+                    "path": "/text"
+                  }
+                }
+              },
+              {
+                "$type": "app.gather.block.defs#person",
+                "bind": {
+                  "did": {
+                    "source": "$item",
+                    "path": "/author"
+                  }
+                }
+              },
+              {
+                "$type": "app.gather.block.defs#stat",
+                "label": "votes",
+                "bind": {
+                  "value": {
+                    "source": "$item",
+                    "path": "/votes"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "$type": "app.gather.block.defs#header",
+        "text": "Vragen voor Zaal C"
+      },
+      {
+        "$type": "app.gather.block.defs#list",
+        "items": {
+          "source": "roomC",
+          "path": ""
+        },
+        "key": "/id",
+        "empty": "Nog geen vragen: ask the first one",
+        "template": []
+      }
+    ],
+    "timeZone": "Europe/Amsterdam",
+    "createdAt": "2027-04-30T07:00:00.000Z",
+    "sources": [
+      {
+        "name": "questions",
+        "ref": {
+          "$type": "app.gather.block.defs#collectionSource",
+          "collection": "app.gather.demo.question"
+        }
+      },
+      {
+        "name": "roomC",
+        "ref": {
+          "$type": "app.gather.block.defs#collectionSource",
+          "collection": "app.gather.demo.question"
+        }
+      }
+    ]
+  },
+  "sources": {
+    "questions": [
+      {
+        "id": "q1",
+        "text": "Will the talks be recorded?",
+        "votes": 30,
+        "author": "did:plc:alice"
+      },
+      {
+        "id": "q2",
+        "text": "Is there a bike rack near the entrance?",
+        "votes": 12,
+        "author": "did:plc:bob"
+      },
+      {
+        "id": "q3",
+        "text": "Where do the canal tours leave from?",
+        "votes": 7,
+        "author": "did:plc:carol"
+      }
+    ],
+    "roomC": []
+  },
+  "profiles": {
+    "did:plc:alice": {
+      "did": "did:plc:alice",
+      "handle": "alice.test",
+      "displayName": "Alice de Vries"
+    },
+    "did:plc:bob": {
+      "did": "did:plc:bob",
+      "handle": "bob.test"
+    },
+    "did:plc:carol": {
+      "$fixture": "loading"
+    }
+  }
+}

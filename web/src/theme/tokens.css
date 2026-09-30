@@ -1,0 +1,92 @@
+/*
+ * The theme token contract. Blocks use only these semantic tokens, never a
+ * literal color or font, so an organizer's white-label theme restyles every
+ * card by redefining them. This is the default theme: the "Program" layout
+ * in the cool "Signal" palette.
+ *
+ * Colors: surfaces and text, then one token per meaning, each with a soft
+ * background (`-bg`) and the text that sits on it at full strength (`on-`).
+ */
+:root {
+  --g-color-bg: #eef1f7;
+  --g-color-surface: #ffffff;
+  --g-color-sunken: #f4f6fb;
+  --g-color-text: #111827;
+  --g-color-muted: #5b6475;
+  --g-color-border: #d5dbe6;
+  --g-color-skeleton: #e3e8f0;
+
+  --g-color-primary: #1f4ed8;
+  --g-color-on-primary: #ffffff;
+  --g-color-danger: #c42b2b;
+  --g-color-on-danger: #ffffff;
+  --g-color-danger-bg: #fdecec;
+  --g-color-info: #0b63b6;
+  --g-color-info-bg: #e6f0fb;
+  --g-color-warning: #9a5b00;
+  --g-color-warning-bg: #fdf1dc;
+  --g-color-success: #17803d;
+  --g-color-success-bg: #e5f5ea;
+  --g-color-neutral-bg: #e9edf3;
+
+  --g-font-display: "Archivo Narrow", "Arial Narrow", system-ui, sans-serif;
+  --g-font-body: Archivo, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --g-font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --g-radius-sm: 4px;
+  --g-radius-md: 8px;
+  --g-radius-lg: 14px;
+  --g-space-1: 4px;
+  --g-space-2: 8px;
+  --g-space-3: 12px;
+  --g-space-4: 16px;
+  --g-space-5: 24px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --g-color-bg: #0d1117;
+    --g-color-surface: #161b24;
+    --g-color-sunken: #10141b;
+    --g-color-text: #e8ecf3;
+    --g-color-muted: #9aa4b5;
+    --g-color-border: #2c3442;
+    --g-color-skeleton: #252c38;
+
+    --g-color-primary: #6d93ff;
+    --g-color-on-primary: #0b1020;
+    --g-color-danger: #ff7b7b;
+    --g-color-on-danger: #1a0707;
+    --g-color-danger-bg: #3a1616;
+    --g-color-info: #6db3ff;
+    --g-color-info-bg: #122840;
+    --g-color-warning: #f0b35a;
+    --g-color-warning-bg: #3a2a10;
+    --g-color-success: #5fd08a;
+    --g-color-success-bg: #10311d;
+    --g-color-neutral-bg: #232a36;
+  }
+}
+
+:root[data-theme="dark"] {
+  --g-color-bg: #0d1117;
+  --g-color-surface: #161b24;
+  --g-color-sunken: #10141b;
+  --g-color-text: #e8ecf3;
+  --g-color-muted: #9aa4b5;
+  --g-color-border: #2c3442;
+  --g-color-skeleton: #252c38;
+
+  --g-color-primary: #6d93ff;
+  --g-color-on-primary: #0b1020;
+  --g-color-danger: #ff7b7b;
+  --g-color-on-danger: #1a0707;
+  --g-color-danger-bg: #3a1616;
+  --g-color-info: #6db3ff;
+  --g-color-info-bg: #122840;
+  --g-color-warning: #f0b35a;
+  --g-color-warning-bg: #3a2a10;
+  --g-color-success: #5fd08a;
+  --g-color-success-bg: #10311d;
+  --g-color-neutral-bg: #232a36;
+}

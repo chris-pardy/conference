@@ -1067,11 +1067,11 @@
       "properties": {
         "wasm": {
           "type": "ref",
-          "ref": "#blobRef"
+          "ref": "#moduleBlob"
         },
         "script": {
           "type": "ref",
-          "ref": "#blobRef"
+          "ref": "#moduleBlob"
         },
         "exports": {
           "type": "array",
@@ -1082,7 +1082,7 @@
         }
       }
     },
-    "blobRef": {
+    "moduleBlob": {
       "type": "object",
       "description": "A blob by CID, with the DID of the repo that holds it.",
       "required": ["cid", "did"],

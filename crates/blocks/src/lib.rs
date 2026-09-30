@@ -1,9 +1,19 @@
 //! Card records (`app.gather.block.card`): types and lexicon validation.
+//!
+//! The appview uses this to check cards it's handed before storing or
+//! serving them. It validates exactly as the PWA does, against the same
+//! lexicons in `lexicons/`.
 
+mod lexicon;
+
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub const CARD_NSID: &str = "app.gather.block.card";
+
 /// Why a card failed validation: the JSON pointer of the offending value, and
-/// a reason code shared with the frontend validator.
+/// a reason code shared with the frontend validator (`required`,
+/// `min-length`, `max-length`, `type`, `format`, …).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CardError {
     pub path: String,
@@ -11,7 +21,66 @@ pub struct CardError {
     pub message: String,
 }
 
+impl std::fmt::Display for CardError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for CardError {}
+
 /// Validates an `app.gather.block.card` record against the lexicons.
-pub fn validate_card(_record: &Value) -> Result<(), CardError> {
-    todo!("not implemented")
+pub fn validate_card(record: &Value) -> Result<(), CardError> {
+    let Some(obj) = record.as_object() else {
+        return Err(CardError {
+            path: String::new(),
+            reason: "type".into(),
+            message: "a card must be an object".into(),
+        });
+    };
+    if obj.get("$type").and_then(Value::as_str) != Some(CARD_NSID) {
+        return Err(CardError {
+            path: "/$type".into(),
+            reason: "const".into(),
+            message: format!("/$type must be {CARD_NSID}"),
+        });
+    }
+    lexicon::validate_record(&format!("{CARD_NSID}#main"), record)
+}
+
+/// A card record. Blocks and sources stay as JSON: the renderer, not the
+/// appview, interprets them, and unknown block types must survive untouched.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Card {
+    pub blocks: Vec<Value>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sources: Vec<Source>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub middleware: Vec<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time_zone: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback_text: Option<String>,
+    pub created_at: String,
+}
+
+/// A named source that bindings refer to.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Source {
+    pub name: String,
+    #[serde(rename = "ref")]
+    pub source: Value,
+}
+
+impl Card {
+    /// Validates a record and reads it as a card.
+    pub fn from_record(record: &Value) -> Result<Card, CardError> {
+        validate_card(record)?;
+        serde_json::from_value(record.clone()).map_err(|err| CardError {
+            path: String::new(),
+            reason: "invalid".into(),
+            message: err.to_string(),
+        })
+    }
 }

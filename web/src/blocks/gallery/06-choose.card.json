@@ -1,0 +1,64 @@
+{
+  "title": "Single and multiple select, with a limit",
+  "card": {
+    "$type": "app.gather.block.card",
+    "blocks": [
+      {
+        "$type": "app.gather.block.defs#header",
+        "text": "Plan your afternoon"
+      },
+      {
+        "$type": "app.gather.block.defs#select",
+        "id": "track",
+        "label": "Which track?",
+        "options": [
+          {
+            "label": "Protocol",
+            "value": "protocol"
+          },
+          {
+            "label": "Apps",
+            "value": "apps"
+          },
+          {
+            "label": "Community",
+            "value": "community"
+          }
+        ]
+      },
+      {
+        "$type": "app.gather.block.defs#select",
+        "id": "talks",
+        "label": "Talks to save",
+        "multiple": true,
+        "maxSelections": 2,
+        "options": [
+          {
+            "label": "Lexicons in Practice",
+            "value": "lexicons"
+          },
+          {
+            "label": "Spaces Deep Dive",
+            "value": "spaces"
+          },
+          {
+            "label": "Running a PDS",
+            "value": "pds"
+          },
+          {
+            "label": "Feeds at Scale",
+            "value": "feeds"
+          }
+        ]
+      },
+      {
+        "$type": "app.gather.block.defs#submit",
+        "id": "plan",
+        "label": "Save my plan",
+        "action": "plan"
+      }
+    ],
+    "timeZone": "Europe/Amsterdam",
+    "createdAt": "2027-04-30T07:00:00.000Z"
+  }
+}
