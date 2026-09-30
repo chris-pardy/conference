@@ -1,5 +1,5 @@
 ---
-status: test-cases
+status: ready
 impact: cross-cutting
 depends-on: []
 branch:
@@ -160,8 +160,9 @@ reports) live in GitHub Actions for 14 days.
 
 ## Open questions
 
-- How `@vivarium/client` is installed, and how integration tests start the
-  Rust server. Both are addressed by the design review below.
+None. The design review settled how `@vivarium/client` is installed
+(published to npm) and how integration tests start the Rust server (a
+prebuilt binary started by a global setup).
 
 ## Architecture analysis
 
@@ -469,5 +470,279 @@ The user approved the revised design as written, including publishing
 a prerequisite for the build.
 
 ## Test cases
+
+### The skeleton works end to end
+
+#### TC-1: A fresh clone passes the full check
+
+- **Given** a fresh clone with the prerequisites installed and a vivarium
+  binary available
+- **When** the developer installs dependencies and runs the full check
+- **Then** lint, build, tests and the frozen-tests check run in that order,
+  and all pass
+- **And** the command exits successfully
+
+#### TC-2: The server reports that it can reach atproto
+
+- **Given** the backend server is started against the test vivarium
+- **When** a client asks for its health
+- **Then** it answers that it's up and that atproto is reachable
+
+#### TC-3: The server stays up when atproto is unreachable
+
+- **Given** the backend server is started with an atproto address that
+  nothing answers on
+- **When** a client asks for its health
+- **Then** it answers that it's up and that atproto is unreachable,
+  rather than crashing or hanging
+
+#### TC-4: The server picks a free port and announces it
+
+- **Given** the backend server is told to use any free port
+- **When** it starts
+- **Then** it announces the address it's listening on
+- **And** that address answers health requests
+
+#### TC-5: The backend's health response has a fixed shape
+
+- **Given** the backend's health logic, tested on its own with no network
+- **When** atproto is reported reachable, and then unreachable
+- **Then** the response carries the matching status each time
+  (a backend unit test)
+
+#### TC-6: The placeholder page shows backend health
+
+- **Given** the frontend is rendered on its own with a faked backend
+  answer
+- **When** the health answer arrives
+- **Then** the page shows the backend's status
+- **And** before the answer arrives, the page shows a loading state
+  (a frontend unit test)
+
+#### TC-7: The app loads on a phone and shows the whole stack is connected
+
+- **Given** the production build of the app, the backend server and the
+  test vivarium are running
+- **When** a phone-sized browser opens the app
+- **Then** the placeholder page shows that the backend is up and that
+  atproto is reachable
+
+#### TC-8: The production build is an installable PWA
+
+- **Given** the production build of the frontend
+- **When** its web app manifest and service worker are inspected
+- **Then** the manifest has a name, a start URL, a standalone display mode
+  and icons
+- **And** a service worker is generated and registered by the page
+
+### Vivarium in tests
+
+#### TC-9: Tests run against a sealed vivarium
+
+- **Given** a test run started through the check
+- **When** a test asks the box for an identity that exists only on the
+  real network
+- **Then** the box doesn't find it, and no request leaves the machine
+
+#### TC-10: One box is shared across a test run
+
+- **Given** a test run started through the check
+- **When** integration tests and browser tests run
+- **Then** they all talk to the same vivarium instance
+- **And** it's stopped when the run ends, whether the run passed or failed
+
+#### TC-11: A run attaches to a box that's already running
+
+- **Given** a vivarium is already running and its address is provided
+- **When** a test run starts
+- **Then** it uses that box instead of starting a new one
+- **And** it leaves the box running when it ends
+
+#### TC-12: The test run reports the real result
+
+- **Given** a test run started through the vivarium wrapper
+- **When** the wrapped tests fail
+- **Then** the wrapper exits with a failure, and the box is still stopped
+
+#### TC-13: A test can ask for a pristine box
+
+- **Given** a test that asks for a fresh vivarium
+- **When** it runs inside the check, locally or in CI
+- **Then** it gets its own new, sealed box, separate from the shared one
+
+### Lint and build gates
+
+#### TC-14: Badly formatted Rust fails the lint step
+
+- **Given** a Rust file that isn't formatted to the project's style
+- **When** the lint step runs
+- **Then** it fails and names the file
+
+#### TC-15: A Rust compiler lint warning fails the lint step
+
+- **Given** Rust code that triggers a clippy warning
+- **When** the lint step runs
+- **Then** it fails
+
+#### TC-16: A TypeScript lint or format problem fails the lint step
+
+- **Given** a TypeScript file with a lint error or bad formatting
+- **When** the lint step runs
+- **Then** it fails and names the file
+
+#### TC-17: A type error fails the build step
+
+- **Given** a frontend file with a type error
+- **When** the build step runs
+- **Then** it fails
+
+### Frozen tests
+
+#### TC-18: Branches that aren't feature branches skip the check
+
+- **Given** a branch not named `feature/<slug>`
+- **When** the frozen-tests check runs
+- **Then** it passes and says it was skipped because this isn't a feature
+  branch
+
+#### TC-19: A feature branch with no frozen tests yet skips the check
+
+- **Given** a feature branch whose feature file has never had a
+  `tests-commit`
+- **When** the frozen-tests check runs
+- **Then** it passes and says it was skipped because there's no
+  tests-commit yet
+
+#### TC-20: Unchanged frozen tests pass
+
+- **Given** a feature branch with a recorded `tests-commit`, and later
+  commits that only change other files
+- **When** the frozen-tests check runs
+- **Then** it passes
+
+#### TC-21: A changed frozen test fails the check
+
+- **Given** a feature branch with a recorded `tests-commit`
+- **When** a file from that commit has been changed, either committed or
+  only in the working tree
+- **Then** the check fails and names the changed file
+
+#### TC-22: Erasing the freeze fails the check
+
+- **Given** a feature branch where `tests-commit` was set and later blanked
+- **When** the frozen-tests check runs
+- **Then** it fails, saying the freeze was removed
+
+#### TC-23: Re-pointing the freeze fails the check
+
+- **Given** a feature branch where `tests-commit` was changed to a
+  different commit after it was first set
+- **When** the frozen-tests check runs
+- **Then** it fails, naming the original commit
+
+#### TC-24: A freeze outside the branch's history fails the check
+
+- **Given** a feature branch whose `tests-commit` isn't in the branch's
+  history
+- **When** the frozen-tests check runs
+- **Then** it fails
+
+#### TC-25: In CI, the branch comes from the pull request
+
+- **Given** CI is checking a pull request from `feature/<slug>`, and the
+  checkout isn't on a named branch
+- **When** the frozen-tests check runs
+- **Then** it checks the feature named by the pull request's branch
+
+### The CI workflow
+
+#### TC-26: CI runs on pull requests and on main
+
+- **Given** the CI workflow
+- **Then** it runs for pull requests targeting `main` and for pushes to
+  `main`
+- **And** it doesn't run for pushes to other branches
+
+#### TC-27: CI has four checks, each running the local script
+
+- **Given** the CI workflow
+- **Then** it has exactly the checks `lint`, `build`, `test` and
+  `frozen-tests`
+- **And** each one runs the same package script a developer runs locally
+
+#### TC-28: A newer push cancels an older PR run, but main runs finish
+
+- **Given** the CI workflow
+- **Then** a new push to a pull request cancels that PR's run still in
+  progress
+- **And** runs on `main` are never cancelled
+
+#### TC-29: Failed browser tests leave evidence
+
+- **Given** the CI workflow
+- **Then** when the `test` check fails, the Playwright report, traces,
+  screenshots and videos are uploaded and kept for 14 days
+- **And** nothing is uploaded when it passes
+
+#### TC-30: The frozen-tests check sees the PR's own commits
+
+- **Given** the CI workflow
+- **Then** the frozen-tests check examines the pull request's head commit,
+  with full history, not GitHub's merge of it into `main`
+
+#### TC-31: CI's vivarium is pinned and sealed
+
+- **Given** the CI workflow
+- **Then** the vivarium it uses comes from the pinned image version, runs
+  as a local binary, and isn't a service container
+
+### Merge gate
+
+#### TC-32: The ruleset requires the four checks on main
+
+- **Given** the ruleset definition
+- **Then** it targets `main` and requires `lint`, `build`, `test` and
+  `frozen-tests` to pass
+- **And** it doesn't require pull requests, and it lets repository admins
+  bypass it
+
+#### TC-33: The ruleset and the workflow agree on check names
+
+- **Given** the ruleset definition and the CI workflow
+- **Then** every required check in the ruleset is a job in the workflow
+
+#### TC-34: Applying the ruleset twice changes nothing (manual)
+
+- **Given** the ruleset has been applied to the GitHub repository
+- **When** the apply script runs again
+- **Then** it updates the existing ruleset instead of creating a second one
+
+#### TC-35: A red pull request can't be merged by a non-admin (manual)
+
+- **Given** a pull request with a failing required check
+- **Then** GitHub shows it as blocked from merging for anyone without the
+  bypass
+
+#### TC-36: Spec commits can still go straight to main (manual)
+
+- **Given** the ruleset is active
+- **When** the admin pushes a commit that only touches a feature file to
+  `main`
+- **Then** the push is accepted
+
+#### TC-37: The agent waits for every required check before merging (manual)
+
+- **Given** a minor pull request whose checks are still pending, or have
+  just been created and aren't listed yet
+- **When** the agent reaches the review gate
+- **Then** it waits for all four required checks to pass before merging,
+  never merges with the admin override, and doesn't mistake "no checks yet"
+  for "CI not configured"
+
+#### TC-38: This feature's own pull request goes green in CI (manual)
+
+- **Given** the pull request that builds this feature
+- **When** CI runs on it
+- **Then** all four checks pass on GitHub
 
 ## Review log
