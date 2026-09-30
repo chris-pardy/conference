@@ -1,5 +1,5 @@
 ---
-status: test-cases
+status: ready
 impact: cross-cutting
 depends-on: [ci-pipeline]
 branch:
@@ -932,5 +932,300 @@ tests/support/blocks/                  seed space, gallery cards, demo middlewar
 </details>
 
 ## Test cases
+
+The scenario follows the design canvas: AtmosphereConf 2027 in Amsterdam,
+Friday 30 April (day 2), 24-hour clock, and the `Atmosphere-Gast` wifi.
+
+### Cards and the lexicon
+
+#### TC-1: Every gallery card is a valid card record
+
+- **Given** the sample cards shipped with the gallery
+- **When** each one is validated against the card lexicon, in both the
+  frontend and the backend
+- **Then** every card passes in both
+
+#### TC-2: Invalid cards are rejected by both sides
+
+- **Given** cards with mistakes: an interactive block with no id, a binding
+  with no source name, a card with no blocks
+- **When** they're validated in the frontend and in the backend
+- **Then** both reject each one, for the same reason
+
+#### TC-3: Generated types can't drift from the lexicons
+
+- **Given** the lexicon files have been changed but the generated types
+  haven't been regenerated
+- **When** the build check runs
+- **Then** it fails, saying the generated types are out of date
+
+### Rendering
+
+#### TC-4: A card renders its blocks in order
+
+- **Given** a card with a header "Welkom in Amsterdam", a divider, a
+  section of rich text, and a small-print context line
+- **When** it's rendered in the feed
+- **Then** the attendee sees those four things, in that order
+
+#### TC-5: Rich text shows links, mentions and emphasis
+
+- **Given** rich text that mentions an attendee, links to the venue page,
+  and has a bold phrase
+- **When** it's rendered
+- **Then** the mention shows the person's handle and opens their profile,
+  the link opens the page, and the phrase is bold
+
+#### TC-6: Layout blocks arrange their children
+
+- **Given** a stack of three blocks, and two columns each holding a stat
+- **When** they're rendered on a phone
+- **Then** the stack's blocks appear vertically and the columns side by
+  side, with no horizontal scrolling
+
+#### TC-7: An image shows with its alt text
+
+- **Given** an image block with alt text
+- **When** it's rendered
+- **Then** the image shows, and screen readers get the alt text
+- **And** if the image fails to load, the alt text shows in its place
+
+#### TC-8: A block type the app doesn't know is skipped
+
+- **Given** a card with a header, a block of a type this version doesn't
+  know, and a section
+- **When** it's rendered
+- **Then** the header and section show, and there's no trace of the
+  unknown block and no error
+
+#### TC-9: Reserved block types are skipped for now
+
+- **Given** a card containing a custom block and a canvas block
+- **When** it's rendered
+- **Then** both are skipped silently, like unknown blocks, and the rest of
+  the card shows
+
+### Data display
+
+#### TC-10: A progress bar, stat and badge show their values
+
+- **Given** a progress bar at 62% labelled "Bitterballen", a stat reading
+  "412 attendees", and a success badge reading "Open"
+- **When** they're rendered
+- **Then** each shows its value and label, and the badge uses the theme's
+  success tone
+
+#### TC-11: A list repeats its template for each item
+
+- **Given** a list bound to a collection of three questions, each shown as
+  a section with the question text and its vote count
+- **When** it's rendered
+- **Then** three sections appear, in the collection's order, each showing
+  its own question and count
+
+#### TC-12: An empty list shows its empty state
+
+- **Given** a list bound to an empty collection, with an empty message
+  "Nog geen vragen: ask the first one"
+- **When** it's rendered
+- **Then** the empty message shows instead of any items
+
+#### TC-13: A reordered list keeps each item's state
+
+- **Given** a rendered list where one item's text input has been partly
+  filled in
+- **When** the collection reorders so that item moves from third to first
+- **Then** the item moves, and its partly filled input keeps what was
+  typed
+
+### Bindings and sources
+
+#### TC-14: A bound value shows the source's field
+
+- **Given** a stat bound to the `total` field of a source whose value is
+  412
+- **When** it's rendered
+- **Then** it shows 412
+
+#### TC-15: A bound value updates when its source changes
+
+- **Given** a rendered stat bound to a source showing 412
+- **When** the source's value changes to 413
+- **Then** the stat shows 413, and the rest of the card doesn't re-mount
+
+#### TC-16: A loading source shows a skeleton
+
+- **Given** a block bound to a source that hasn't answered yet
+- **When** the card is rendered
+- **Then** that block shows a skeleton, and the rest of the card is fully
+  shown
+
+#### TC-17: A missing, forbidden or failing source shows "unavailable"
+
+- **Given** three blocks bound to a source that's missing, one that's
+  forbidden, and one that errors
+- **When** the card is rendered
+- **Then** each of the three shows the same quiet "unavailable"
+  placeholder, with no hint of why
+- **And** the rest of the card shows normally
+
+#### TC-18: A binding to a field that doesn't exist shows "unavailable"
+
+- **Given** a block bound to a path that isn't in the source's value
+- **When** it's rendered
+- **Then** it shows "unavailable", and nothing crashes
+
+### Inputs and action intents
+
+#### TC-19: A button sends an action intent
+
+- **Given** a card with a primary button "Ik kom!" (id `rsvp`, action
+  `going`)
+- **When** the attendee taps it
+- **Then** the host receives one intent naming the card, block `rsvp`,
+  action `going`, and the button's value
+
+#### TC-20: A button group sends the chosen button's intent
+
+- **Given** a button group "Stroopwafel", "Bitterballen", "Kaas"
+- **When** the attendee taps "Kaas"
+- **Then** exactly one intent is sent, carrying the value for "Kaas"
+
+#### TC-21: A text input submits its text
+
+- **Given** a text input "Your question" with a submit button
+- **When** the attendee types "Is there a bike rack?" and submits
+- **Then** an intent carrying that text is sent, and the input clears
+
+#### TC-22: A required input blocks an empty submit
+
+- **Given** a required text input with a maximum length of 280 characters
+- **When** the attendee submits it empty, and then with 281 characters
+- **Then** no intent is sent either time, and each time the input shows
+  why
+
+#### TC-23: A single select sends one choice
+
+- **Given** a single select with three options
+- **When** the attendee picks one and submits
+- **Then** the intent carries exactly that option
+
+#### TC-24: A multi select respects its limit
+
+- **Given** a multi select of five talks with at most two selections
+- **When** the attendee tries to select a third
+- **Then** the third can't be selected, and the limit is explained
+- **And** submitting sends exactly the two chosen options
+
+#### TC-25: Inputs are usable with a keyboard and a screen reader
+
+- **Given** a card with a button, a text input, a single select and a
+  multi select
+- **When** the attendee moves through it with the keyboard
+- **Then** every control can be reached and operated, and each has an
+  accessible name
+
+### Conference-aware blocks
+
+#### TC-26: A person block shows who someone is
+
+- **Given** a person block for an attendee's DID
+- **When** it's rendered
+- **Then** it shows their avatar and display name, falling back to their
+  handle when there's no display name
+- **And** while the profile loads it shows a skeleton, and if the profile
+  can't be found it shows "unavailable"
+
+#### TC-27: Session and room blocks show their details
+
+- **Given** a session reference "Lexicons in Practice", 14:30–15:15,
+  Grote Zaal, and a room block "Zaal B, 1st floor (Trap)"
+- **When** they're rendered
+- **Then** the details show, with times on a 24-hour clock
+
+#### TC-28: A countdown counts down and then says it has started
+
+- **Given** a countdown to 19:00 "Bitterballen after the talks", seen at
+  18:58
+- **When** the clock passes 19:00
+- **Then** it shows the time remaining, then "now", and after the event's
+  end, "ended"
+
+#### TC-29: A copyable value copies to the clipboard
+
+- **Given** a copyable value for the wifi password of `Atmosphere-Gast`
+- **When** the attendee taps copy
+- **Then** the password is on the clipboard, and "Copied" shows briefly
+
+#### TC-30: A QR code encodes its value
+
+- **Given** a QR code block for the venue's check-in URL
+- **When** it's rendered and the QR code is decoded
+- **Then** it decodes to exactly that URL
+
+### Surfaces
+
+#### TC-31: A card fits each surface
+
+- **Given** one card with a header, an image, rich text, a text input and a
+  primary button
+- **When** it's rendered as a feed item, a compact card, and an ephemeral
+  response
+- **Then** the feed item shows everything
+- **And** the compact card shows only the first blocks and its primary
+  button, with no image or text input
+- **And** the ephemeral response shows everything, is marked "only you",
+  and can be dismissed
+
+#### TC-32: A button opens a sheet of blocks
+
+- **Given** a button "Details" that opens a sheet containing a section and
+  a text input
+- **When** the attendee taps it, and then closes the sheet
+- **Then** the sheet slides up showing those blocks, and closing it
+  returns to the card
+- **And** an input submitted inside the sheet sends its intent like any
+  other
+
+### Theme
+
+#### TC-33: Blocks use only the theme's tokens
+
+- **Given** the gallery rendered with the default theme, and then with a
+  test theme that changes every token
+- **When** the two renders are compared
+- **Then** every block's colors and fonts follow the test theme, and no
+  block keeps a hard-coded color or font
+
+#### TC-34: Variants map to their meaning
+
+- **Given** primary and danger buttons, and info, warning and success
+  tones
+- **When** they're rendered
+- **Then** each uses the theme token for its meaning, and variants a block
+  doesn't support are ignored
+
+### The gallery
+
+#### TC-35: The gallery shows every block and every surface
+
+- **Given** the block gallery page, opened on a phone-sized screen
+- **Then** it has at least one example of every vocabulary block type, and
+  one example of each surface
+- **And** it has examples of loading, unavailable and empty states
+
+#### TC-36: The gallery shows the intents cards send
+
+- **Given** the gallery
+- **When** the attendee taps a button and submits an input on sample cards
+- **Then** the gallery lists each intent, with its card, block, action and
+  value
+
+#### TC-37: The home page still shows backend health
+
+- **Given** the app with the gallery added
+- **When** a browser opens the home page
+- **Then** it still shows that the backend is up (ci-pipeline's smoke
+  check), and the gallery is at its own address
 
 ## Review log
