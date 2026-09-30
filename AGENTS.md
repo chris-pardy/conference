@@ -99,7 +99,8 @@ in the feature file, push, and stop.
     Docker) and `@vivarium-dev/client`, both pinned devDependencies. Never
     install with `--omit=optional`, which drops the binary.
   - `scripts/with-vivarium.ts` starts one sealed (`--no-upstream`) box for a
-    whole run and exports `VIVARIUM_URL`; every `test:*` script uses it, and
+    whole run and exports `VIVARIUM_URL`. `check:test`, `test:integration`,
+    `test:tooling` and `test:e2e` use it, and
     it attaches to an existing box when `VIVARIUM_URL` is already set.
     `VIVARIUM_BIN` overrides the binary, e.g. for a local vivarium checkout.
     CI never runs vivarium as a service container or through Docker.

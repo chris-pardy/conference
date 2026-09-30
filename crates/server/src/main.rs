@@ -8,7 +8,7 @@ async fn main() {
     let port: u16 = std::env::var("PORT")
         .ok()
         .map(|p| p.parse().expect("PORT must be a port number"))
-        .unwrap_or(3000);
+        .unwrap_or(3100);
     let atproto_url =
         std::env::var("ATPROTO_URL").unwrap_or_else(|_| "http://localhost:2580".into());
 

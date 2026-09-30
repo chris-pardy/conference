@@ -1,9 +1,27 @@
+import { createServer } from 'node:net'
 import { defineConfig, devices } from '@playwright/test'
 
 // The backend and the built PWA, as a phone sees them. Run through
 // `pnpm test:e2e` so the backend is pointed at the run's sealed vivarium.
-const SERVER_PORT = 3100
-const PREVIEW_PORT = 4173
+
+/** A port nothing is listening on right now. */
+function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = createServer()
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address() as { port: number }
+      server.close(() => resolve(port))
+    })
+  })
+}
+
+// Chosen once in the main process; the workers that load this config again
+// inherit them through the environment, so every process agrees.
+process.env.E2E_SERVER_PORT ??= String(await freePort())
+process.env.E2E_PREVIEW_PORT ??= String(await freePort())
+const SERVER_PORT = process.env.E2E_SERVER_PORT
+const PREVIEW_PORT = process.env.E2E_PREVIEW_PORT
 
 export default defineConfig({
   testDir: './e2e',
@@ -21,7 +39,7 @@ export default defineConfig({
   webServer: [
     {
       command: 'target/debug/conference-server',
-      env: { PORT: String(SERVER_PORT), ATPROTO_URL: process.env.VIVARIUM_URL ?? '' },
+      env: { PORT: SERVER_PORT, ATPROTO_URL: process.env.VIVARIUM_URL ?? '' },
       url: `http://127.0.0.1:${SERVER_PORT}/health`,
       reuseExistingServer: false,
     },

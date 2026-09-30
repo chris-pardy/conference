@@ -780,3 +780,39 @@ the agent's own behavior, and are verified on the PR.
 - **Then** all four checks pass on GitHub
 
 ## Review log
+
+### Round 1
+
+Reviewer: a fresh subagent following `adversarial-review`. Frozen tests
+unchanged; `pnpm check` green. Verdict: not clean (2 major, 3 minor, 2 nit).
+
+1. **[major] Pending runs on `main` could be cancelled.** GitHub cancels a
+   *pending* run whenever a newer one joins its concurrency group, whatever
+   `cancel-in-progress` says. So quick pushes to `main` could leave a commit
+   unchecked.
+   **Fixed:** PR runs share a group per ref. Every run on `main` gets its
+   own group (`github.run_id`).
+2. **[major] The PR under test ran its own enforcement scripts,** so it
+   could disable its own frozen-tests check.
+   **Fixed:** the `frozen-tests` job now takes `frozen-tests.sh` and
+   `check-tests-unchanged.sh` from `origin/main` whenever `main` has them,
+   and fails if `package.json`'s `check:frozen` no longer runs that script.
+   **Residual:** a PR can still edit `.github/workflows/ci.yml` itself.
+   `ship-feature` treats any CI change as architectural, so such a PR
+   always waits for a human.
+3. **[minor] The dev proxy defaulted to port 3100 but the server to 3000.**
+   **Fixed:** the server now defaults to 3100, matching the proxy.
+4. **[minor] `reqwest` had no TLS,** so every HTTPS atproto service looked
+   unreachable and nothing reported why.
+   **Fixed:** enabled `rustls-tls`. The health probe now logs why it
+   failed to stderr.
+5. **[minor] The e2e servers used fixed ports,** so concurrent checks
+   collided.
+   **Fixed:** the Playwright config picks free ports once in the main
+   process and shares them with its workers through the environment.
+6. **[nit] AGENTS.md overstated which scripts use `with-vivarium`.**
+   **Fixed.**
+7. **[nit] `with-vivarium` exit codes:** a signal-killed child exited 128,
+   and a failing `box.stop()` could hide the real exit code.
+   **Fixed:** it now exits with 128 + the signal number, and a failure to
+   stop the box is logged but no longer changes the exit code.

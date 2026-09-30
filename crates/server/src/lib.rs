@@ -46,9 +46,16 @@ impl AppState {
 
     async fn atproto_status(&self) -> AtprotoStatus {
         let url = format!("{}/xrpc/_health", self.atproto_url);
-        match self.http.get(url).send().await {
+        match self.http.get(&url).send().await {
             Ok(res) if res.status().is_success() => AtprotoStatus::Reachable,
-            _ => AtprotoStatus::Unreachable,
+            Ok(res) => {
+                eprintln!("atproto health probe: {url} answered {}", res.status());
+                AtprotoStatus::Unreachable
+            }
+            Err(err) => {
+                eprintln!("atproto health probe: {url} failed: {err}");
+                AtprotoStatus::Unreachable
+            }
         }
     }
 }

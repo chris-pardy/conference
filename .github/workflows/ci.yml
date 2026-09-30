@@ -9,8 +9,12 @@ on:
   push:
     branches: [main]
 
+# A PR's runs share a group, so a newer push cancels the older run. Every run
+# on main gets its own group: GitHub cancels a *pending* run whenever another
+# joins its group, whatever cancel-in-progress says, and each main commit must
+# be checked.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -90,6 +94,19 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
+      # The branch under test mustn't be able to switch off its own policing:
+      # once main has the enforcement scripts, they come from main.
+      - name: Use main's frozen-tests enforcement
+        run: |
+          for f in scripts/frozen-tests.sh scripts/check-tests-unchanged.sh; do
+            if git cat-file -e "origin/main:$f" 2>/dev/null; then
+              git show "origin/main:$f" > "$f"
+            fi
+          done
+          if [ "$(jq -r '.scripts["check:frozen"]' package.json)" != "bash scripts/frozen-tests.sh" ]; then
+            echo "package.json's check:frozen must run scripts/frozen-tests.sh" >&2
+            exit 1
+          fi
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
