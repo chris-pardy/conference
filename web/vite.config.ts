@@ -5,10 +5,12 @@ import { VitePWA } from 'vite-plugin-pwa'
 // The backend the dev and preview servers proxy to: the server's default port,
 // unless SERVER_URL says otherwise (Playwright sets it).
 const serverUrl = process.env.SERVER_URL ?? 'http://127.0.0.1:3100'
+// Anchored like the service worker's denylist below, so /apis or /healthy
+// stay app routes everywhere.
 const proxy = {
-  '/health': serverUrl,
-  '/api': serverUrl,
-  '/xrpc': serverUrl,
+  '^/health(\\?|$)': serverUrl,
+  '^/api/': serverUrl,
+  '^/xrpc/': serverUrl,
 }
 
 export default defineConfig({

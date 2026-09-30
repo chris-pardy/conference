@@ -15,10 +15,11 @@ if (!command) {
 
 const box = await startVivarium({ upstream: false })
 
-const child = spawn(command, args, {
-  stdio: 'inherit',
-  env: { ...process.env, VIVARIUM_URL: box.url },
-})
+// Every box in the run stays sealed: vivFresh boxes read VIVARIUM_UPSTREAM.
+const env: NodeJS.ProcessEnv = { ...process.env, VIVARIUM_URL: box.url }
+delete env.VIVARIUM_UPSTREAM
+
+const child = spawn(command, args, { stdio: 'inherit', env })
 
 const forward = (signal: NodeJS.Signals) => child.kill(signal)
 process.on('SIGINT', forward)

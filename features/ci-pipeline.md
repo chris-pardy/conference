@@ -1,5 +1,5 @@
 ---
-status: implementing
+status: blocked
 impact: cross-cutting
 depends-on: []
 branch: feature/ci-pipeline
@@ -7,6 +7,24 @@ tests-commit: 1e253c62660da8051a2e231e43cd1d4b41aa8372
 ---
 
 # CI pipeline
+
+> **Blocked (review round 3): the merge gate can't be applied.**
+> `chris-pardy/conference` is a private repository on a free personal
+> account. GitHub refuses both rulesets and branch protection there:
+> `gh api repos/chris-pardy/conference/rulesets` returns HTTP 403 "Upgrade
+> to GitHub Pro or make this repository public to enable this feature."
+>
+> So the approved "Merging" requirement (a ruleset requiring the four
+> checks) can't be delivered, and the manual TC-34, TC-35 and TC-36 can't
+> pass. The options are:
+>
+> - make the repository public
+> - upgrade the account to GitHub Pro
+> - re-scope the merge gate to `ship-feature`'s check verification alone,
+>   dropping the ruleset and TC-32 to TC-36 (or keeping the ruleset file for
+>   later)
+>
+> Everything else is implemented, green, and through three review rounds.
 
 ## Summary
 
@@ -848,3 +866,28 @@ unchanged; `pnpm check` green. Verdict: not clean (3 major, 1 minor, 2 nit).
 6. **[nit] `pnpm check` builds the web app twice.**
    **Left as is:** each `test:*` script builds what it needs so it can run
    on its own, and the extra Vite build takes well under a second here.
+
+### Round 3
+
+Reviewer: a fresh subagent following `adversarial-review`. Frozen tests
+unchanged; `pnpm check` green. Verdict: not clean (2 major, 2 minor, 1 nit).
+
+1. **[major] A committed `node_modules/.bin` could replace `bash` or `git`
+   in the `frozen-tests` job,** because pnpm puts it first on PATH.
+   **Fixed:** the job fails if the branch tracks any `node_modules`, and
+   deletes `node_modules` before running the check. It never installs
+   dependencies.
+2. **[major] The ruleset can't be applied:** the repository is private on a
+   free plan, and GitHub returns 403 for rulesets and branch protection.
+   **Blocked** on a decision from the user (see the top of this file).
+3. **[minor] No job timeouts.**
+   **Fixed:** `timeout-minutes` is 15 for lint and build, 25 for test, and
+   5 for frozen-tests.
+4. **[minor] `VIVARIUM_UPSTREAM=1` in a developer's shell would unseal
+   `vivFresh` boxes.**
+   **Fixed:** `with-vivarium` removes it from the wrapped command's
+   environment.
+5. **[nit] The proxy prefix keys and the service-worker denylist
+   disagreed.**
+   **Fixed:** the proxy keys are now anchored patterns that match the
+   denylist.
