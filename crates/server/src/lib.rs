@@ -1,3 +1,7 @@
+use std::time::Duration;
+
+use axum::{Json, Router, extract::State, routing::get};
+
 pub mod health {
     use serde::Serialize;
 
@@ -14,7 +18,45 @@ pub mod health {
         pub atproto: AtprotoStatus,
     }
 
-    pub fn health_report(_atproto: AtprotoStatus) -> HealthReport {
-        todo!("not implemented")
+    /// The body of `GET /health`: the server is up whenever it can answer.
+    pub fn health_report(atproto: AtprotoStatus) -> HealthReport {
+        HealthReport { status: "up", atproto }
     }
+}
+
+use health::{AtprotoStatus, HealthReport, health_report};
+
+/// How long a health check waits for the atproto service before calling it unreachable.
+const ATPROTO_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
+
+#[derive(Clone)]
+pub struct AppState {
+    atproto_url: String,
+    http: reqwest::Client,
+}
+
+impl AppState {
+    pub fn new(atproto_url: impl Into<String>) -> Self {
+        let http = reqwest::Client::builder()
+            .timeout(ATPROTO_PROBE_TIMEOUT)
+            .build()
+            .expect("the HTTP client has a valid static configuration");
+        Self { atproto_url: atproto_url.into().trim_end_matches('/').to_owned(), http }
+    }
+
+    async fn atproto_status(&self) -> AtprotoStatus {
+        let url = format!("{}/xrpc/_health", self.atproto_url);
+        match self.http.get(url).send().await {
+            Ok(res) if res.status().is_success() => AtprotoStatus::Reachable,
+            _ => AtprotoStatus::Unreachable,
+        }
+    }
+}
+
+pub fn router(state: AppState) -> Router {
+    Router::new().route("/health", get(health)).with_state(state)
+}
+
+async fn health(State(state): State<AppState>) -> Json<HealthReport> {
+    Json(health_report(state.atproto_status().await))
 }

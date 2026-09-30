@@ -37,7 +37,7 @@ branch.
   can't be automated, say why in the feature file and mark it `(manual)`.
 - Use vitest for units and integration, and Playwright for UI flows.
   Anything that touches atproto runs against vivarium through the
-  `@vivarium/client/vitest` fixtures (see Testing in `AGENTS.md`). Never use
+  `@vivarium-dev/client/vitest` fixtures (see Testing in `AGENTS.md`). Never use
   the live network.
 - Test behavior through the surfaces a user or another feature would use:
   the UI, the API, the records written. Don't test internals, because the

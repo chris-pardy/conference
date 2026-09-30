@@ -1,0 +1,97 @@
+# Each job runs the same package script a developer runs locally; `pnpm check`
+# runs all four in order. The job names are the required checks in
+# .github/rulesets/main.json, so renaming one means updating the ruleset too.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - name: Install the Rust toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check:lint
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - name: Install the Rust toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check:build
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - name: Install the Rust toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - run: pnpm install --frozen-lockfile
+      - name: Playwright version
+        id: playwright
+        run: echo "version=$(pnpm exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+      - run: pnpm exec playwright install --with-deps chromium
+      # The tooling tests commit to throwaway git repos.
+      - run: |
+          git config --global user.name "CI"
+          git config --global user.email "ci@users.noreply.github.com"
+      - run: pnpm check:test
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            playwright-report
+            test-results
+          retention-days: 14
+
+  frozen-tests:
+    runs-on: ubuntu-latest
+    steps:
+      # The PR's own head commit with full history, not GitHub's merge into main.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - run: pnpm check:frozen

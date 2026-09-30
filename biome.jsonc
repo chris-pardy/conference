@@ -1,0 +1,40 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
+  "files": {
+    "includes": ["**", "!**/dist", "!**/target", "!**/playwright-report", "!**/test-results", "!features", "!.claude"]
+  },
+  "formatter": {
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 120
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "single",
+      "semicolons": "asNeeded",
+      "trailingCommas": "all",
+      "arrowParentheses": "always"
+    }
+  },
+  "linter": { "enabled": true },
+  "assist": { "actions": { "source": { "organizeImports": "on" } } },
+  "overrides": [
+    {
+      // ci-pipeline's frozen tests (tests-commit 1e253c6) were approved before
+      // this config existed and can't be edited, so they're exempt from
+      // formatting and import sorting. They're still linted. Future frozen
+      // tests are formatted before they're frozen.
+      "includes": [
+        "tests/integration/vivarium.test.ts",
+        "tests/tooling/gates.test.ts",
+        "tests/tooling/pwa-build.test.ts",
+        "tests/tooling/ruleset.test.ts",
+        "tests/tooling/with-vivarium.test.ts",
+        "tests/tooling/workflow.test.ts"
+      ],
+      "formatter": { "enabled": false },
+      "assist": { "enabled": false }
+    }
+  ]
+}
