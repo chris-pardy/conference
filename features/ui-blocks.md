@@ -1,9 +1,9 @@
 ---
-status: ready
+status: implementing
 impact: cross-cutting
 depends-on: [ci-pipeline]
 branch: feature/ui-blocks
-tests-commit:
+tests-commit: eb0f71353cb5f8a8628d9d6f1269d4eaf18df6a9
 ---
 
 # UI blocks
