@@ -83,7 +83,7 @@ if [[ $(full "$current") != $(full "$frozen") ]]; then
 fi
 
 if ! git merge-base --is-ancestor "$frozen" HEAD 2>/dev/null; then
-  fail "tests-commit $frozen is not an ancestor of HEAD (not in this branch's history)"
+  fail "tests-commit $frozen is not an ancestor of HEAD (not in this branch's history). Was the branch rebased? Once tests are frozen, bring in main with \`git merge origin/main\`, never a rebase."
 fi
 
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)

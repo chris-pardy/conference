@@ -1,5 +1,5 @@
 ---
-status: implementing
+status: blocked
 impact: cross-cutting
 depends-on: []
 branch: feature/ci-pipeline
@@ -7,6 +7,11 @@ tests-commit: 1e253c62660da8051a2e231e43cd1d4b41aa8372
 ---
 
 # CI pipeline
+
+> **Blocked: waiting for a ship decision.** All five review rounds are done,
+> and round 5 found only minor issues, all now fixed. The pipeline's
+> five-round cap still needs a human to decide whether to ship. See Round 5
+> in the review log.
 
 ## Summary
 
@@ -916,3 +921,52 @@ not clean (2 major, 1 minor, 1 nit).
 4. **[nit] The service-worker denylist didn't match `/health?query` like
    the proxy did.**
    **Fixed:** the denylist entry is now `/^\/health(\?|$)/`.
+
+### Round 5
+
+Reviewer: a fresh subagent following `adversarial-review`. Frozen tests
+unchanged; `pnpm check` green; the first real CI run (run 36785876444 on
+draft PR #1) passed all four checks, and both frozen-tests paths
+enforced the freeze. Verdict: not clean, but only minor issues (0 blocking,
+0 major, 3 minor, 1 nit). The reviewer said none of them touch the main
+path or the stated requirements.
+
+1. **[minor] Rebasing a frozen branch breaks the check for good,** and no
+   doc said to merge instead.
+   **Fixed:** added a rule to AGENTS.md: never rebase a feature branch once
+   its tests are frozen; bring in main with `git merge origin/main`. The
+   not-an-ancestor error now says the same. A new test covers it.
+2. **[minor] A frozen path containing a space escaped the freeze,** because
+   of an unquoted word-split.
+   **Fixed:** `check-tests-unchanged.sh` now reads the file list
+   NUL-separated and passes `:(literal)` pathspecs. A new test covers a
+   frozen `tests/a b.test.ts`.
+3. **[minor] The architectural checklist didn't name the configs that
+   decide which tests run.**
+   **Fixed:** `ship-feature` now lists `.github/`, `scripts/`, the vitest
+   and Playwright configs, `biome.jsonc`, the Rust toolchain and format
+   configs, `Cargo.toml` files, and `package.json` scripts.
+4. **[nit] GitHub warned that the actions ran on the deprecated Node 20
+   runtime.**
+   **Fixed:** bumped to the current majors (`checkout@v7`,
+   `setup-node@v7`, `cache@v6`, `upload-artifact@v7`,
+   `pnpm/action-setup@v6`).
+
+**Status after five rounds:** by the pipeline's rule, a fifth round that
+isn't clean blocks the feature. The findings have gone down every round:
+
+| Round | blocking | major | minor | nit |
+|---|---|---|---|---|
+| 1 | 0 | 2 | 3 | 2 |
+| 2 | 0 | 3 | 1 | 2 |
+| 3 | 0 | 2 | 2 | 1 |
+| 4 | 0 | 2 | 1 | 1 |
+| 5 | 0 | 0 | 3 | 1 |
+
+What kept coming back was hardening the frozen-tests check against a
+deliberately adversarial branch. The bypasses went: running the PR's own
+scripts, then `.npmrc`, pre/post scripts, `node_modules/.bin`, and
+`.pnpmfile.cjs`. Round 4 closed that class by also running main's script
+directly in a clean environment, and round 5 found no bypass. Everything
+round 5 found is fixed. The user decides whether to ship, or to run a
+sixth round.

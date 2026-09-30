@@ -6,15 +6,18 @@
 set -euo pipefail
 
 sha=${1:?usage: $0 <tests-commit>}
-files=$(git show --name-only --no-renames --diff-filter=AM --format= "$sha")
+# NUL-separated, so paths with spaces or glob characters stay whole.
+files=()
+while IFS= read -r -d '' file; do
+  [ -n "$file" ] && files+=(":(literal)$file")
+done < <(git show -z --name-only --no-renames --diff-filter=AM --format= "$sha")
 
-if [ -z "$files" ]; then
+if [ ${#files[@]} -eq 0 ]; then
   echo "commit $sha adds or modifies no files" >&2
   exit 1
 fi
 
-# shellcheck disable=SC2086 # file list is newline-separated paths
-changed=$(git diff --name-only "$sha" -- $files)
+changed=$(git diff --name-only "$sha" -- "${files[@]}")
 
 if [ -n "$changed" ]; then
   echo "frozen test files changed since $sha:" >&2

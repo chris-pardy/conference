@@ -60,7 +60,11 @@ apply:
 - The feature's `impact` is `cross-cutting`.
 - The diff adds or upgrades dependencies.
 - The diff touches lexicons, database schema, build or CI config, or
-  `AGENTS.md`/`.claude/`.
+  `AGENTS.md`/`.claude/`. Build and CI config includes anything that decides
+  which tests run or how: `.github/`, `scripts/`, `vitest.config.ts`,
+  `playwright.config.ts`, `biome.jsonc`, `rustfmt.toml`,
+  `rust-toolchain.toml`, `Cargo.toml` files, and the `scripts` in
+  `package.json`.
 - The diff changes a module, API or component that another feature uses.
 
 Otherwise it's **minor**.

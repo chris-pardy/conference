@@ -71,6 +71,10 @@ in the feature file, push, and stop.
   starts a `feature/<slug>` branch at step 5, and the tests and code land
   through its PR, which also marks the feature complete. Nothing else is
   committed directly to `main`. Push after every commit.
+- **Never rebase a feature branch once its tests are frozen.** Rebasing
+  rewrites `tests-commit`, and the frozen-tests check then fails for good.
+  Bring in `main` with `git merge origin/main` (the `git pull --rebase`
+  habit is for `main` only).
 - **Commit identity.** Every commit's author and committer is
   `Chris Pardy <chris.pardy@gmail.com>`. This repo's git config already sets
   it, so don't override it with `-c`, `--author` or environment variables.
