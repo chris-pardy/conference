@@ -23,16 +23,20 @@ it needs to. Many features can be specced before any of them are built.
 | # | Step | Skill | Who | Status when done |
 |---|------|-------|-----|------------------|
 | 5–6 | Refresh the spec; write automated tests, shown red | [`write-tests`](.claude/skills/write-tests/SKILL.md) | agent writes, human approves | `implementing` |
-| 7–9 | Implement → adversarial review → rework, repeated until clean | [`implement-feature`](.claude/skills/implement-feature/SKILL.md), [`adversarial-review`](.claude/skills/adversarial-review/SKILL.md) | agent, unsupervised | `pr` |
-| 10–12 | PR + demo video → review gate → mark complete | [`ship-feature`](.claude/skills/ship-feature/SKILL.md) | agent; human only for architectural PRs | `complete` |
+| 7–9 | Implement → adversarial review → rework, repeated until clean | [`implement-feature`](.claude/skills/implement-feature/SKILL.md), [`adversarial-review`](.claude/skills/adversarial-review/SKILL.md) | agent, unsupervised | `implementing` |
+| 10–12 | Mark complete, PR + demo video → review gate | [`ship-feature`](.claude/skills/ship-feature/SKILL.md) | agent; human only for architectural PRs | `complete` (in the PR) |
 
 If you don't load skills automatically, read the linked `SKILL.md` for the
 step before you start it.
 
 Statuses, in order: `analysis`, `design-review`, `test-cases`, `ready`,
-`implementing`, `pr`, `awaiting-human-review`, `complete`. `ready` means
-fully specced and waiting to be built. A feature that can't go on without a
-human decision is `blocked`, and its file explains why.
+`implementing`, `complete`. `ready` means fully specced and waiting to be
+built. A feature that can't go on without a human decision is `blocked`, and
+its file explains why.
+
+A PR that finishes a feature sets `status: complete` itself, so `main` shows
+a feature as complete exactly when its PR merges. While the build is on a
+branch, `main` still shows `ready`.
 
 A spec session ends at `ready`. Don't start building unless the user asks.
 When they ask to build "the next feature", pick a `ready` feature whose
@@ -65,8 +69,8 @@ in the feature file, push, and stop.
   `features/<slug>.md` and go directly to `main`. Run `git pull --rebase`
   before each push, since other spec sessions may be pushing too. A build
   starts a `feature/<slug>` branch at step 5, and the tests and code land
-  through its PR. The only other direct commit to `main` is marking a
-  feature `complete` after its PR merges. Push after every commit.
+  through its PR, which also marks the feature complete. Nothing else is
+  committed directly to `main`. Push after every commit.
 - **Commit identity.** Every commit's author and committer is
   `Chris Pardy <chris.pardy@gmail.com>`. This repo's git config already sets
   it, so don't override it with `-c`, `--author` or environment variables.
@@ -89,9 +93,3 @@ in the feature file, push, and stop.
     service and set `VIVARIUM_URL`.
 - Name every automated test after the test case it covers, e.g.
   `test('TC-3: a member can leave a session chat', …)`.
-
-## Session start
-
-Before starting new work, check for features in `awaiting-human-review`
-whose PR has merged (`gh pr view <n> --json state`), and finish step 12 for
-them (see `ship-feature`).

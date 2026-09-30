@@ -19,12 +19,12 @@ impact: standalone       # or cross-cutting; set by architecture analysis
 depends-on: [attendee-profile]   # features that must be complete first
 branch: feature/session-chat     # set when the build starts
 tests-commit: 3f0e1e9    # the approved red tests; these files are frozen
-pr: https://github.com/chris-pardy/conference/pull/4
-merged: 2026-10-02
 ```
 
-Specs (up to `status: ready`) live on `main` before any code exists. A
-feature is done when its `status` is `complete`.
+Specs (up to `status: ready`) live on `main` before any code exists. The PR
+that builds a feature also sets its `status` to `complete`, so on `main` the
+status changes when the PR merges. `gh pr list --head feature/<slug>` finds
+the PR.
 
 ```bash
 grep -l '^status: ready' features/*.md      # specced, waiting to be built

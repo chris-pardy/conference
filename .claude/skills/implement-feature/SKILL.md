@@ -56,5 +56,4 @@ declined unless it can show the reason is wrong.
 If round 5 still isn't clean, set `status: blocked`, summarize what keeps
 coming back, and stop.
 
-When the review is clean, set `status: pr`, commit, push, and go on to
-`ship-feature`.
+When the review is clean, go on to `ship-feature`.

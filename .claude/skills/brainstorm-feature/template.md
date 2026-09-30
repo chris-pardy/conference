@@ -4,8 +4,6 @@ impact:
 depends-on: []
 branch:
 tests-commit:
-pr:
-merged:
 ---
 
 # <Feature name>

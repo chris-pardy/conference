@@ -1,11 +1,16 @@
 ---
 name: ship-feature
-description: Steps 10-12 of the feature pipeline. Use when a feature file has status pr, or has status awaiting-human-review and its PR has merged. Opens the PR with a demo video, applies the review gate (auto-merge minor changes, wait for a human on architectural ones), and marks the feature complete once merged.
+description: Steps 10-12 of the feature pipeline. Use when a feature's adversarial review has come back clean. Marks the feature complete within its branch, opens the PR with a demo video, and applies the review gate (auto-merge minor changes, wait for a human on architectural ones).
 ---
 
 # Ship a feature
 
-## 10. PR and demo
+## 10. Mark complete, then open the PR with a demo
+
+**Mark complete.** In `features/<slug>.md` on the feature branch, set
+`status: complete`. Commit (`docs(<slug>): mark complete`) and push. Because
+the PR carries this change, `main` shows the feature as complete exactly
+when the PR merges. Nothing needs to be committed to `main` afterwards.
 
 **Demo video.** If the feature has anything a user can see, write a
 Playwright script that walks through its main test cases against a local
@@ -32,14 +37,12 @@ name. The body contains:
 - The demo link, or the reason there isn't one.
 - The output of the final test run.
 
-Record the PR URL as `pr:` in the feature file, commit and push.
-
 ## 11. Review gate
 
 Wait for CI with `gh pr checks <n> --watch`.
 
-- **Checks fail:** go back to `implement-feature` to fix them. Frozen tests
-  stay frozen.
+- **Checks fail:** go back to `implement-feature` to fix them, pushing to
+  the same branch. Frozen tests stay frozen, and `status` stays `complete`.
 - **No checks are configured:** this PR can't auto-merge. Treat it as
   architectural and say why in the comment below.
 
@@ -57,18 +60,10 @@ Otherwise it's **minor**.
 Post the classification and its reason as a PR comment. Then:
 
 - **Minor:** `gh pr merge <n> --squash --delete-branch`, then go to step 12.
-- **Architectural:** set `status: awaiting-human-review`, commit and push.
-  Tell the user the PR is waiting for them, then stop.
+- **Architectural:** tell the user the PR is waiting for their review, and
+  stop. Merging it completes the feature, and nothing more is needed.
 
-## 12. Mark complete
+## 12. Clean up
 
-This step runs after the agent merges the PR, or in a later session once a
-human has merged it (`gh pr view <n> --json state` shows `MERGED`):
-
-```bash
-git switch main && git pull --rebase
-```
-
-In `features/<slug>.md`, set `status: complete` and `merged: <YYYY-MM-DD>`.
-Commit (`docs(<slug>): mark complete`) directly to `main` and push. Delete
-the local feature branch.
+After a merge, run `git switch main && git pull --rebase` and delete the
+local feature branch. The feature file on `main` now says `complete`.
