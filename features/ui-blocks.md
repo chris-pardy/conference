@@ -1,6 +1,6 @@
 ---
-status: analysis
-impact:
+status: design-review
+impact: cross-cutting
 depends-on: [ci-pipeline]
 branch:
 tests-commit:
@@ -300,3 +300,110 @@ info/warning/success tones. The theme decides colors and fonts.
   isn't on screen.
 - Whether `ui-blocks` needs `conference-space` first, or can define its
   records against a generic space and leave membership to that feature.
+
+## Architecture analysis
+
+**Existing code touched:** none: no code yet. This feature builds on the
+skeleton that [`ci-pipeline`](ci-pipeline.md) will create (`ready`, not
+built):
+
+- `crates/server`, which becomes the appview
+- `web/`, the React + Vite PWA
+- the vitest integration harness (vivarium plus the server)
+- the Playwright config
+
+**Features affected:**
+
+- [`ci-pipeline`](ci-pipeline.md) (`ready`). Its approved design still
+  holds, but ui-blocks leans on it in four ways:
+  - **Playwright blocks service workers globally** (`serviceWorkers:
+    'block'`), yet the offline queue tests need the offline behavior. Either
+    the queue works without a service worker (in-page IndexedDB plus
+    `context.setOffline`), or those specs opt back into service workers.
+    The design has to pick.
+  - **An embedded JS engine** in `crates/server`, and possibly a wasm build
+    of it for the PWA, adds build time and dependencies to the `build` and
+    `test` jobs and to the Rust cache.
+  - **The placeholder `/health` page** becomes one route among several (the
+    gallery), which brings client-side routing into `web/`.
+  - **Integration tests need an authenticated attendee** writing to a
+    space. That's the first use of vivarium OAuth and permissioned spaces,
+    through `viv`.
+- **Planned features** (`conference-space`, `conference-feed`,
+  `feed-templates`, `block-editor`, `feed-apps` and the experiences) aren't
+  specced yet. Every one of them consumes the surfaces below, so changing
+  them later ripples into all of them.
+
+**New shared surfaces:**
+
+- **Lexicons:**
+  - block documents (the vocabulary)
+  - bindings and source references
+  - action records
+  - the middleware request and response shapes
+  - the quasi-record addressing scheme
+- **The React renderer:** a block-document component, one component per
+  block type, the four surfaces (feed item, ephemeral, sheet, compact
+  card), and placeholder states.
+- **A theme token contract:** the semantic variants map to white-label
+  tokens. No theming system exists yet. The design decides whether
+  ui-blocks defines the token set or a separate `theming` feature comes
+  first. The earlier "Program" design direction (see project memory) could
+  seed it.
+- **The sandbox runtime:** one JS module format for custom blocks, computed
+  bindings and middleware. It runs:
+  - in the PWA, in an isolated worker or frame
+  - in the Rust appview, in an embedded engine (QuickJS via `rquickjs`,
+    Boa, or V8 via `deno_core`)
+
+  It needs identical semantics in both places, with time and memory
+  budgets.
+- **Appview APIs:**
+  - submit an action, which runs middleware and writes the action to the
+    space
+  - resolve a source, viewer-scoped
+  - subscribe to source changes
+- **The offline action queue and reconciliation:** the local result
+  against the server's result.
+- **The block gallery route,** plus the test-space fixtures that later
+  features' tests will reuse.
+
+**Findings that affect the design:**
+
+- **Writing to a space as an attendee needs that attendee's OAuth session**
+  with a `space:` scope (vivarium enforces it). The appview has to be the
+  OAuth client (a backend-for-frontend holding DPoP-bound tokens) to write
+  actions on the attendee's behalf. No sign-in feature exists. The design
+  must decide whether sign-in is part of ui-blocks, or a new
+  `attendee-sign-in` feature that ui-blocks depends on.
+- **Vivarium spaces must be created explicitly**
+  (`com.atproto.simplespace.createSpace`), and it tracks a proposal's
+  lexicons, so expect churn. The gallery's test space and the
+  `conference-space` feature both depend on this. Keeping ui-blocks'
+  records independent of the space's membership model avoids a hard
+  dependency on `conference-space`.
+- **Whose repo action records go in:** space writes go through the writer's
+  own space credentials, so either the attendee's repo or the appview's.
+  That decides whether the action authored by the attendee is literally
+  true, and how the space's writer set must be configured.
+- **"Isomorphic" middleware** means one JS module that behaves the same
+  under the browser's engine and under an embedded Rust engine. Two
+  engines risk subtle differences (Date, Intl, float formatting, missing
+  APIs). One engine on both sides (e.g. QuickJS natively and as wasm)
+  removes that risk, at some cost in PWA performance.
+- **Quasi-records need a live change feed.** Either the appview pushes
+  source updates (WebSocket/SSE), or clients re-resolve on space write
+  notifications. That's a design choice with cost and latency trade-offs.
+
+**Verdict:** cross-cutting. ui-blocks introduces the lexicons, the
+renderer, the theme contract, the sandbox runtime and the appview APIs that
+every planned configurable-UI feature is built on. It also establishes
+auth, space writes and client-side routing for the first time. It leans on
+`ci-pipeline`'s test harness in ways that its design needs to accommodate:
+service workers in Playwright, and the build cost of an embedded JS engine.
+
+## Design review
+
+## Test cases
+
+## Review log
