@@ -11,131 +11,114 @@ tests-commit:
 ## Summary
 
 This is a block-kit style vocabulary of UI building blocks, plus a themed
-React renderer. Conference experiences are built from it: chat, polls,
-Q&A/AMA, announcements, wifi info and toys.
+React renderer that turns a **card** (a tree of blocks bound to data) into
+UI. Conference experiences are built from it: chat, polls, Q&A/AMA,
+announcements, wifi info and toys.
 
-Blocks can bind to live data from the conference space. Attendee
-interactions become actions that pass through middleware. That middleware
-is sandboxed JS that runs both on the PWA and on our appview, so
-interactions work offline.
+Every later part of the configurable UI renders through it.
 
-Every later part of the configurable UI builds on this feature: the
-conference feed, templates, the block editor, third-party feed apps and
-each experience.
+**The split.** This file started as all of "configurable UI blocks". Design
+review round 1 split it into six features, and this one is now the **core**:
+
+- the lexicons for cards, blocks and bindings
+- the renderer
+- the static vocabulary
+- the theme contract
+- field and list bindings, resolved through a pluggable source resolver
+- the surfaces
+- the block gallery
+
+Interaction, offline and sandboxed JS moved to sibling features. The
+decisions recorded under Options considered still apply across the whole
+family.
 
 ### Where this sits
 
-"Configurable UI" was split into a family of features. This one comes
-first, because everything else renders through it:
-
-| Slug | What it is |
-|------|-----------|
-| `conference-space` | A conference as a permissioned space: the organizer owns it and attendees are members |
-| **`ui-blocks`** | This feature: the vocabulary, renderer, bindings, actions and middleware contract |
-| `conference-feed` | The main timeline and scoped sub-feeds (per session or room), ordering, pinning, live updates |
-| `feed-templates` | App-shipped experience templates that organizers configure |
-| `block-editor` | Organizers compose custom cards from blocks |
-| `feed-apps` | Third-party apps post blocks and supply middleware: install, trust, auth |
-| `announcements`, `wifi-info`, `polls`, `qa`, `session-chat`, `toys` | The experiences, built on the above |
-
-Organizers get all three authoring modes: templates, a full block editor,
-and third-party apps.
+| Slug | What it is | Depends on |
+|------|-----------|-----------|
+| [`attendee-sign-in`](attendee-sign-in.md) | OAuth backend-for-frontend in the appview, with `space:` scopes, plus a test helper | ci-pipeline |
+| [`space-sync`](space-sync.md) | The appview's identity and access to spaces: credentials, write notifications, a per-repo index | ci-pipeline, attendee-sign-in |
+| **`ui-blocks`** | This feature: lexicons, renderer, vocabulary, theme, bindings, surfaces, gallery | ci-pipeline |
+| [`block-actions`](block-actions.md) | Actions, isomorphic QuickJS middleware, ingest validation, built-in views, live updates | ui-blocks, space-sync, attendee-sign-in |
+| [`block-offline`](block-offline.md) | Offline queue, optimistic overlay, replay and reconciliation | block-actions |
+| [`block-sandbox`](block-sandbox.md) | Custom JS blocks and computed bindings | block-actions |
+| `conference-space` | A conference as a permissioned space: the organizer owns it and attendees are members | (not specced yet) |
+| `conference-feed` | The main timeline and scoped sub-feeds (per session or room), ordering, pinning | (not specced yet) |
+| `feed-templates`, `block-editor`, `feed-apps` | The three authoring modes | (not specced yet) |
+| `announcements`, `wifi-info`, `polls`, `qa`, `session-chat`, `toys` | The experiences | (not specced yet) |
 
 ## Experience
 
-**Attendees** see cards made of blocks: in the feed, as pinned or home
-cards, in sheets opened from a button, and as ephemeral responses to their
-own actions. Every card uses the organizer's white-label theme.
+**Attendees** see cards made of blocks, on four surfaces:
 
-**Reading live data.** A block can show live data. Examples:
+- in the feed
+- as compact home or pinned cards
+- in sheets opened from a button
+- as ephemeral responses
 
-- the poll bar shows current percentages
-- the Q&A list reorders as upvotes arrive
-- the poll says "you voted B"
+Every card uses the organizer's white-label theme, through semantic
+variants only.
 
-Data a viewer isn't allowed to read never appears. While data loads, the
-block shows a skeleton. If the data is missing, forbidden or failing, the
-block shows a quiet "unavailable" without saying why, and the rest of the
-card still renders.
+**Bound data.** Blocks can show data bound from sources: a field of a
+record, or a list that repeats a block template over a collection. While a
+source loads, the block shows a skeleton. If it's missing, forbidden or
+failing, the block shows a quiet "unavailable", never saying why, and the
+rest of the card still renders.
 
-**Acting.** An attendee taps a button, picks an option, or types and
-submits. Middleware then does one of these:
+**Interactive blocks.** Buttons, selects and text inputs render, validate
+their own local input (e.g. required, max length), and hand an **action
+intent** to whoever is hosting the card. In this feature, the gallery shows
+the intent. [`block-actions`](block-actions.md) sends intents to the
+appview.
 
-- accepts it straight away (optimistically, on the device)
-- rejects it with a message ("Voting has closed")
-- shows an ephemeral response only they see ("Thanks! Here's the result")
-
-**Offline.** With no connection, the action still runs through the local
-middleware and the card updates optimistically. The action is queued and
-sent when the connection returns. If the server then disagrees (say the
-poll closed in the meantime), the card reverts and shows the server's
-message.
-
-**Custom blocks.** A custom block, such as a toy, renders its own UI in an
-isolated frame. It sees only the data it's bound to, and it can only act
-through the same action path.
-
-**Old clients.** An older app that doesn't know a newer block type skips
+**Old clients.** An older client that doesn't know a newer block type skips
 it silently.
 
-**Organizers and developers** get a block gallery page. It renders sample
-cards covering every block type and every surface, with live bindings to
-records in a test space and demo middleware. It's the reference for
-authors, and the target for the Playwright tests and the demo video.
+**The block gallery** (`/dev/blocks`) renders sample cards covering every
+vocabulary block and every surface. Their sources are fixtures, and the
+gallery shows each action intent a card emits. It's the reference for
+authors, and the target for Playwright and the demo video. Once
+`block-actions` lands, it switches to live sources.
 
 ### Vocabulary (v1)
 
 - **Layout and text:** section, header, divider, context (small print), rich
   text, image, columns/stack.
-- **Inputs:** button, button group, text input, single select, multi select,
-  submit.
-- **Data display:** list (repeats a block template over a collection),
-  progress/result bar, stat/number, badge.
+- **Inputs:** button (it can open a sheet), button group, text input,
+  single select, multi select, submit.
+- **Data display:** list (repeats over a collection), progress/result bar,
+  stat/number, badge.
 - **Conference-aware:** person (a DID shown as avatar and name), session
   reference, room/location, time/countdown, copyable value (e.g. a wifi
   password), QR code.
-- **Custom:** a sandboxed JS block.
+- **Custom:** reserved in the lexicon. Rendered by
+  [`block-sandbox`](block-sandbox.md). Until then, the renderer treats it
+  as an unknown block and skips it.
 
 Blocks take semantic variants only: primary/danger buttons, emphasis, and
-info/warning/success tones. The theme decides colors and fonts.
+info/warning/success tones.
 
 ## Data
 
-- **Block documents** are the blocks that make up a card. They're records
-  in the conference space, whose shape is defined by this feature's
-  lexicons. Who writes them is decided by later features (feed, templates,
-  editor, apps).
+- **Cards** are records in a space. The lexicons are defined here. Who
+  writes cards is up to later features (feed, templates, editor, apps).
 - **Rich text** is plain text plus atproto richtext facets, the same model
   as `app.bsky` posts.
-- **Data sources** come in two kinds:
-  - atproto records in the conference space
-  - **quasi-records**: record-shaped views that the appview computes, such
-    as vote tallies
-- **Bindings:** a block property can be bound to a field of a source, and
-  a list block can repeat over a collection. Sources resolve as the viewer,
-  so viewer-scoped values such as `myVote` are possible and permissions are
-  enforced as that viewer.
-- **Computed bindings:** sandboxed JS can derive values from the resolved
-  sources.
-- **Actions:** each one records the attendee's DID, the card, the block, an
-  action id and a value.
-  - The client sends it to our appview, which runs middleware and then
-    writes the accepted action to the conference space as a record.
-  - The attendee authors the action, and the space's policy governs who
-    reads it.
-  - The offline queue lives on the device until it's sent.
-- **Middleware** is a sandboxed JS module.
-  - It receives an action and the viewer context.
-  - It returns one of: accept, reject with a message, a rewritten action,
-    or ephemeral blocks.
-  - The same module runs on the PWA (optimistically) and on the appview
-    (authoritatively).
-- **Sandbox limits** (custom blocks, computed bindings and middleware):
-  - the code sees only its inputs: resolved bindings, or the action and
-    context
-  - it can only emit actions
-  - it has no network and no storage
-  - it runs under time and memory budgets
+- **Source references** come in two kinds:
+  - a record, or a collection in the card's space
+  - a view: a quasi-record computed by the appview (the built-in views
+    arrive in `block-actions`)
+
+  The renderer resolves them through a **source resolver** interface. This
+  feature ships a fixture resolver, and `block-actions` ships the live
+  appview one.
+- **Privacy model** (applies to the whole family): attendees hold only a
+  `read_self` space grant, so they can read their own records and nothing
+  else of anyone's. Only our appview, which has its own did:web and client
+  attestation, and is the only client on the space's app allow-list, gets
+  space credentials that read every repo. Other members' data reaches
+  attendees only as aggregates or views the appview chooses to serve. See
+  [`space-sync`](space-sync.md).
 
 ## Options considered
 
@@ -148,6 +131,11 @@ info/warning/success tones. The theme decides colors and fonts.
   as a unit.
 - **Start with conference-space**: also foundational, but ui-blocks can be
   proven in a test space first.
+- **Round 1 of the design review split ui-blocks itself into six**
+  (chosen): attendee-sign-in, space-sync, ui-blocks (core), block-actions,
+  block-offline and block-sandbox. The alternatives were three pieces
+  (sign-in, sync, and everything else) or one. Six keeps each piece
+  testable and reviewable, and lets the core land right after ci-pipeline.
 
 ### Who authors experiences
 
@@ -274,32 +262,49 @@ info/warning/success tones. The theme decides colors and fonts.
   plus demo middleware.
 - Component tests only: nothing visible until the feed ships.
 
+### Privacy inside a space (design review round 1)
+
+- **Members get `read_self`; only the appview reads everything and serves
+  aggregates** (chosen by the user): the space's app allow-list admits only
+  our appview's attested client, so only it can obtain space credentials.
+- Accept that all members can read everything: rules out secret ballots and
+  anonymous Q&A.
+- Actions written into an appview-owned repo: the attendee would no longer
+  author their own record.
+- A separate private space per sensitive interaction: many more spaces to
+  manage.
+
+### What custom blocks can see (design review round 1)
+
+- **Declared, non-viewer-scoped sources only** (chosen): the card must pass
+  sources explicitly, and never `mine` or other viewer-scoped fields. The
+  WebRTC leak is an accepted risk.
+- Anything, gated by a trust flag on the card's author.
+
 ## Out of scope
 
+- Sending actions, middleware, views and live updates
+  ([`block-actions`](block-actions.md)).
+- The offline queue and optimistic updates
+  ([`block-offline`](block-offline.md)).
+- Custom JS blocks and computed bindings
+  ([`block-sandbox`](block-sandbox.md)).
+- Sign-in, and the appview's access to spaces.
 - The feed: timeline, sub-feeds, ordering, pinning (`conference-feed`).
-- The conference space and membership (`conference-space`). The gallery
-  uses a test space.
-- Organizer block editing (`block-editor`).
-- Experience templates and how organizers configure them
-  (`feed-templates`).
-- Installing, trusting and authenticating third-party apps and their
-  middleware (`feed-apps`).
-- Any specific experience: polls, Q&A, chat, wifi, announcements, toys.
-- Free-form styling.
+- Creating and administering conference spaces (`conference-space`).
+- Organizer block editing, templates, and third-party apps.
+- Any specific experience.
+- Per-organizer theme configuration (a future `theming` feature). This
+  feature ships the token contract and one default theme.
 
 ## Open questions
 
-- How the Rust appview runs sandboxed JS middleware (an embedded engine
-  such as QuickJS, Boa or V8 isolates, or a JS sidecar), and how exactly
-  the same module runs in the PWA (a worker, an iframe, or QuickJS-wasm).
-  For architecture analysis and design review.
-- How quasi-records are addressed and served. Probably a URI scheme and an
-  appview endpoint, plus how clients subscribe to their changes.
-- How an attendee sees a server rejection of a queued offline action beyond
-  the card itself, e.g. whether a notification is needed when the card
-  isn't on screen.
-- Whether `ui-blocks` needs `conference-space` first, or can define its
-  records against a generic space and leave membership to that feature.
+None for this feature. The earlier questions moved with their topics:
+
+- the JS engine goes to `block-actions` and `block-sandbox`
+- quasi-record addressing goes to `block-actions`
+- notifying people about offline rejections goes to `block-offline`
+- the space dependency is answered by the split
 
 ## Architecture analysis
 
@@ -402,7 +407,479 @@ auth, space writes and client-side routing for the first time. It leans on
 `ci-pipeline`'s test harness in ways that its design needs to accommodate:
 service workers in Playwright, and the build cost of an embedded JS engine.
 
+**Addendum (design review round 1):** the critique found that vivarium's
+space write check never checks which app is writing, that a space
+credential reads every repo in the space, and that sources spanning members
+need an appview-side indexer. Those findings drove the split into six
+features, and moved the auth, sync and action concerns out of this one.
+
 ## Design review
+
+NSIDs use `app.gather.*` as a **placeholder** namespace until the user
+picks the real one.
+
+### Approach
+
+A **card** is a record holding three things:
+
+- a tree of blocks
+- named source references
+- an optional list of middleware module references (reserved here, used
+  by `block-actions`)
+
+`<BlockCard>` renders a card for a surface:
+
+1. It walks the block tree.
+2. It resolves each binding against sources obtained from a
+   `SourceResolver` found through React context.
+3. It renders each known block type through a registry, and skips unknown
+   types (they render `null`).
+
+Bindings are JSON pointers into a source's value. A `list` block repeats
+its template for each element of a bound array, with the element exposed
+as the reserved source `$item`. Keys come from a declared path, so
+reordering doesn't remount blocks.
+
+`SourceResolver` is the seam between this feature and the rest of the
+family:
+
+```ts
+interface SourceResolver {
+  // one observable per source; the renderer subscribes while mounted
+  watch(card: CardRef, name: string, ref: SourceRef):
+    Observable<{ state: 'loading' } | { state: 'ready', value: unknown } | { state: 'unavailable' }>
+}
+```
+
+The gallery and unit tests use `FixtureResolver`, which maps a source name
+to a value or a state, including delayed and failing sources. The live
+resolver comes with `block-actions`. Anything forbidden, missing or
+erroring maps to `unavailable`, and the reason is never surfaced.
+
+**Interactive blocks** hold their own local input state, run declared
+local validation (required, min/max length, max selections), and on submit
+call `onAction(intent)`, which they get from context:
+
+```ts
+type ActionIntent = { card: CardRef, blockId: string, actionId: string, value: unknown }
+```
+
+The gallery's host logs intents on screen. Sending them is `block-actions`'
+job.
+
+**Surfaces** are the same tree with a layout variant:
+
+- `feed`: full width
+- `compact`: truncated to the first N blocks, with media and inputs hidden
+  except for the primary button
+- `sheet`: a modal bottom sheet, opened by `button.opens`
+- `ephemeral`: an inline, dismissible card with an "only you" marker
+
+**Theme:** `web/src/theme/tokens.css` defines the semantic custom
+properties. Blocks use only those tokens. The default theme is the
+"Program"/"Signal" direction.
+
+**Conference-aware blocks without their backing features:**
+
+- **person** takes a DID and resolves its display name and avatar through
+  the resolver (a `profile` source kind). The fixture resolver answers in
+  tests.
+- **session reference** and **room** take inline title, time and room data,
+  plus an optional URI for a future schedule feature to deep-link.
+- **time/countdown** ticks on the client clock and switches to "now" or
+  "ended" labels.
+- **QR code** is generated on the client.
+- **copyable value** uses the clipboard API, and shows "Copied".
+
+All times use a 24-hour clock.
+
+### Components
+
+```
+lexicons/app/gather/block/defs.json    block union, binding, sourceRef, moduleRef, variants
+lexicons/app/gather/block/card.json    the card record
+crates/blocks/                         serde types + lexicon validation for cards (Rust),
+                                       used later by the appview; no runtime yet
+web/src/blocks/
+  BlockCard.tsx                        entry: <BlockCard card surface />
+  registry.ts                          type -> component; unknown -> null
+  blocks/*.tsx                         one component per vocabulary block
+  bindings.ts                          JSON pointer, $item scope, list keys
+  SourceResolver.ts                    interface + FixtureResolver
+  ActionContext.ts                     onAction(intent) context
+  surfaces/*.tsx                       feed, compact, sheet, ephemeral wrappers
+web/src/theme/tokens.css               semantic token contract + default theme
+web/src/routes/dev/blocks.tsx          gallery at /dev/blocks (react-router)
+web/src/blocks/gallery/*.card.json     sample cards (valid against the lexicon) + fixture sources
+```
+
+### Data (lexicons)
+
+- **`app.gather.block.defs`:**
+  - The **block union**, with each v1 type as a def: `section`, `header`,
+    `divider`, `context`, `richText`, `image`, `stack`, `columns`,
+    `button`, `buttonGroup`, `textInput`, `select`, `submit`, `list`,
+    `progress`, `stat`, `badge`, `person`, `sessionRef`, `room`, `time`,
+    `copyable`, `qr`, `custom`.
+  - Every block has an optional `id`, which interactive blocks require.
+  - Every bindable property is typed as a literal, a `#binding`
+    (`{source, path}`), or a `#computed` (reserved for `block-sandbox`).
+  - `#sourceRef` is a union of `#recordSource` (a space record reference),
+    `#collectionSource` (an nsid plus an optional filter),
+    `#profileSource` (a DID) and `#viewSource` (an nsid plus params).
+  - `#spaceRecordRef` holds a space URI, an author DID, a collection, an
+    rkey and a CID. Space record URIs have more segments than a standard
+    at-uri, so `strongRef` doesn't fit.
+  - `#moduleRef` holds a blob CID, the uploader's DID, and its exports
+    (reserved).
+- **`app.gather.block.card`** (a record in a space) has these fields:
+  `blocks`, `sources` (a map from name to `#sourceRef`), `middleware`
+  (a list of `#moduleRef`, reserved), `fallbackText` (optional), and
+  `createdAt`.
+- **Unknown fields and types:** open unions, so older clients skip newer
+  block types.
+- **Who writes and reads:** nothing is written by this feature. The gallery
+  cards are static JSON validated against the lexicon.
+
+### Interfaces other features will use
+
+- `<BlockCard card surface />`, `SourceResolver`, `ActionContext` /
+  `ActionIntent`, and the block registry. Adding a block type means a
+  lexicon def, a component, and a gallery card.
+- The lexicons, and their generated TS and Rust types.
+- `tokens.css`, the semantic token contract.
+- The gallery's fixture format, which later features reuse for their own
+  cards.
+
+### Impact on existing features
+
+- **[`ci-pipeline`](ci-pipeline.md)** (`ready`) keeps its approved design,
+  with two small additions:
+  - `react-router` for `/dev/blocks`, with the placeholder health page
+    staying at `/`
+  - lexicon codegen (`@atproto/lex-cli`) wired into `check:build`, so
+    generated types never drift
+- **The five new sibling features** build on these interfaces.
+
+### Alternatives
+
+- **Resolve sources straight from the space in this feature:** needs
+  sign-in and space-sync first, which would delay the core. The resolver
+  seam lets the core land now.
+- **A standard `strongRef` for records:** doesn't fit space URIs.
+- **Snapshots with no bindings in the core,** adding bindings later: the
+  user chose bindings, and the lexicon shape has to include them from day
+  one.
+
+### Risks
+
+- **Lexicon churn:** the lexicon is designed before its main consumers
+  (actions, feed, editor) exist. The reserved `#computed`, `#moduleRef`,
+  `middleware` and `#viewSource` shapes reduce that, but may still change
+  before those features ship.
+- **The namespace is a placeholder** and gets baked into records.
+- **Vocabulary size:** 24 block types is a lot of components and gallery
+  cards for one feature. It's still static UI, so it's low risk.
+
+### Round 1
+
+The first draft covered the whole family in one feature. A subagent
+critique checked it against vivarium's space implementation and found:
+
+- **Critical:**
+  - Space writes don't check which app is writing, so attendees can skip
+    the middleware.
+  - A space credential reads every repo, so "viewer-scoped" wasn't access
+    control.
+  - Collection sources and views need an unmentioned appview indexer:
+    credentials, delegation, write notifications, and per-repo cursors.
+- **High:**
+  - A middleware rewrite could put words in the attendee's mouth.
+  - Custom blocks can leak data through actions and WebRTC.
+  - The iframe watchdog can't recover a frozen frame in Chrome either.
+  - Idempotency had no mechanism.
+  - Offline `now` was ambiguous.
+- **Medium:**
+  - Offline scope was overstated.
+  - Blob fetches are unauthenticated and blobs are stored per uploader.
+  - quickjs-ng vs QuickJS parity.
+  - Space URIs don't fit `strongRef`.
+  - Sign-in had no test helper.
+
+**User decisions:**
+
+- Split into six features, as proposed.
+- Privacy: members hold only `read_self`. Our appview, with its own did:web,
+  is the only reader of all repos, and exposes aggregates over XRPC.
+  Verified against vivarium:
+  - user tokens can read only their own repo
+  - `getSpaceCredential` enforces the space's app allow-list through
+    client attestation
+- Custom blocks see declared, non-viewer-scoped sources only.
+
+**What changed:**
+
+- This file was narrowed to the core.
+- Five sibling feature files were written, carrying the rest of the
+  original brainstorm and the critique's fixes.
+- The core design above replaces the whole-family draft, which is kept
+  below for reference.
+
+<details><summary>Round 1 draft (whole family, superseded)</summary>
+
+
+NSIDs below use `app.gather.*` as a **placeholder** namespace until the user
+picks the real one.
+
+### Approach
+
+A **card** is the unit of configurable UI. It holds three things:
+
+- a tree of blocks
+- named data sources the blocks bind to
+- optional middleware modules
+
+Cards are records in a permissioned space. Later features embed or
+reference them: feed items, pinned cards, template output.
+
+The React renderer turns a card into UI for a surface: feed item, compact
+card, sheet or ephemeral response. It resolves the card's sources as the
+viewer, keeps them live, and routes interactions into actions.
+
+**Two sandboxes, split by job:**
+
+- **Middleware and computed bindings** are pure, deterministic functions,
+  so they must behave identically on the PWA and the appview. They run in
+  **QuickJS** everywhere:
+  - `rquickjs` embedded in the Rust appview
+  - `quickjs-emscripten` (wasm) in a Web Worker on the PWA
+
+  One engine means identical semantics. Hosts inject `now`, the viewer and
+  the resolved inputs. `Date.now`, `Math.random`, timers and I/O are
+  removed, and interrupt and memory limits enforce budgets.
+- **Custom blocks** draw UI, so they only ever run on the client, never on
+  the server. They run in a `sandbox="allow-scripts"` iframe on an opaque
+  origin, with a CSP of `default-src 'none'`. They talk only over
+  `postMessage`: bindings in, actions and a size hint out. A heartbeat
+  watchdog tears down a frame that stops responding.
+
+Module code is stored as **blobs referenced by CID**, so the client and
+server provably run the same bytes.
+
+**Actions** flow through the appview:
+
+1. The client calls `submitAction`.
+2. The appview loads the card and runs the middleware chain: built-in
+   validation, then the card's modules in order.
+3. If the chain accepts, the appview writes the (possibly rewritten) action
+   record into the space as the attendee, using the attendee's OAuth
+   session (the appview is a backend-for-frontend OAuth client).
+4. It returns `{accepted | rejected, message?, ephemeral?, uri?}`.
+
+Every action carries a client-generated `clientId`, so resubmitting the
+same action is idempotent.
+
+**Offline:**
+
+- The same middleware chain runs in the PWA's worker, and its result is
+  shown immediately.
+- The action goes into an **IndexedDB queue** in the page. No service
+  worker is used, so it's compatible with `ci-pipeline`'s
+  `serviceWorkers: 'block'` Playwright setting.
+- Pending actions are overlaid on the cached sources through each view's
+  **optimistic reducer**, e.g. tally +1.
+- On reconnect, the queue replays in order. The server's result replaces
+  the optimistic one. If they differ, the card reverts and shows the
+  server's message.
+
+**Sources** come in two kinds:
+
+- **Record sources** are a record or a collection in the space.
+- **View sources** are quasi-records: named views the appview computes,
+  such as a tally of actions on this card.
+
+Both resolve through the appview as the viewer. v1 ships two built-in
+views, `actionTally` and `actionList`, which cover polls, votes and Q&A.
+Plugin-defined views come with `feed-apps`.
+
+Clients stay live over one **WebSocket per session**. The appview follows
+the space's write notifications and `listRepoOps`, recomputes the affected
+views, and pushes new values for the sources each client has subscribed to.
+
+### Components
+
+```
+lexicons/app/gather/block/*.json       lexicons (below); TS types via @atproto/lex-cli
+crates/blocks/                         shared Rust crate
+  src/lexicon.rs                       serde types + validation of block documents
+  src/sandbox.rs                       rquickjs host: budgets, deterministic globals
+  src/middleware.rs                    chain runner, built-in validation middleware
+  src/views/{tally,list}.rs            built-in views + their optimistic-reducer specs
+crates/server/                         (from ci-pipeline) becomes the appview
+  src/xrpc/block.rs                    submitAction, resolveSources, subscribeSources (WS)
+  src/space.rs                         space reads/writes, write-notification follower
+  src/oauth.rs                         BFF session (from attendee-sign-in, see Impact)
+web/src/blocks/
+  BlockCard.tsx                        <BlockCard card surface> entry point
+  registry.ts                          type -> component; unknown types -> null
+  blocks/*.tsx                         one component per block type
+  bindings.ts                          JSON-pointer resolution, list repetition, $item scope
+  sources.ts                           resolve + WS subscription + cache
+  sandbox/worker.ts                    quickjs-emscripten worker (middleware, computed)
+  sandbox/CustomFrame.tsx              iframe host for custom blocks + watchdog
+  actions/queue.ts                     IndexedDB queue, replay, reconcile
+  theme/tokens.css                     semantic token contract + default theme
+web/src/routes/dev/blocks.tsx          block gallery (/dev/blocks)
+tests/support/blocks/                  seed space, gallery cards, demo middleware modules
+```
+
+### Data (lexicons)
+
+- **`app.gather.block.defs`** defines the block union: every v1 block type
+  from the vocabulary, plus `custom`. It also defines `binding`, `computed`,
+  `sourceRef`, `moduleRef` and `variant`.
+  - Every block has an optional `id`. Interactive blocks require one.
+  - Any bindable property accepts either a literal, a
+    `binding {source, path}` (JSON pointer), or a
+    `computed {module, export, inputs[]}`.
+  - A `list` block has `items` (a binding to an array), a `key` path and a
+    `template` of blocks, which reach the current element through the
+    reserved source `$item`.
+  - A `button` may carry `opens`, a nested block document that's shown as
+    a sheet.
+- **`app.gather.block.card`** (a record in the space) has these fields:
+  - `blocks`
+  - `sources` (a map from name to `sourceRef`)
+  - `middleware` (a list of `moduleRef`s)
+  - `fallbackText` (optional; unused by v1 clients, kept for notifications
+    and search)
+  - `createdAt`
+- **`sourceRef`** is one of:
+  - `{record: at-uri}`
+  - `{collection: nsid, filter?}`, scoped to the card's space
+  - `{view: nsid, params}`
+- **`moduleRef`** is a blob with the `application/javascript` MIME type,
+  referenced by CID, plus its `exports`.
+- **`app.gather.block.action`** (a record in the space, in the attendee's
+  space repo) has these fields: `card` (strongRef), `blockId`, `actionId`,
+  `value` (unknown, validated by middleware), `clientId`, `createdAt`.
+- **Middleware contract:**
+  - It receives `handle(action, ctx)`, where `ctx` holds `viewer` (DID),
+    `now`, `sources` (the card's sources resolved for the viewer) and
+    `side` (`client` or `server`).
+  - It returns either `{accept: true, action?, ephemeral?}` or
+    `{accept: false, message}`.
+  - The chain stops at the first rejection, and a rewritten action carries
+    on down the chain.
+- **Views:**
+  - `app.gather.block.view.actionTally{card, blockId}` returns
+    `{total, options: [{value, count, percent}], mine?}`.
+  - `app.gather.block.view.actionList{card, blockId, sort}` returns
+    `{items: [{uri, author, value, score, mine}]}`.
+  - Each view has a client-side optimistic reducer, fixed in code for the
+    built-ins.
+
+**Who writes and reads:**
+
+- **Cards and module blobs** are written by whoever holds writer rights in
+  the space. In the gallery, that's the test organizer. Later, it's
+  feed/templates/apps.
+- **Actions** are written by attendees, through the appview.
+- **Reads** are made by the appview on the viewer's behalf. Views run
+  server-side over actions the appview can read, and never return more
+  about other people than their fields expose. `mine` only ever carries the
+  viewer's own data.
+
+### Interfaces other features will use
+
+- **`<BlockCard card={uri|inline} surface="feed|compact|sheet|ephemeral" />`:**
+  the only way other features render blocks.
+- **The block registry**, for adding a block type. Adding one means a
+  lexicon change, a component, and a gallery card.
+- **XRPC:**
+  - `app.gather.block.submitAction`
+  - `app.gather.block.resolveSources`
+  - `app.gather.block.subscribeSources` (WebSocket)
+- **The sandbox module format** (ES module exports) and the middleware and
+  computed-binding signatures. Templates and apps write to this.
+- **The view registry in `crates/blocks`,** for adding a view and its
+  optimistic reducer. `feed-apps` will extend it with plugin-defined views.
+- **`theme/tokens.css`:** semantic tokens (`--g-color-{bg,surface,text,muted,
+  border,primary,on-primary,danger,info,warning,success}`,
+  `--g-font-{display,body,mono}`, `--g-radius-*`, `--g-space-*`). The
+  default theme is the "Program"/"Signal" direction (Archivo Narrow,
+  Archivo, JetBrains Mono). Configuring themes per organizer belongs to a
+  future `theming` feature.
+- **`tests/support/blocks`:** creates a space, seeds cards, and signs in
+  test attendees. Later features' tests reuse it.
+
+### Impact on existing features
+
+- **[`ci-pipeline`](ci-pipeline.md)** (`ready`) doesn't need any changes to
+  its approved design:
+  - The offline queue lives in the page, so Playwright keeps blocking
+    service workers. Offline tests use `context.setOffline`.
+  - `rquickjs` compiles QuickJS from C, which needs the `cc` toolchain.
+    That's already on GitHub runners, and `rust-cache` covers it.
+  - `quickjs-emscripten` is a prebuilt wasm npm package, with no emsdk in
+    CI.
+  - The placeholder `/health` page moves to `/`, and `react-router` is
+    added for `/dev/blocks`.
+- **Attendee sign-in is a new dependency.** Writing actions as an attendee
+  needs an OAuth session with a `space:` scope, held by the appview. That's
+  a foundational feature of its own (`attendee-sign-in`), and ui-blocks
+  depends on it, with the gallery's tests signing in through vivarium's
+  OAuth. The alternative is folding a minimal sign-in into ui-blocks (see
+  Alternatives).
+- **No new dependency on `conference-space`.** ui-blocks only needs *a*
+  space whose member policy lets its test attendees write. The test support
+  code creates one directly (`simplespace.createSpace`, member-list
+  policy). `conference-space` later decides how real conferences create
+  and administer theirs.
+
+### Alternatives
+
+- **Browser JS for client middleware, QuickJS on the server:** faster on
+  the PWA, but two engines drift (Intl, Date, float printing), which breaks
+  "isomorphic".
+- **V8 via `deno_core` on the server:** a faster engine, but a very large
+  dependency and still a different engine from the client's.
+- **Custom blocks in QuickJS with a virtual UI tree:** would make them
+  isomorphic, but no one needs a server-rendered toy, and it means
+  inventing a UI protocol.
+- **A service worker queue with Background Sync:** sends actions even with
+  the app closed, but clashes with `ci-pipeline`'s Playwright setting,
+  isn't supported in Safari, and is harder to test. It can be added later.
+- **Clients re-resolving on space write notifications themselves:** no
+  appview socket, but every client would need space sync access, and views
+  would have to be computed on the client.
+- **Minimal sign-in folded into ui-blocks:** one feature fewer, but auth is
+  foundational and every feature reuses it. Its scope, session and token
+  storage deserve their own spec.
+- **Modules inline as strings in the card record:** simpler, but records
+  get bloated, and there's no content-addressed identity shared across
+  cards.
+
+### Risks
+
+- **QuickJS in wasm** costs PWA memory and speed. Budgets have to be tuned
+  so phones don't jank. Middleware and computed bindings are small, so
+  this should be acceptable, but it hasn't been measured.
+- **Iframe sandbox limits:** a same-process frame can still hog the main
+  thread on Safari. The watchdog can only recover after the fact.
+- **Proposal churn:** spaces follow proposal 0016, so vivarium's lexicons
+  may change under us. The space client is isolated in `space.rs`.
+- **Deterministic sources:** optimistic reducers exist only for the
+  built-in views. A card bound to a record source shows no optimistic
+  change offline, only after sync.
+- **Scope:** this is a large feature. Every vocabulary block, both
+  sandboxes, offline behavior, live views and four surfaces make for a big
+  test plan and a long build.
+- **The namespace is a placeholder** until chosen, and it will be baked
+  into every record.
+
+
+</details>
 
 ## Test cases
 
