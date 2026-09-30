@@ -41,5 +41,8 @@ the user first.
 Show the user the list, with titles only if it's long, plus anything you had
 to interpret. This is a human gate. Iterate until they approve.
 
-On approval, set `status: tests`, commit (`docs(<slug>): test cases`), push,
-and continue with `write-tests`.
+On approval, set `status: ready`, commit (`docs(<slug>): test cases`) to
+`main`, `git pull --rebase`, and push.
+
+That ends the spec. Tell the user the feature is ready to build, and stop.
+Go on to `write-tests` only if they ask to build it now.

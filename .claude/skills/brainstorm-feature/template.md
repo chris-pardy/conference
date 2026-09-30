@@ -1,7 +1,8 @@
 ---
 status: analysis
 impact:
-branch: feature/<slug>
+depends-on: []
+branch:
 tests-commit:
 pr:
 merged:

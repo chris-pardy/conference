@@ -38,7 +38,7 @@ need their eyes, and the path to the file. This is a human gate, so wait.
 
 Record each round under `### Round N`, noting the user's feedback and what
 changed as a result. Commit each round (`docs(<slug>): design review round
-N`) and push. Repeat until the user approves.
+N`) to `main`, `git pull --rebase`, and push. Repeat until the user approves.
 
 On approval, set `status: test-cases`, commit, push, and continue with
 `write-test-cases`.

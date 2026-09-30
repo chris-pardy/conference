@@ -11,7 +11,10 @@ features depend on. That verdict decides whether it needs a design review
 
 ## Look
 
-- Read the feature file and every other file in `features/`.
+- Read the feature file and every other file in `features/`. That includes
+  features that are specced but not built yet. If this feature changes
+  something one of them plans to build on, it affects that feature just as
+  much as if the code already existed.
 - Find the code the feature would touch: modules, data models, lexicons,
   APIs, UI screens, shared components, build and CI setup. On a large
   codebase, hand the search to an Explore subagent and keep the conclusions.
@@ -45,8 +48,10 @@ Fill in the `## Architecture analysis` section of the feature file:
 - **Verdict:** standalone or cross-cutting, with a one-paragraph reason.
 
 Set `impact:` to match. Set `status: design-review` if the feature is
-cross-cutting, or `status: test-cases` if it's standalone. Commit
-(`docs(<slug>): architecture analysis`) and push.
+cross-cutting, or `status: test-cases` if it's standalone. If the analysis
+shows this feature needs another one to exist first, add it to
+`depends-on`. Commit (`docs(<slug>): architecture analysis`) on `main`,
+`git pull --rebase`, and push.
 
 Tell the user the verdict in a line or two, then continue with
 `design-review` or `write-test-cases`.

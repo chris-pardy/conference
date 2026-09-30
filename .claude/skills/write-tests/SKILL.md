@@ -1,9 +1,34 @@
 ---
 name: write-tests
-description: Steps 5-6 of the feature pipeline. Use when a feature file has status tests. Writes automated tests for every test case using vitest, Playwright and vivarium, shows the user they fail for the right reasons, and freezes them on approval.
+description: Steps 5-6 of the feature pipeline, and the start of a build. Use when the user asks to build a feature with status ready. Starts the feature branch, refreshes the spec against what's changed since it was written, writes automated tests for every test case using vitest, Playwright and vivarium, shows the user they fail for the right reasons, and freezes them on approval.
 ---
 
-# Write the automated tests and show them red
+# Start the build: refresh, write the tests, show them red
+
+## Start
+
+1. Check that every feature in `depends-on` has `status: complete`. If one
+   doesn't, tell the user and stop.
+2. From an up-to-date `main`, run `git switch -c feature/<slug>`, set
+   `branch:` in the feature file, and push with `-u`.
+
+## Refresh the spec
+
+The spec may have been written long before this build, and other features
+may have landed since. Find out what's changed:
+`git log --oneline <last commit touching features/<slug>.md>..main`. Then
+re-check:
+
+- The architecture analysis. Is the code it describes still there? Did a
+  standalone feature become cross-cutting because of what landed?
+- The design, if there is one. Does it still fit the code?
+- The test cases. Do they contradict how a completed feature now behaves?
+
+Update the feature file with what you find. If the verdict flips to
+cross-cutting and there's no design, do a `design-review` now. If a test
+case needs to change, keep its number, show the user the change, and get
+their approval, since it alters the contract they approved. Commit on the
+branch.
 
 ## Write
 

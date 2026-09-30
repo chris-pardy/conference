@@ -46,10 +46,11 @@ one at a time.
    confirm or correct it. This is a human gate.
 2. Pick a slug that names the capability, not the implementation
    (`session-chat`, not `add-websocket`).
-3. `git switch -c feature/<slug>` from an up-to-date `main`.
-4. Write `features/<slug>.md` from [template.md](template.md) and set
+3. Write `features/<slug>.md` from [template.md](template.md) and set
    `status: analysis`. Fill in the summary, experience, options considered,
-   out-of-scope and open-questions sections. Leave the later sections as
-   headings.
-5. Commit (`docs(<slug>): feature brainstorm`) and push with `-u`.
-6. Go straight on to `analyze-architecture`, which doesn't need the user.
+   out-of-scope and open-questions sections. If the feature needs other
+   features to exist first, list their slugs in `depends-on`. Leave the
+   later sections as headings.
+4. On `main`, commit (`docs(<slug>): feature brainstorm`), run
+   `git pull --rebase`, and push.
+5. Go straight on to `analyze-architecture`, which doesn't need the user.

@@ -16,10 +16,17 @@ The frontmatter tracks progress through the pipeline described in
 ```yaml
 status: implementing     # see AGENTS.md for the list
 impact: standalone       # or cross-cutting; set by architecture analysis
-branch: feature/session-chat
+depends-on: [attendee-profile]   # features that must be complete first
+branch: feature/session-chat     # set when the build starts
 tests-commit: 3f0e1e9    # the approved red tests; these files are frozen
 pr: https://github.com/chris-pardy/conference/pull/4
 merged: 2026-10-02
 ```
 
-A feature is done when its `status` is `complete`.
+Specs (up to `status: ready`) live on `main` before any code exists. A
+feature is done when its `status` is `complete`.
+
+```bash
+grep -l '^status: ready' features/*.md      # specced, waiting to be built
+grep -L '^status: complete' features/*.md   # everything not yet done
+```
