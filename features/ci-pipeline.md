@@ -1,5 +1,5 @@
 ---
-status: blocked
+status: implementing
 impact: cross-cutting
 depends-on: []
 branch: feature/ci-pipeline
@@ -7,24 +7,6 @@ tests-commit: 1e253c62660da8051a2e231e43cd1d4b41aa8372
 ---
 
 # CI pipeline
-
-> **Blocked (review round 3): the merge gate can't be applied.**
-> `chris-pardy/conference` is a private repository on a free personal
-> account. GitHub refuses both rulesets and branch protection there:
-> `gh api repos/chris-pardy/conference/rulesets` returns HTTP 403 "Upgrade
-> to GitHub Pro or make this repository public to enable this feature."
->
-> So the approved "Merging" requirement (a ruleset requiring the four
-> checks) can't be delivered, and the manual TC-34, TC-35 and TC-36 can't
-> pass. The options are:
->
-> - make the repository public
-> - upgrade the account to GitHub Pro
-> - re-scope the merge gate to `ship-feature`'s check verification alone,
->   dropping the ruleset and TC-32 to TC-36 (or keeping the ruleset file for
->   later)
->
-> Everything else is implemented, green, and through three review rounds.
 
 ## Summary
 
@@ -879,7 +861,20 @@ unchanged; `pnpm check` green. Verdict: not clean (2 major, 2 minor, 1 nit).
    dependencies.
 2. **[major] The ruleset can't be applied:** the repository is private on a
    free plan, and GitHub returns 403 for rulesets and branch protection.
-   **Blocked** on a decision from the user (see the top of this file).
+   **Was blocked**, and resolved by the user.
+   - Moving to tangled with a spindle was researched first. Tangled has no
+     merge gate at all: no branch protection or required checks. Its
+     hosted spindle has a 5-minute default timeout that workflow YAML
+     can't override. Its Nix images can't run the prebuilt vivarium
+     binary. It has no artifact upload, and no `gh`-equivalent PR check
+     watching or squash merge for `ship-feature`.
+   - **The user chose to make the GitHub repository public.** After a scan
+     of the history found no secrets, it was made public on 2026-09-30.
+     `scripts/apply-ruleset.sh` created ruleset 24276263, which is active
+     on the default branch, requires `lint`, `build`, `test` and
+     `frozen-tests`, and lets admins bypass it.
+   - **TC-34 verified:** running the script a second time updated the same
+     ruleset, and the repository still has exactly one.
 3. **[minor] No job timeouts.**
    **Fixed:** `timeout-minutes` is 15 for lint and build, 25 for test, and
    5 for frozen-tests.
