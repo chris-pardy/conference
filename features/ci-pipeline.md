@@ -1,6 +1,6 @@
 ---
-status: analysis
-impact:
+status: design-review
+impact: cross-cutting
 depends-on: []
 branch:
 tests-commit:
@@ -167,6 +167,54 @@ reports) live in GitHub Actions for 14 days.
   (prebuilt binary from the build job vs. `cargo run` in global setup).
 
 ## Architecture analysis
+
+**Existing code touched:** none: no code yet. The repo holds only the
+pipeline docs (`AGENTS.md`, `.claude/skills/`), `features/` and
+`scripts/check-tests-unchanged.sh`. CI calls that script and this feature
+edits `AGENTS.md`'s Testing section.
+
+**Features affected:** no other features are specced yet. Every future
+feature is affected indirectly: it inherits this project layout, toolchain,
+test harness and merge gate, and it can't merge without passing these
+checks.
+
+**New shared surfaces:**
+
+- The repo layout: where the Rust crate, the frontend and the tests live.
+- The toolchain: pnpm, Vite, Biome, Rust stable, clippy/rustfmt settings.
+- The local `check` command, which becomes the meaning of "all green".
+- The vitest setup: the vivarium global setup, the `viv` fixture, and how
+  integration tests build and start the Rust server and point it at
+  vivarium.
+- The Playwright config: how it serves the app, the viewport, trace/video
+  settings.
+- The GitHub Actions workflow, its job and check names (which the ruleset
+  pins as required), and the ruleset itself.
+- The frozen-tests CI step, which reads the feature file frontmatter.
+- The Rust test-naming convention in `AGENTS.md`.
+
+**Findings that affect the design:**
+
+- `@vivarium/client` is not on npm. In `~/Code/atproto/vivarium` it's a bun
+  workspace package (`0.0.1`) whose dependencies use `workspace:*`
+  (`@vivarium/lexicons`, and an optional peer `@vivarium/core`) and whose
+  `dist/` is built with `bun build`. pnpm can't install it straight from the
+  git repo, so the design must pick a way to get it: publish it, vendor a
+  packed tarball, or use a git subdirectory with a prepare step.
+- The global setup can spawn vivarium itself (`VIVARIUM_BIN`) or attach
+  (`VIVARIUM_URL`). CI attaches to the service container. Locally, the
+  design must say whether developers run the Docker image or a local
+  binary.
+- The integration tests' Rust server runs on the runner host, while
+  vivarium runs in a service container mapped to `localhost:2580`. The box
+  then sees the app's callbacks as loopback. The design should confirm that
+  vivarium's `--app-host` and `--public-url` defaults work in that layout.
+
+**Verdict:** cross-cutting. This is the first feature in an empty repo. It
+sets the stack, the project layout, the build, the test harness and CI, and
+every later feature builds on all of those. The required-check names and
+the `check` command become a contract that `ship-feature` and all future
+PRs depend on.
 
 ## Design review
 
