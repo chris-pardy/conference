@@ -931,6 +931,82 @@ tests/support/blocks/                  seed space, gallery cards, demo middlewar
 
 </details>
 
+## Build refresh (2026-09-30)
+
+**What changed since the spec:** only [`ci-pipeline`](ci-pipeline.md),
+now complete. It landed as the analysis assumed: `crates/server`, the
+React + Vite PWA in `web/`, vitest projects `unit` (jsdom,
+`web/src/**/*.test.tsx`), `integration` and `tooling`, and Playwright on a
+Pixel 7 against the built PWA via `vite preview`, with service workers
+blocked. Nothing in it contradicts the design or the test cases, and the
+verdict stays cross-cutting. `react-router` and lexicon codegen are still
+this feature's to add.
+
+**Lexicon decisions the tests needed** (approved by the user at the start
+of the build). Lexicons have no maps, no unions of plain values and no
+floats, so:
+
+- **Bindings:** literal properties stay plain. An optional `bind` object
+  on a block maps a property name to a `#binding` (`{source, path}`), and a
+  bound property replaces the literal one. `#computed` stays reserved for
+  `block-sandbox`.
+- **Sources:** `sources` is an array of `#source {name, ref}`, where `ref`
+  is the `#recordSource` / `#collectionSource` / `#profileSource` /
+  `#viewSource` union.
+- **Forms:** `textInput` and `select` hold values. A `submit` block sends
+  one intent whose value maps each input's id to its value, for every input
+  in its form (the nearest list item, sheet or card), then clears them.
+  Single and multi select are one `select` def with `multiple`.
+- **Time zone:** the card has an optional IANA `timeZone`, used for every
+  time on it, falling back to the viewer's.
+- **Rich text:** the facet model of `app.bsky.richtext.facet`, with our
+  own features: `mention`, `link`, `tag`, plus `bold` and `italic`.
+- **Values:** option and button values are strings, and progress values
+  are integers (`value` of `max`, default 100).
+
+The lexicons are in `lexicons/app/gather/block/{defs,card}.json`.
+
+**Test contract** (what the frozen tests rely on besides the lexicons):
+
+- **Modules:**
+  - `<BlockCard cardRef card surface />`
+  - `SourceResolverContext`, and `FixtureResolver(sources, {profiles})`
+    with `loading()`, `forbidden()`, `failing()` and `set(name, value)`.
+    A name it doesn't know is missing.
+  - `ActionContext` holding `{onAction}`
+  - `validateCard(record)`, which returns `{ok: true}` or
+    `{ok: false, error: {path, reason, message}}`, and
+    `conference_blocks::validate_card`, which returns a `CardError` with
+    the same `path` (a JSON pointer) and `reason` (`required`,
+    `min-length`, …)
+- **DOM:**
+  - Each rendered block's root has `data-block="<type>"`, plus
+    `data-block-id` when it has an id.
+  - Buttons have `data-variant` and badges `data-tone`. An unsupported
+    value becomes `default` or `neutral`.
+  - A block whose data isn't ready has `data-state`: `loading` (also
+    `aria-busy`), `unavailable` (the text "Unavailable") or `empty` for a
+    list.
+  - The card root has `data-surface` and `data-card` (the card URI).
+  - A button that opens a sheet has `aria-haspopup="dialog"`, and the
+    sheet is a `dialog`.
+  - Single select is a radio group, and multi select a group of
+    checkboxes.
+- **Theme:** `web/src/theme/tokens.css` defines `--g-color-*` (including
+  `primary`, `danger`, `info`, `warning` and `success`) and `--g-font-*`.
+- **Gallery** (`/dev/blocks`):
+  - an `h1` mentioning blocks
+  - sample cards in `web/src/blocks/gallery/*.card.json`, each holding its
+    record under `card`
+  - an intent log (`role="log"`, named for intents) with one list item per
+    intent
+  - examples of a stack of three or more blocks, columns of stats, a QR
+    code for `https://atmosphereconf.org/2027/check-in`, primary and danger
+    buttons, info, warning and success badges, a button that opens a
+    sheet, and the loading, unavailable and empty states
+- **Codegen:** `check:build` fails with a message saying the generated
+  types are out of date.
+
 ## Test cases
 
 The scenario follows the design canvas: AtmosphereConf 2027 in Amsterdam,
