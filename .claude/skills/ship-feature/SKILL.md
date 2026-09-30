@@ -5,6 +5,8 @@ description: Steps 10-12 of the feature pipeline. Use when a feature's adversari
 
 # Ship a feature
 
+Steps 10 and 11 run in the feature's worktree, `.claude/worktrees/<slug>`.
+
 ## 10. Mark complete, then open the PR with a demo
 
 **Mark complete.** In `features/<slug>.md` on the feature branch, set
@@ -78,5 +80,15 @@ Post the classification and its reason as a PR comment. Then:
 
 ## 12. Clean up
 
-After a merge, run `git switch main && git pull --rebase` and delete the
-local feature branch. The feature file on `main` now says `complete`.
+After a merge, leave the worktree (in Claude Code, `ExitWorktree` with
+`action: "keep"`, since the session entered it by path), then from the main
+checkout:
+
+```bash
+git worktree remove .claude/worktrees/<slug>
+git branch -D feature/<slug>   # -D: a squash merge isn't an ancestor of main
+git pull --rebase
+```
+
+The feature file on `main` now says `complete`. An architectural PR that's
+waiting for a human keeps its worktree until whoever merges it runs this.

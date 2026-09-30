@@ -10,6 +10,11 @@ truly blocked (a frozen test looks wrong, the requirements contradict each
 other, or a decision needs a human), set `status: blocked`, explain why in
 the feature file, push, tell the user, and stop.
 
+Work in the feature's worktree, `.claude/worktrees/<slug>` (see
+`write-tests`). If you're resuming and it's gone, recreate it with
+`git worktree add .claude/worktrees/<slug> feature/<slug>` and run
+`pnpm install` there.
+
 The frozen files are the ones in `tests-commit`
 (`git show --name-only --format= <tests-commit>`). Never edit, move, delete,
 skip or `.only` them, and don't weaken their setup through config.
@@ -32,7 +37,8 @@ Commit (`feat(<slug>): …`) and push.
 Spawn a **fresh** subagent to do the review. It must not have written this
 code, so don't pass it your reasoning. Prompt it to follow
 `.claude/skills/adversarial-review/SKILL.md` for this feature, and give it
-the feature file path, the `tests-commit` SHA and the base branch (`main`).
+the worktree's absolute path (it must run every command there), the feature
+file path, the `tests-commit` SHA and the base branch (`origin/main`).
 
 Append its findings to `## Review log` in the feature file as `### Round N`.
 

@@ -9,14 +9,29 @@ description: Steps 5-6 of the feature pipeline, and the start of a build. Use wh
 
 1. Check that every feature in `depends-on` has `status: complete`. If one
    doesn't, tell the user and stop.
-2. From an up-to-date `main`, run `git switch -c feature/<slug>`, set
-   `branch:` in the feature file, and push with `-u`.
+2. Create the branch in its own worktree, so the main checkout stays on
+   `main` for spec sessions and other builds can run at the same time:
+
+   ```bash
+   git fetch origin
+   git worktree add .claude/worktrees/<slug> -b feature/<slug> origin/main
+   cd .claude/worktrees/<slug> && pnpm install
+   ```
+
+   If `git worktree list` already shows `.claude/worktrees/<slug>`, the build
+   is resuming: use that worktree. If the branch exists but the worktree
+   doesn't, run `git worktree add .claude/worktrees/<slug> feature/<slug>`.
+3. Do everything from here through step 12 (edits, commands, commits) in
+   that worktree. In Claude Code, switch the session into it with
+   `EnterWorktree` and its `path`. Never `git switch` the main checkout to
+   the feature branch.
+4. Set `branch:` in the feature file, commit, and push with `-u`.
 
 ## Refresh the spec
 
 The spec may have been written long before this build, and other features
 may have landed since. Find out what's changed:
-`git log --oneline <last commit touching features/<slug>.md>..main`. Then
+`git log --oneline <last commit touching features/<slug>.md>..origin/main`. Then
 re-check:
 
 - The architecture analysis. Is the code it describes still there? Did a
