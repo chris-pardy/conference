@@ -9,8 +9,11 @@ async fn main() {
         .ok()
         .map(|p| p.parse().expect("PORT must be a port number"))
         .unwrap_or(3100);
-    let atproto_url =
-        std::env::var("ATPROTO_URL").unwrap_or_else(|_| "http://localhost:2580".into());
+    // Unset or empty means a vivarium on its default port.
+    let atproto_url = std::env::var("ATPROTO_URL")
+        .ok()
+        .filter(|url| !url.trim().is_empty())
+        .unwrap_or_else(|| "http://localhost:2580".into());
 
     let listener =
         TcpListener::bind(("127.0.0.1", port)).await.expect("failed to bind the listening port");

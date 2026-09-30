@@ -14,8 +14,12 @@ export interface RunningServer {
  * URL. `ATPROTO_URL` defaults to the run's vivarium; pass env to override.
  */
 export async function spawnServer(env: Record<string, string> = {}): Promise<RunningServer> {
+  const atprotoUrl = env.ATPROTO_URL ?? process.env.VIVARIUM_URL
+  if (!atprotoUrl) {
+    throw new Error('spawnServer needs ATPROTO_URL or a run vivarium (VIVARIUM_URL); run through with-vivarium')
+  }
   const child = spawn(SERVER_BIN, [], {
-    env: { ...process.env, PORT: '0', ATPROTO_URL: process.env.VIVARIUM_URL ?? '', ...env },
+    env: { ...process.env, PORT: '0', ...env, ATPROTO_URL: atprotoUrl },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   let stderr = ''

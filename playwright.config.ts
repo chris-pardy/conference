@@ -20,6 +20,10 @@ function freePort(): Promise<number> {
 // inherit them through the environment, so every process agrees.
 process.env.E2E_SERVER_PORT ??= String(await freePort())
 process.env.E2E_PREVIEW_PORT ??= String(await freePort())
+const VIVARIUM_URL = process.env.VIVARIUM_URL
+if (!VIVARIUM_URL) {
+  throw new Error('Playwright needs the run vivarium in VIVARIUM_URL: use `pnpm test:e2e`')
+}
 const SERVER_PORT = process.env.E2E_SERVER_PORT
 const PREVIEW_PORT = process.env.E2E_PREVIEW_PORT
 
@@ -39,7 +43,7 @@ export default defineConfig({
   webServer: [
     {
       command: 'target/debug/conference-server',
-      env: { PORT: SERVER_PORT, ATPROTO_URL: process.env.VIVARIUM_URL ?? '' },
+      env: { PORT: SERVER_PORT, ATPROTO_URL: VIVARIUM_URL },
       url: `http://127.0.0.1:${SERVER_PORT}/health`,
       reuseExistingServer: false,
     },

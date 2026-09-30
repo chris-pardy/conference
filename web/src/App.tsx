@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-type Health = { status: string; atproto: string }
+type Health = { status: string; atproto: 'reachable' | 'unreachable' }
 type State = { kind: 'checking' } | { kind: 'ready'; health: Health } | { kind: 'failed' }
 
 export default function App() {
@@ -25,7 +25,7 @@ export default function App() {
       {state.kind === 'ready' && (
         <>
           <p>Backend: {state.health.status}</p>
-          <p>atproto: {state.health.atproto}</p>
+          <p>atproto: {state.health.atproto === 'reachable' ? 'reachable' : 'offline'}</p>
         </>
       )}
     </main>

@@ -88,6 +88,11 @@ jobs:
 
   frozen-tests:
     runs-on: ubuntu-latest
+    # Environment settings override any project .npmrc, so the branch can't
+    # swap the script shell or slip in a pre/post script.
+    env:
+      npm_config_script_shell: /bin/bash
+      npm_config_enable_pre_post_scripts: 'false'
     steps:
       # The PR's own head commit with full history, not GitHub's merge into main.
       - uses: actions/checkout@v4
@@ -103,8 +108,18 @@ jobs:
               git show "origin/main:$f" > "$f"
             fi
           done
+          # pnpm settings come from main too, or not at all.
+          if git cat-file -e origin/main:.npmrc 2>/dev/null; then
+            git show origin/main:.npmrc > .npmrc
+          else
+            rm -f .npmrc
+          fi
           if [ "$(jq -r '.scripts["check:frozen"]' package.json)" != "bash scripts/frozen-tests.sh" ]; then
             echo "package.json's check:frozen must run scripts/frozen-tests.sh" >&2
+            exit 1
+          fi
+          if jq -e '.scripts | has("precheck:frozen") or has("postcheck:frozen")' package.json >/dev/null; then
+            echo "package.json must not wrap check:frozen in pre/post scripts" >&2
             exit 1
           fi
       - uses: pnpm/action-setup@v4

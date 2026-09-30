@@ -816,3 +816,35 @@ unchanged; `pnpm check` green. Verdict: not clean (2 major, 3 minor, 2 nit).
    and a failing `box.stop()` could hide the real exit code.
    **Fixed:** it now exits with 128 + the signal number, and a failure to
    stop the box is logged but no longer changes the exit code.
+
+### Round 2
+
+Reviewer: a fresh subagent following `adversarial-review`. Frozen tests
+unchanged; `pnpm check` green. Verdict: not clean (3 major, 1 minor, 2 nit).
+
+1. **[major] The PR's own pnpm configuration could still bypass
+   frozen-tests.** An `.npmrc` with `script-shell=/usr/bin/true`, or a
+   `precheck:frozen` script, got past round 1's fix.
+   **Fixed:** the job now sets `npm_config_script_shell=/bin/bash` and
+   `npm_config_enable_pre_post_scripts=false` in its environment, which
+   overrides any project `.npmrc`. It restores `.npmrc` from `main` (or
+   deletes it), and fails if `package.json` defines `precheck:frozen` or
+   `postcheck:frozen`.
+2. **[major] Frozen TC-7 matched "atproto: unreachable",** because
+   `/atproto.*reachable/i` also matches "unreachable". So it passed without
+   a connected stack.
+   **Fixed in the implementation:** the page now shows an unreachable
+   atproto as "atproto: offline". Verified: with atproto unreachable, TC-7
+   now fails.
+3. **[major] The service worker's navigation fallback served `index.html`
+   for backend routes.**
+   **Fixed:** added `navigateFallbackDenylist` for `/api/`, `/xrpc/` and
+   `/health`. The built `sw.js` now carries the denylist.
+4. **[minor] An empty `ATPROTO_URL` was probed as a relative URL.**
+   **Fixed:** the server treats an empty value as unset. `spawnServer`
+   and the Playwright config fail fast without a run vivarium.
+5. **[nit] `apply-ruleset.sh` didn't paginate its lookup.**
+   **Fixed:** it now uses `--paginate`.
+6. **[nit] `pnpm check` builds the web app twice.**
+   **Left as is:** each `test:*` script builds what it needs so it can run
+   on its own, and the extra Vite build takes well under a second here.
