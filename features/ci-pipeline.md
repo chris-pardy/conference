@@ -160,8 +160,8 @@ reports) live in GitHub Actions for 14 days.
 
 ## Open questions
 
-None. The design review settled how `@vivarium/client` is installed
-(published to npm) and how integration tests start the Rust server (a
+None. The design review settled how vivarium is installed (the
+`@vivarium-dev/cli` and `@vivarium-dev/client` npm packages, as of round 2) and how integration tests start the Rust server (a
 prebuilt binary started by a global setup).
 
 ## Architecture analysis
@@ -230,24 +230,31 @@ root. Every check is a named package script:
 local and CI parity comes from sharing scripts, not from copying commands
 into YAML.
 
-**Vivarium runs as a native binary, sealed, on loopback.** Everything
-starts vivarium through `VIVARIUM_BIN`, and nothing uses a container at test
-time:
+**Vivarium comes from npm, as a native binary, sealed, on loopback.** Two
+devDependencies are pinned in `package.json` and locked in
+`pnpm-lock.yaml`:
 
-- **In CI,** a step pulls the pinned image, runs `docker create`, and
-  `docker cp`s out `/usr/local/bin/vivarium`. That path is documented in
-  vivarium's Dockerfile. The step then exports `VIVARIUM_BIN`.
-- **Locally,** `VIVARIUM_BIN` points to a compiled vivarium from the
-  vivarium checkout.
+- **`@vivarium-dev/cli`** ships prebuilt binaries as platform packages:
+  darwin-arm64/x64, linux-x64/arm64 (with musl variants) and win32-x64. No
+  Bun or Docker is needed.
+- **`@vivarium-dev/client`** is the test-suite client and vitest fixtures.
+  It finds the CLI's binary for the current platform by itself, through
+  `@vivarium-dev/cli/resolve`.
+
+The same `pnpm install` works for a laptop and for CI, with no extra CI
+step, no image and no `VIVARIUM_BIN`. `VIVARIUM_BIN` still overrides the
+binary, e.g. to test against a local vivarium checkout. Upgrading vivarium
+is a normal dependency bump.
 
 `scripts/with-vivarium.ts` is a small node script that wraps `check:test`.
-It calls `startVivarium({ upstream: false })` from `@vivarium/client`, which
-spawns `$VIVARIUM_BIN` on a random port. It exports `VIVARIUM_URL`, runs the
+It calls `startVivarium({ upstream: false })` from `@vivarium-dev/client`,
+which spawns the binary on a random port. It exports `VIVARIUM_URL`, runs the
 wrapped command, and stops the box afterwards. So vitest, the Rust server
 and Playwright all share one sealed box.
 
 - If `VIVARIUM_URL` is already set, the script attaches to it instead.
-- `vivFresh` keeps working, because it spawns a new box from `VIVARIUM_BIN`.
+- `vivFresh` keeps working, because it spawns a new box from the same
+  binary.
 - Everything is on loopback, which is the layout vivarium treats as "your
   own service". Future OAuth, did:web and proxy features need that, with no
   `--app-host` or `--public-url`.
@@ -269,14 +276,11 @@ It waits for the `listening on http://127.0.0.1:<port>` line on stdout, and
 that need their own instance. Playwright's `webServer` starts the same
 binary, plus `vite preview`, and reads `VIVARIUM_URL` from the environment.
 
-**Getting `@vivarium/client`:** `dist/*.js` already inlines lexicons, but
-`dist/client.d.ts` imports types from `@vivarium/lexicons`. The fix is a
-prerequisite in the vivarium repo: publish both `@vivarium/lexicons` and
-`@vivarium/client` to npm with `bun publish`, which rewrites `workspace:*`
-to real versions. This repo depends on pinned versions.
-
-`@vivarium/lexicons` exports TypeScript source, which is fine for type-only
-imports under `moduleResolution: bundler`.
+**Prerequisite:** `@vivarium-dev/cli`, its platform packages,
+`@vivarium-dev/client` and `@vivarium-dev/lexicons` are published to npm.
+That's in progress in the vivarium repo. pnpm installs only the platform
+package that matches the machine, and `--omit=optional` must never be
+used, because it drops the binary.
 
 ### Components
 
@@ -287,7 +291,8 @@ crates/server/             bin `conference-server`, axum + tokio
   src/main.rs              reads PORT and ATPROTO_URL, prints the listening line
   src/lib.rs               router: GET /health -> {status, atproto: ok|unreachable}
 package.json               root: scripts, devDeps (biome, vitest, playwright,
-                           @vivarium/client), packageManager pnpm@<pinned>
+                           @vivarium-dev/client, @vivarium-dev/cli),
+                           packageManager pnpm@<pinned>
 pnpm-workspace.yaml        packages: [web]
 biome.json                 lint + format for web/, tests/, e2e/, scripts/
 tsconfig.base.json
@@ -302,7 +307,6 @@ playwright.config.ts       chromium only, phone viewport, serviceWorkers: 'block
                            trace/video/screenshot retain-on-failure;
                            webServer: server binary + `vite preview`
 scripts/with-vivarium.ts   one sealed box for a command (above)
-scripts/vivarium-version   the pinned image tag, read by CI
 scripts/frozen-tests.sh    wraps check-tests-unchanged.sh with branch logic
 .github/workflows/ci.yml   jobs: lint, build, test, frozen-tests
 .github/rulesets/main.json the ruleset, as code
@@ -330,11 +334,12 @@ None. There are no lexicons, records or spaces.
 - **The server contract for tests:** the binary reads `PORT` and
   `ATPROTO_URL`, and prints `listening on <url>`. Tests get `serverUrl` via
   `inject('serverUrl')`, `viv` and `vivFresh` from
-  `@vivarium/client/vitest`, and `spawnServer(env)` from `tests/support`.
+  `@vivarium-dev/client/vitest`, and `spawnServer(env)` from `tests/support`.
 - **Required check names:** `lint`, `build`, `test`, `frozen-tests`.
   Renaming a job means updating the ruleset in the same PR.
 - **The local prerequisites:** Node (the version in `.nvmrc`), pnpm via
-  corepack, rustup (which honours `rust-toolchain.toml`), and `VIVARIUM_BIN`.
+  corepack, and rustup (which honours `rust-toolchain.toml`). Vivarium
+  arrives with `pnpm install`.
 
 ### CI workflow
 
@@ -349,7 +354,7 @@ then `Swatinem/rust-cache`.
 |-----|------|-------|
 | `lint` | `pnpm check:lint` | cargo fmt --check, clippy `-D warnings`, biome ci |
 | `build` | `pnpm check:build` | tsc -b, vite build (PWA), cargo build --locked |
-| `test` | extract the vivarium binary, then `pnpm check:test` | cargo test, vitest (both projects), Playwright (`playwright install --with-deps chromium`, browsers cached by version). Uploads `playwright-report/` + `test-results/` on failure, kept 14 days |
+| `test` | `pnpm check:test` | cargo test, vitest (both projects), Playwright (`playwright install --with-deps chromium`, browsers cached by version). Uploads `playwright-report/` + `test-results/` on failure, kept 14 days |
 | `frozen-tests` | `pnpm check:frozen` | checks out `github.event.pull_request.head.sha` with `fetch-depth: 0`, not the merge ref |
 
 **`frozen-tests.sh`** works out the branch from `GITHUB_HEAD_REF` in CI, or
@@ -408,9 +413,11 @@ None exist. The changes to shared docs are:
 
 - **`AGENTS.md`** gets:
   - the Rust test convention
-  - how vivarium is run (as a binary through `VIVARIUM_BIN`, never as a
-    `services:` container), replacing the current "run the image as a
-    service" line
+  - how vivarium is run: the `@vivarium-dev/cli` binary from npm, started
+    by `@vivarium-dev/client`, never as a `services:` container or through
+    Docker. This replaces the current "run the image as a service" line
+  - the package scope rename, from `@vivarium/client/vitest` to
+    `@vivarium-dev/client/vitest"
   - `pnpm check` as the "all green" command
 - **`.claude/skills/ship-feature`** gets the two gate fixes above.
 
@@ -421,10 +428,11 @@ None exist. The changes to shared docs are:
 - **`docker run --network host` in CI, with a Docker fallback locally:**
   `vivFresh` breaks without a binary, there are three code paths, and host
   networking is unreliable on macOS.
-- **Vendor a packed `@vivarium/client` tarball:** manual repacking. This is
-  the fallback if publishing is blocked.
-- **Move lexicons to devDependencies and publish only the client:** the
-  client's `.d.ts` files import lexicons, so its types would break.
+- **Extract the binary from the Docker image in CI, with `VIVARIUM_BIN`
+  locally** (round 1): superseded once the npm CLI existed. It needed an
+  extra CI step, only ran on linux/amd64, depended on the image's internal
+  layout, and needed a manual setup on laptops.
+- **Vendor packed vivarium tarballs:** manual repacking, now unnecessary.
 - **One `check` job:** fully serial, and one opaque check.
 - **Fold `frozen-tests` into `lint`:** saves a runner, but hides which rule
   failed. Kept separate.
@@ -434,16 +442,16 @@ None exist. The changes to shared docs are:
 
 ### Risks
 
-- **Publishing the two vivarium packages** is work in another repo, and it
-  blocks the build until it's done. The fallback is vendored tarballs.
-- **The binary extracted from the image** is linux/amd64. It needs
-  `ubuntu-latest` on x86 runners, and it relies on the Dockerfile's
-  `/usr/local/bin/vivarium` path.
+- **The `@vivarium-dev/*` packages must be on npm** before the build.
+  Publishing is in progress.
+- **Optional platform packages:** if a machine's platform has no prebuilt
+  binary, or optional dependencies are omitted, `startVivarium` falls back
+  to `vivarium` on PATH and fails clearly.
 - **The admin bypass** means an agent run could merge red if
   `ship-feature` is skipped. That's mitigated by the skill change, not
   enforced by GitHub.
-- **Toolchain and image drift** is avoided by pinning both, and bumping
-  them deliberately.
+- **Toolchain and vivarium drift** is avoided by pinning the Rust
+  toolchain and the locked npm version, and bumping them deliberately.
 ### Round 1
 
 The first draft ran vivarium with `docker run --network host` and fell back
@@ -469,14 +477,32 @@ The user approved the revised design as written, including publishing
 `@vivarium/client` and `@vivarium/lexicons` to npm from the vivarium repo as
 a prerequisite for the build.
 
+### Round 2
+
+**User feedback:** vivarium is being published as a standalone npm command
+(`npx @vivarium-dev/cli`), with prebuilt binaries for each platform and no
+Bun required. The npm scope was renamed to `@vivarium-dev`. Rework the
+approach around that.
+
+**What changed:**
+
+- Vivarium comes from pinned `@vivarium-dev/cli` and `@vivarium-dev/client`
+  devDependencies. `@vivarium-dev/client` finds the CLI's binary by itself.
+- The Docker image extraction step, the pinned image tag and the local
+  `VIVARIUM_BIN` requirement are gone.
+- Everything else stands: one sealed box on loopback per run through
+  `with-vivarium.ts`, `vivFresh`, and the jobs and ruleset.
+- TC-1 and TC-31 are reworded, keeping their numbers. The user approved
+  the reworked design and both test cases.
+
 ## Test cases
 
 ### The skeleton works end to end
 
 #### TC-1: A fresh clone passes the full check
 
-- **Given** a fresh clone with the prerequisites installed and a vivarium
-  binary available
+- **Given** a fresh clone with only Node, pnpm and Rust installed: no
+  Docker, Bun or separately installed vivarium
 - **When** the developer installs dependencies and runs the full check
 - **Then** lint, build, tests and the frozen-tests check run in that order,
   and all pass
@@ -692,9 +718,11 @@ a prerequisite for the build.
 
 #### TC-31: CI's vivarium is pinned and sealed
 
-- **Given** the CI workflow
-- **Then** the vivarium it uses comes from the pinned image version, runs
-  as a local binary, and isn't a service container
+- **Given** the CI workflow and the project's dependencies
+- **Then** vivarium comes from the locked npm package version, installed
+  like any other dependency
+- **And** the workflow has no Docker step or service container for it, and
+  every box it starts is sealed
 
 ### Merge gate
 
