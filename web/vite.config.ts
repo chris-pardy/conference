@@ -19,7 +19,7 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       // Backend routes must reach the server, never the cached app shell.
-      workbox: { navigateFallbackDenylist: [/^\/api\//, /^\/xrpc\//, /^\/health$/] },
+      workbox: { navigateFallbackDenylist: [/^\/api\//, /^\/xrpc\//, /^\/health(\?|$)/] },
       injectRegister: 'script',
       manifest: {
         name: 'Conference',

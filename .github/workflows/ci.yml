@@ -97,6 +97,7 @@ jobs:
     env:
       npm_config_script_shell: /bin/bash
       npm_config_enable_pre_post_scripts: 'false'
+      npm_config_ignore_pnpmfile: 'true'
     steps:
       # The PR's own head commit with full history, not GitHub's merge into main.
       - uses: actions/checkout@v4
@@ -118,7 +119,7 @@ jobs:
             echo "the branch commits node_modules, which could replace the check's tools" >&2
             exit 1
           fi
-          rm -rf node_modules
+          rm -rf node_modules .pnpmfile.cjs
           # pnpm settings come from main too, or not at all.
           if git cat-file -e origin/main:.npmrc 2>/dev/null; then
             git show origin/main:.npmrc > .npmrc
@@ -138,3 +139,10 @@ jobs:
         with:
           node-version-file: .nvmrc
       - run: pnpm check:frozen
+      # The same check with pnpm and anything else the branch controls out of
+      # the loop: main's script, the system shell, a clean environment.
+      - name: Frozen tests, run directly
+        run: >-
+          env -i PATH=/usr/bin:/bin HOME="$HOME"
+          GITHUB_HEAD_REF="$GITHUB_HEAD_REF"
+          /bin/bash scripts/frozen-tests.sh

@@ -886,3 +886,33 @@ unchanged; `pnpm check` green. Verdict: not clean (2 major, 2 minor, 1 nit).
    disagreed.**
    **Fixed:** the proxy keys are now anchored patterns that match the
    denylist.
+
+### Round 4
+
+Reviewer: a fresh subagent following `adversarial-review`. Frozen tests
+unchanged; `pnpm check` green; the live ruleset matches the file. Verdict:
+not clean (2 major, 1 minor, 1 nit).
+
+1. **[major] The `tests-commit` parser glued a trailing `# comment` onto the
+   SHA.** That comment format is the one `features/README.md` documents. The
+   parser also read quoted values and matched `tests-commit:` lines outside
+   the frontmatter.
+   **Fixed:** the parser now reads only the frontmatter, strips quotes and a
+   trailing comment, and takes the first word. Anything that isn't a
+   7–40 character hex SHA fails with "isn't a commit SHA". New unfrozen
+   tests in `tests/tooling/frozen-tests-format.test.ts` cover the README
+   format, quotes, a body example and a non-SHA.
+2. **[major] A committed `.pnpmfile.cjs` could skip `pnpm check:frozen`.**
+   **Fixed, and the whole class closed:** the job sets
+   `npm_config_ignore_pnpmfile` and deletes `.pnpmfile.cjs`. It also now
+   runs main's `frozen-tests.sh` directly: `/bin/bash` in a clean
+   environment (`env -i`, `PATH=/usr/bin:/bin`), with pnpm and every other
+   file the branch controls out of the loop. `pnpm check:frozen` stays for
+   parity with local runs (TC-27).
+3. **[minor] `check-tests-unchanged.sh` let a file renamed in the frozen
+   commit escape the freeze,** because of git's rename detection.
+   **Fixed:** it now uses `--no-renames`. A new test covers a renamed
+   frozen file.
+4. **[nit] The service-worker denylist didn't match `/health?query` like
+   the proxy did.**
+   **Fixed:** the denylist entry is now `/^\/health(\?|$)/`.

@@ -19,7 +19,22 @@ fi
 slug=${BASH_REMATCH[1]}
 file=features/$slug.md
 
-tests_commit_in() { sed -n 's/^tests-commit:[[:space:]]*//p' | head -n 1 | tr -d '[:space:]'; }
+# The tests-commit value from a feature file's frontmatter (only between the
+# opening and closing ---), without quotes or a trailing # comment.
+tests_commit_in() {
+  awk '
+    NR == 1 { if ($0 != "---") exit; next }
+    $0 == "---" { exit }
+    /^tests-commit:/ {
+      sub(/^tests-commit:[[:space:]]*/, "")
+      sub(/[[:space:]]*#.*$/, "")
+      gsub(/["\047]/, "")
+      split($0, words, /[[:space:]]+/)
+      print words[1]
+      exit
+    }
+  '
+}
 
 # The branch's own history of the feature file, oldest first. Anything
 # already on main counts as the starting point.
@@ -44,6 +59,12 @@ fi
 
 current=
 if [[ -f $file ]]; then current=$(tests_commit_in < "$file"); fi
+
+for value in "$frozen" "$current"; do
+  if [[ -n $value && ! $value =~ ^[0-9a-f]{7,40}$ ]]; then
+    fail "tests-commit \"$value\" in $file isn't a commit SHA"
+  fi
+done
 
 if [[ -z $frozen && -z $current ]]; then
   say "skipped: no tests-commit yet in $file"

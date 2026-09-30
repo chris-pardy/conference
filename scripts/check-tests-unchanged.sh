@@ -6,7 +6,7 @@
 set -euo pipefail
 
 sha=${1:?usage: $0 <tests-commit>}
-files=$(git show --name-only --diff-filter=AM --format= "$sha")
+files=$(git show --name-only --no-renames --diff-filter=AM --format= "$sha")
 
 if [ -z "$files" ]; then
   echo "commit $sha adds or modifies no files" >&2
