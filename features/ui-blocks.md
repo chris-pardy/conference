@@ -1,5 +1,5 @@
 ---
-status: design-review
+status: test-cases
 impact: cross-cutting
 depends-on: [ci-pipeline]
 branch:
@@ -628,6 +628,8 @@ Both sandbox risks from round 1 go away:
 - **`block-actions`:** wasm instead of QuickJS.
 - **`block-sandbox`:** rewritten around wasm (no iframe), with the canvas
   block and animation.
+
+**Round 2 outcome:** the user approved the core design as written above.
 
 ### Round 1
 
