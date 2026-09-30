@@ -1,9 +1,9 @@
 ---
-status: ready
+status: implementing
 impact: cross-cutting
 depends-on: []
 branch: feature/ci-pipeline
-tests-commit:
+tests-commit: 1e253c62660da8051a2e231e43cd1d4b41aa8372
 ---
 
 # CI pipeline
@@ -496,6 +496,12 @@ approach around that.
   the reworked design and both test cases.
 
 ## Test cases
+
+**Automation:** TC-1 to TC-33 are automated. The full fresh-clone run in
+TC-1 would recurse inside the check, so its automated test checks that
+`pnpm check` runs every step in order, and CI's clean checkout proves the
+rest (TC-38). TC-34 to TC-38 are manual. They need the live GitHub repo or
+the agent's own behavior, and are verified on the PR.
 
 ### The skeleton works end to end
 
