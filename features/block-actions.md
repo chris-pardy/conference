@@ -13,7 +13,7 @@ tests-commit:
 This makes UI blocks interactive and live. An attendee's interaction with
 a card becomes an **action**. The action:
 
-1. passes through **middleware**: sandboxed JS that can accept, reject,
+1. passes through **middleware**: a sandboxed wasm module that can accept, reject,
    rewrite the value, or answer with ephemeral blocks
 2. is written into the space as the attendee
 3. updates live **views** such as vote tallies and question lists, which
@@ -68,8 +68,10 @@ space, with demo middleware:
   - by ingest re-validation of actions that arrive through
     [`space-sync`](space-sync.md) without having gone through
     `submitAction`
-- **Middleware** is ES-module JS, stored as blobs referenced by the card
-  (`#moduleRef`: CID, uploader DID, exports).
+- **Middleware** is a wasm module, stored as a blob and referenced by the
+  card (`#moduleRef`: a wasm blob CID, the uploader's DID, an optional
+  script, and exports). A JS module is a script run by the shared QuickJS
+  runtime compiled to wasm.
   - It's called as `handle(action, ctx)`, where `ctx` holds `viewer`,
     `now`, `sources` (resolved for the viewer), and `side` (`client` or
     `server`).
@@ -81,14 +83,18 @@ space, with demo middleware:
     order, and stops at the first rejection.
 - **The server decides on its own clock:** `now` is always the appview's
   time, never the action's `createdAt`.
-- **Engine:** QuickJS on both sides, and the same **quickjs-ng** build:
-  - `rquickjs` on the appview
-  - `@jitl/quickjs-ng-*` wasm in a Web Worker on the PWA
-
-  Both are pinned to the same upstream version, and a parity test runs the
-  same modules through both. `Date` is replaced, `Math.random` is removed,
-  and there's no I/O and no timers. Interrupt and memory limits enforce
-  time and memory budgets.
+- **Engine:** the same `.wasm` bytes run on both sides:
+  - `wasmtime` on the appview
+  - the browser's native WebAssembly, in a Web Worker, on the PWA
+- **The ABI** is Extism-style: plain core wasm, with JSON in and out. The
+  middleware export is `handle`.
+- **Budgets:** modules are fuel-instrumented at load time, so budgets run
+  out at the same point on both sides. Memory is capped by rejecting
+  modules that declare too high a maximum. A stuck Worker can be
+  terminated.
+- **Determinism:** no imports for I/O, clocks or randomness (`now` arrives
+  in `ctx`), no threads, and NaN values canonicalized.
+- **Parity:** a test runs the same modules on both hosts.
 - **Views** are quasi-records that the appview computes from the index plus
   the accepted-actions table.
   - `app.gather.block.view.actionTally{card, blockId}` returns
@@ -126,9 +132,16 @@ isomorphic sandboxed JS. Round 1 of the design review added these:
 
 ### Engine parity
 
-- **quickjs-ng on both sides, pinned, with a parity test** (chosen).
+- **wasm modules on `wasmtime` and in browser WebAssembly, fuel-instrumented,
+  with an Extism-style JSON ABI; JS runs through a shared QuickJS-wasm
+  runtime** (chosen in ui-blocks design review round 2): any language, the
+  same bytes and budgets everywhere.
+- quickjs-ng on both sides (`rquickjs` and `@jitl/quickjs-ng`): JS only,
+  and two builds to keep in lockstep.
 - The browser's JS engine on the client: Intl, Date and float drift break
   "isomorphic".
+- The WebAssembly Component Model (WIT): a cleaner interface, but browsers
+  need a `jco` transpile step. Worth revisiting later.
 
 ## Out of scope
 

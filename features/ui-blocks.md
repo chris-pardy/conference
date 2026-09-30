@@ -39,7 +39,7 @@ family.
 | [`attendee-sign-in`](attendee-sign-in.md) | OAuth backend-for-frontend in the appview, with `space:` scopes, plus a test helper | ci-pipeline |
 | [`space-sync`](space-sync.md) | The appview's identity and access to spaces: credentials, write notifications, a per-repo index | ci-pipeline, attendee-sign-in |
 | **`ui-blocks`** | This feature: lexicons, renderer, vocabulary, theme, bindings, surfaces, gallery | ci-pipeline |
-| [`block-actions`](block-actions.md) | Actions, isomorphic QuickJS middleware, ingest validation, built-in views, live updates | ui-blocks, space-sync, attendee-sign-in |
+| [`block-actions`](block-actions.md) | Actions, isomorphic wasm middleware, ingest validation, built-in views, live updates | ui-blocks, space-sync, attendee-sign-in |
 | [`block-offline`](block-offline.md) | Offline queue, optimistic overlay, replay and reconciliation | block-actions |
 | [`block-sandbox`](block-sandbox.md) | Custom JS blocks and computed bindings | block-actions |
 | `conference-space` | A conference as a permissioned space: the organizer owns it and attendees are members | (not specced yet) |
@@ -91,9 +91,13 @@ authors, and the target for Playwright and the demo video. Once
 - **Conference-aware:** person (a DID shown as avatar and name), session
   reference, room/location, time/countdown, copyable value (e.g. a wifi
   password), QR code.
-- **Custom:** reserved in the lexicon. Rendered by
-  [`block-sandbox`](block-sandbox.md). Until then, the renderer treats it
-  as an unknown block and skips it.
+- **Custom and canvas:** reserved in the lexicon. Rendered by
+  [`block-sandbox`](block-sandbox.md): `custom` runs a wasm module that
+  returns blocks, and `canvas` draws commands and reports taps. Until then,
+  the renderer treats both as unknown blocks and skips them.
+- **Declarative animation:** an `animate` property (from, to, duration,
+  easing, repeat) is reserved in the lexicon, and `block-sandbox` runs
+  it.
 
 Blocks take semantic variants only: primary/danger buttons, emphasis, and
 info/warning/success tones.
@@ -520,7 +524,8 @@ web/src/blocks/gallery/*.card.json     sample cards (valid against the lexicon) 
     `divider`, `context`, `richText`, `image`, `stack`, `columns`,
     `button`, `buttonGroup`, `textInput`, `select`, `submit`, `list`,
     `progress`, `stat`, `badge`, `person`, `sessionRef`, `room`, `time`,
-    `copyable`, `qr`, `custom`.
+    `copyable`, `qr`, `custom`, `canvas` (the last two reserved for
+    `block-sandbox`).
   - Every block has an optional `id`, which interactive blocks require.
   - Every bindable property is typed as a literal, a `#binding`
     (`{source, path}`), or a `#computed` (reserved for `block-sandbox`).
@@ -530,8 +535,12 @@ web/src/blocks/gallery/*.card.json     sample cards (valid against the lexicon) 
   - `#spaceRecordRef` holds a space URI, an author DID, a collection, an
     rkey and a CID. Space record URIs have more segments than a standard
     at-uri, so `strongRef` doesn't fit.
-  - `#moduleRef` holds a blob CID, the uploader's DID, and its exports
-    (reserved).
+  - `#moduleRef` (reserved) holds these fields:
+    - `wasm`: a blob CID plus the uploader's DID
+    - `script`: optional, for modules built on the shared JS runtime
+    - `exports`
+  - `#animate` (reserved): a target property, `from`, `to`, `duration`,
+    `easing` and `repeat`.
 - **`app.gather.block.card`** (a record in a space) has these fields:
   `blocks`, `sources` (a map from name to `#sourceRef`), `middleware`
   (a list of `#moduleRef`, reserved), `fallbackText` (optional), and
@@ -580,6 +589,45 @@ web/src/blocks/gallery/*.card.json     sample cards (valid against the lexicon) 
 - **The namespace is a placeholder** and gets baked into records.
 - **Vocabulary size:** 24 block types is a lot of components and gallery
   cards for one feature. It's still static UI, so it's low risk.
+
+### Round 2
+
+**User feedback:**
+
+- Keep `app.gather.*` as a placeholder until a real domain is bought.
+- The PWA sandbox should use a wasm interpreter, and then the question was
+  raised: why not let a custom block just run a wasm module?
+
+**Decision:** wasm is the only sandbox unit for middleware, computed
+bindings and custom blocks.
+
+- **Hosts:** `wasmtime` on the appview, and the browser's native
+  WebAssembly in a Worker on the PWA.
+- **ABI:** an Extism-style ABI, JSON in and out: `handle`, `compute`,
+  `render`, `event`, `tick`.
+- **Budgets:** fuel is instrumented at load time, so budgets behave the
+  same on both sides. Memory is capped. A stuck Worker can be killed.
+- **JS authoring:** a JS module is a script plus a shared, prebuilt QuickJS
+  runtime compiled to wasm, cached by CID.
+- **What custom blocks draw:** they return standard blocks, plus a `canvas`
+  block with draw commands and tap coordinates.
+- **Animation:** `tick(dt)` at up to 30fps under a per-frame budget, plus a
+  declarative `animate` that the host runs without calling the module every
+  frame.
+
+Both sandbox risks from round 1 go away:
+
+- wasm has no network imports, so there's no WebRTC leak
+- loops are fuel-bounded and run in a killable Worker, so nothing freezes
+  the page
+
+**What changed:**
+
+- **Here:** `canvas`, the `#moduleRef` shape (wasm plus an optional script)
+  and `#animate` are reserved in the lexicon.
+- **`block-actions`:** wasm instead of QuickJS.
+- **`block-sandbox`:** rewritten around wasm (no iframe), with the canvas
+  block and animation.
 
 ### Round 1
 
