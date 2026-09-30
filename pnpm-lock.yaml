@@ -17,6 +17,9 @@ importers:
       '@types/node':
         specifier: 26.6.3
         version: 26.6.3
+      '@vitejs/plugin-react':
+        specifier: 6.1.1
+        version: 6.1.1(vite@8.3.1(@types/node@26.6.3)(yaml@2.9.1))
       '@vivarium-dev/cli':
         specifier: 0.0.1
         version: 0.0.1
@@ -29,6 +32,9 @@ importers:
       typescript:
         specifier: 7.0.2
         version: 7.0.2
+      vite:
+        specifier: 8.3.1
+        version: 8.3.1(@types/node@26.6.3)(yaml@2.9.1)
       vitest:
         specifier: 5.0.3
         version: 5.0.3(@types/node@26.6.3)(jsdom@30.1.1)(vite@8.3.1(@types/node@26.6.3)(yaml@2.9.1))
