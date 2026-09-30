@@ -18,7 +18,8 @@ it needs to. Many features can be specced before any of them are built.
 | 3 | Design review (cross-cutting features only) | [`design-review`](.claude/skills/design-review/SKILL.md) | agent + human, one or more rounds | `test-cases` |
 | 4 | Test cases | [`write-test-cases`](.claude/skills/write-test-cases/SKILL.md) | agent writes, human approves | `ready` |
 
-**Build** (steps 5–12): on a `feature/<slug>` branch, landing through a PR.
+**Build** (steps 5–12): on a `feature/<slug>` branch in its own worktree,
+`.claude/worktrees/<slug>`, landing through a PR.
 
 | # | Step | Skill | Who | Status when done |
 |---|------|-------|-----|------------------|
@@ -75,6 +76,13 @@ in the feature file, push, and stop.
   rewrites `tests-commit`, and the frozen-tests check then fails for good.
   Bring in `main` with `git merge origin/main` (the `git pull --rebase`
   habit is for `main` only).
+- **One worktree per build.** The main checkout stays on `main`, where spec
+  work happens. Each build gets `git worktree add .claude/worktrees/<slug>
+  -b feature/<slug> origin/main`, runs `pnpm install` there, and does all its
+  work there until the merge, when the worktree is removed. That lets
+  several builds and spec sessions run at once without switching each
+  other's branches. Don't set `CARGO_TARGET_DIR`: tests expect the binary in
+  the worktree's own `target/`.
 - **Commit identity.** Every commit's author and committer is
   `Chris Pardy <chris.pardy@gmail.com>`. This repo's git config already sets
   it, so don't override it with `-c`, `--author` or environment variables.

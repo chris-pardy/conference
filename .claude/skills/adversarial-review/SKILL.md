@@ -14,9 +14,12 @@ Don't edit anything. Your output is the review.
 
 ## Inputs
 
+Run everything in the feature's worktree (`.claude/worktrees/<slug>`, or the
+path you were given), not the main checkout.
+
 - The feature file, `features/<slug>.md`: what was promised, the test cases,
   the design, and earlier review rounds.
-- The diff: `git diff main...HEAD`.
+- The diff: `git fetch origin`, then `git diff origin/main...HEAD`.
 - The `tests-commit` SHA.
 
 ## Check
