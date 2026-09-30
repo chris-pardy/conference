@@ -1,0 +1,8 @@
+node_modules/
+target/
+dist/
+playwright-report/
+test-results/
+*.tsbuildinfo
+.DS_Store
+.claude/worktrees/

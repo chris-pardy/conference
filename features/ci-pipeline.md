@@ -1,9 +1,9 @@
 ---
-status: ready
+status: complete
 impact: cross-cutting
 depends-on: []
-branch:
-tests-commit:
+branch: feature/ci-pipeline
+tests-commit: 1e253c62660da8051a2e231e43cd1d4b41aa8372
 ---
 
 # CI pipeline
@@ -497,6 +497,12 @@ approach around that.
 
 ## Test cases
 
+**Automation:** TC-1 to TC-33 are automated. The full fresh-clone run in
+TC-1 would recurse inside the check, so its automated test checks that
+`pnpm check` runs every step in order, and CI's clean checkout proves the
+rest (TC-38). TC-34 to TC-38 are manual. They need the live GitHub repo or
+the agent's own behavior, and are verified on the PR.
+
 ### The skeleton works end to end
 
 #### TC-1: A fresh clone passes the full check
@@ -774,3 +780,188 @@ approach around that.
 - **Then** all four checks pass on GitHub
 
 ## Review log
+
+### Round 1
+
+Reviewer: a fresh subagent following `adversarial-review`. Frozen tests
+unchanged; `pnpm check` green. Verdict: not clean (2 major, 3 minor, 2 nit).
+
+1. **[major] Pending runs on `main` could be cancelled.** GitHub cancels a
+   *pending* run whenever a newer one joins its concurrency group, whatever
+   `cancel-in-progress` says. So quick pushes to `main` could leave a commit
+   unchecked.
+   **Fixed:** PR runs share a group per ref. Every run on `main` gets its
+   own group (`github.run_id`).
+2. **[major] The PR under test ran its own enforcement scripts,** so it
+   could disable its own frozen-tests check.
+   **Fixed:** the `frozen-tests` job now takes `frozen-tests.sh` and
+   `check-tests-unchanged.sh` from `origin/main` whenever `main` has them,
+   and fails if `package.json`'s `check:frozen` no longer runs that script.
+   **Residual:** a PR can still edit `.github/workflows/ci.yml` itself.
+   `ship-feature` treats any CI change as architectural, so such a PR
+   always waits for a human.
+3. **[minor] The dev proxy defaulted to port 3100 but the server to 3000.**
+   **Fixed:** the server now defaults to 3100, matching the proxy.
+4. **[minor] `reqwest` had no TLS,** so every HTTPS atproto service looked
+   unreachable and nothing reported why.
+   **Fixed:** enabled `rustls-tls`. The health probe now logs why it
+   failed to stderr.
+5. **[minor] The e2e servers used fixed ports,** so concurrent checks
+   collided.
+   **Fixed:** the Playwright config picks free ports once in the main
+   process and shares them with its workers through the environment.
+6. **[nit] AGENTS.md overstated which scripts use `with-vivarium`.**
+   **Fixed.**
+7. **[nit] `with-vivarium` exit codes:** a signal-killed child exited 128,
+   and a failing `box.stop()` could hide the real exit code.
+   **Fixed:** it now exits with 128 + the signal number, and a failure to
+   stop the box is logged but no longer changes the exit code.
+
+### Round 2
+
+Reviewer: a fresh subagent following `adversarial-review`. Frozen tests
+unchanged; `pnpm check` green. Verdict: not clean (3 major, 1 minor, 2 nit).
+
+1. **[major] The PR's own pnpm configuration could still bypass
+   frozen-tests.** An `.npmrc` with `script-shell=/usr/bin/true`, or a
+   `precheck:frozen` script, got past round 1's fix.
+   **Fixed:** the job now sets `npm_config_script_shell=/bin/bash` and
+   `npm_config_enable_pre_post_scripts=false` in its environment, which
+   overrides any project `.npmrc`. It restores `.npmrc` from `main` (or
+   deletes it), and fails if `package.json` defines `precheck:frozen` or
+   `postcheck:frozen`.
+2. **[major] Frozen TC-7 matched "atproto: unreachable",** because
+   `/atproto.*reachable/i` also matches "unreachable". So it passed without
+   a connected stack.
+   **Fixed in the implementation:** the page now shows an unreachable
+   atproto as "atproto: offline". Verified: with atproto unreachable, TC-7
+   now fails.
+3. **[major] The service worker's navigation fallback served `index.html`
+   for backend routes.**
+   **Fixed:** added `navigateFallbackDenylist` for `/api/`, `/xrpc/` and
+   `/health`. The built `sw.js` now carries the denylist.
+4. **[minor] An empty `ATPROTO_URL` was probed as a relative URL.**
+   **Fixed:** the server treats an empty value as unset. `spawnServer`
+   and the Playwright config fail fast without a run vivarium.
+5. **[nit] `apply-ruleset.sh` didn't paginate its lookup.**
+   **Fixed:** it now uses `--paginate`.
+6. **[nit] `pnpm check` builds the web app twice.**
+   **Left as is:** each `test:*` script builds what it needs so it can run
+   on its own, and the extra Vite build takes well under a second here.
+
+### Round 3
+
+Reviewer: a fresh subagent following `adversarial-review`. Frozen tests
+unchanged; `pnpm check` green. Verdict: not clean (2 major, 2 minor, 1 nit).
+
+1. **[major] A committed `node_modules/.bin` could replace `bash` or `git`
+   in the `frozen-tests` job,** because pnpm puts it first on PATH.
+   **Fixed:** the job fails if the branch tracks any `node_modules`, and
+   deletes `node_modules` before running the check. It never installs
+   dependencies.
+2. **[major] The ruleset can't be applied:** the repository is private on a
+   free plan, and GitHub returns 403 for rulesets and branch protection.
+   **Was blocked**, and resolved by the user.
+   - Moving to tangled with a spindle was researched first. Tangled has no
+     merge gate at all: no branch protection or required checks. Its
+     hosted spindle has a 5-minute default timeout that workflow YAML
+     can't override. Its Nix images can't run the prebuilt vivarium
+     binary. It has no artifact upload, and no `gh`-equivalent PR check
+     watching or squash merge for `ship-feature`.
+   - **The user chose to make the GitHub repository public.** After a scan
+     of the history found no secrets, it was made public on 2026-09-30.
+     `scripts/apply-ruleset.sh` created ruleset 24276263, which is active
+     on the default branch, requires `lint`, `build`, `test` and
+     `frozen-tests`, and lets admins bypass it.
+   - **TC-34 verified:** running the script a second time updated the same
+     ruleset, and the repository still has exactly one.
+3. **[minor] No job timeouts.**
+   **Fixed:** `timeout-minutes` is 15 for lint and build, 25 for test, and
+   5 for frozen-tests.
+4. **[minor] `VIVARIUM_UPSTREAM=1` in a developer's shell would unseal
+   `vivFresh` boxes.**
+   **Fixed:** `with-vivarium` removes it from the wrapped command's
+   environment.
+5. **[nit] The proxy prefix keys and the service-worker denylist
+   disagreed.**
+   **Fixed:** the proxy keys are now anchored patterns that match the
+   denylist.
+
+### Round 4
+
+Reviewer: a fresh subagent following `adversarial-review`. Frozen tests
+unchanged; `pnpm check` green; the live ruleset matches the file. Verdict:
+not clean (2 major, 1 minor, 1 nit).
+
+1. **[major] The `tests-commit` parser glued a trailing `# comment` onto the
+   SHA.** That comment format is the one `features/README.md` documents. The
+   parser also read quoted values and matched `tests-commit:` lines outside
+   the frontmatter.
+   **Fixed:** the parser now reads only the frontmatter, strips quotes and a
+   trailing comment, and takes the first word. Anything that isn't a
+   7–40 character hex SHA fails with "isn't a commit SHA". New unfrozen
+   tests in `tests/tooling/frozen-tests-format.test.ts` cover the README
+   format, quotes, a body example and a non-SHA.
+2. **[major] A committed `.pnpmfile.cjs` could skip `pnpm check:frozen`.**
+   **Fixed, and the whole class closed:** the job sets
+   `npm_config_ignore_pnpmfile` and deletes `.pnpmfile.cjs`. It also now
+   runs main's `frozen-tests.sh` directly: `/bin/bash` in a clean
+   environment (`env -i`, `PATH=/usr/bin:/bin`), with pnpm and every other
+   file the branch controls out of the loop. `pnpm check:frozen` stays for
+   parity with local runs (TC-27).
+3. **[minor] `check-tests-unchanged.sh` let a file renamed in the frozen
+   commit escape the freeze,** because of git's rename detection.
+   **Fixed:** it now uses `--no-renames`. A new test covers a renamed
+   frozen file.
+4. **[nit] The service-worker denylist didn't match `/health?query` like
+   the proxy did.**
+   **Fixed:** the denylist entry is now `/^\/health(\?|$)/`.
+
+### Round 5
+
+Reviewer: a fresh subagent following `adversarial-review`. Frozen tests
+unchanged; `pnpm check` green; the first real CI run (run 36785876444 on
+draft PR #1) passed all four checks, and both frozen-tests paths
+enforced the freeze. Verdict: not clean, but only minor issues (0 blocking,
+0 major, 3 minor, 1 nit). The reviewer said none of them touch the main
+path or the stated requirements.
+
+1. **[minor] Rebasing a frozen branch breaks the check for good,** and no
+   doc said to merge instead.
+   **Fixed:** added a rule to AGENTS.md: never rebase a feature branch once
+   its tests are frozen; bring in main with `git merge origin/main`. The
+   not-an-ancestor error now says the same. A new test covers it.
+2. **[minor] A frozen path containing a space escaped the freeze,** because
+   of an unquoted word-split.
+   **Fixed:** `check-tests-unchanged.sh` now reads the file list
+   NUL-separated and passes `:(literal)` pathspecs. A new test covers a
+   frozen `tests/a b.test.ts`.
+3. **[minor] The architectural checklist didn't name the configs that
+   decide which tests run.**
+   **Fixed:** `ship-feature` now lists `.github/`, `scripts/`, the vitest
+   and Playwright configs, `biome.jsonc`, the Rust toolchain and format
+   configs, `Cargo.toml` files, and `package.json` scripts.
+4. **[nit] GitHub warned that the actions ran on the deprecated Node 20
+   runtime.**
+   **Fixed:** bumped to the current majors (`checkout@v7`,
+   `setup-node@v7`, `cache@v6`, `upload-artifact@v7`,
+   `pnpm/action-setup@v6`).
+
+**Status after five rounds:** by the pipeline's rule, a fifth round that
+isn't clean blocks the feature. The findings have gone down every round:
+
+| Round | blocking | major | minor | nit |
+|---|---|---|---|---|
+| 1 | 0 | 2 | 3 | 2 |
+| 2 | 0 | 3 | 1 | 2 |
+| 3 | 0 | 2 | 2 | 1 |
+| 4 | 0 | 2 | 1 | 1 |
+| 5 | 0 | 0 | 3 | 1 |
+
+What kept coming back was hardening the frozen-tests check against a
+deliberately adversarial branch. The bypasses went: running the PR's own
+scripts, then `.npmrc`, pre/post scripts, `node_modules/.bin`, and
+`.pnpmfile.cjs`. Round 4 closed that class by also running main's script
+directly in a clean environment, and round 5 found no bypass. Everything
+round 5 found is fixed. **The user chose to ship** rather than run a
+sixth round.

@@ -39,12 +39,20 @@ name. The body contains:
 
 ## 11. Review gate
 
-Wait for CI with `gh pr checks <n> --watch`.
+Wait for CI with `gh pr checks <n> --watch`. Right after `gh pr create`,
+the workflow may not have registered yet: if `gh pr checks` reports no
+checks, retry every 15 seconds for up to 2 minutes before concluding there
+are none.
 
 - **Checks fail:** go back to `implement-feature` to fix them, pushing to
   the same branch. Frozen tests stay frozen, and `status` stays `complete`.
-- **No checks are configured:** this PR can't auto-merge. Treat it as
-  architectural and say why in the comment below.
+- **No checks are configured** (still none after 2 minutes): this PR can't
+  auto-merge. Treat it as architectural and say why in the comment below.
+
+"Green" means every required check (`lint`, `build`, `test`,
+`frozen-tests`) has passed on the PR's head commit. The agent merges as a
+repository admin, and admins bypass the `main` ruleset, so GitHub won't stop
+a red merge: this step is the gate. Never merge with `--admin`.
 
 When CI is green, classify the PR. It's **architectural** if any of these
 apply:
@@ -52,14 +60,19 @@ apply:
 - The feature's `impact` is `cross-cutting`.
 - The diff adds or upgrades dependencies.
 - The diff touches lexicons, database schema, build or CI config, or
-  `AGENTS.md`/`.claude/`.
+  `AGENTS.md`/`.claude/`. Build and CI config includes anything that decides
+  which tests run or how: `.github/`, `scripts/`, `vitest.config.ts`,
+  `playwright.config.ts`, `biome.jsonc`, `rustfmt.toml`,
+  `rust-toolchain.toml`, `Cargo.toml` files, and the `scripts` in
+  `package.json`.
 - The diff changes a module, API or component that another feature uses.
 
 Otherwise it's **minor**.
 
 Post the classification and its reason as a PR comment. Then:
 
-- **Minor:** `gh pr merge <n> --squash --delete-branch`, then go to step 12.
+- **Minor:** confirm once more that every required check passed on the head
+  commit, then `gh pr merge <n> --squash --delete-branch`, and go to step 12.
 - **Architectural:** tell the user the PR is waiting for their review, and
   stop. Merging it completes the feature, and nothing more is needed.
 

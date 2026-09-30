@@ -1,0 +1,148 @@
+# Each job runs the same package script a developer runs locally; `pnpm check`
+# runs all four in order. The job names are the required checks in
+# .github/rulesets/main.json, so renaming one means updating the ruleset too.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# A PR's runs share a group, so a newer push cancels the older run. Every run
+# on main gets its own group: GitHub cancels a *pending* run whenever another
+# joins its group, whatever cancel-in-progress says, and each main commit must
+# be checked.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - name: Install the Rust toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check:lint
+
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - name: Install the Rust toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check:build
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - name: Install the Rust toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - run: pnpm install --frozen-lockfile
+      - name: Playwright version
+        id: playwright
+        run: echo "version=$(pnpm exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+      - run: pnpm exec playwright install --with-deps chromium
+      # The tooling tests commit to throwaway git repos.
+      - run: |
+          git config --global user.name "CI"
+          git config --global user.email "ci@users.noreply.github.com"
+      - run: pnpm check:test
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            playwright-report
+            test-results
+          retention-days: 14
+
+  frozen-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Environment settings override any project .npmrc, so the branch can't
+    # swap the script shell or slip in a pre/post script.
+    env:
+      npm_config_script_shell: /bin/bash
+      npm_config_enable_pre_post_scripts: 'false'
+      npm_config_ignore_pnpmfile: 'true'
+    steps:
+      # The PR's own head commit with full history, not GitHub's merge into main.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      # The branch under test mustn't be able to switch off its own policing:
+      # once main has the enforcement scripts, they come from main.
+      - name: Use main's frozen-tests enforcement
+        run: |
+          for f in scripts/frozen-tests.sh scripts/check-tests-unchanged.sh; do
+            if git cat-file -e "origin/main:$f" 2>/dev/null; then
+              git show "origin/main:$f" > "$f"
+            fi
+          done
+          # pnpm puts node_modules/.bin first on PATH, so a committed one could
+          # replace bash or git. This job never installs, so none may exist.
+          if [ -n "$(git ls-files -- node_modules '**/node_modules')" ]; then
+            echo "the branch commits node_modules, which could replace the check's tools" >&2
+            exit 1
+          fi
+          rm -rf node_modules .pnpmfile.cjs
+          # pnpm settings come from main too, or not at all.
+          if git cat-file -e origin/main:.npmrc 2>/dev/null; then
+            git show origin/main:.npmrc > .npmrc
+          else
+            rm -f .npmrc
+          fi
+          if [ "$(jq -r '.scripts["check:frozen"]' package.json)" != "bash scripts/frozen-tests.sh" ]; then
+            echo "package.json's check:frozen must run scripts/frozen-tests.sh" >&2
+            exit 1
+          fi
+          if jq -e '.scripts | has("precheck:frozen") or has("postcheck:frozen")' package.json >/dev/null; then
+            echo "package.json must not wrap check:frozen in pre/post scripts" >&2
+            exit 1
+          fi
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+      - run: pnpm check:frozen
+      # The same check with pnpm and anything else the branch controls out of
+      # the loop: main's script, the system shell, a clean environment.
+      - name: Frozen tests, run directly
+        run: >-
+          env -i PATH=/usr/bin:/bin HOME="$HOME"
+          GITHUB_HEAD_REF="$GITHUB_HEAD_REF"
+          /bin/bash scripts/frozen-tests.sh

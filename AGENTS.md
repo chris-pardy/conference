@@ -71,25 +71,49 @@ in the feature file, push, and stop.
   starts a `feature/<slug>` branch at step 5, and the tests and code land
   through its PR, which also marks the feature complete. Nothing else is
   committed directly to `main`. Push after every commit.
+- **Never rebase a feature branch once its tests are frozen.** Rebasing
+  rewrites `tests-commit`, and the frozen-tests check then fails for good.
+  Bring in `main` with `git merge origin/main` (the `git pull --rebase`
+  habit is for `main` only).
 - **Commit identity.** Every commit's author and committer is
   `Chris Pardy <chris.pardy@gmail.com>`. This repo's git config already sets
   it, so don't override it with `-c`, `--author` or environment variables.
-- **All green before any commit of implementation code.** That means the
+- **All green before any commit of implementation code** (`pnpm check`). That means the
   whole suite, not only the feature's own tests.
 
 ## Testing
 
+- **`pnpm check` is "all green".** It runs, in order, `check:lint`
+  (rustfmt, clippy with `-D warnings`, Biome), `check:build` (tsc, the Vite
+  PWA build, cargo build), `check:test` (every suite against one sealed
+  vivarium) and `check:frozen` (the frozen-tests rule). CI runs the same four
+  scripts as the required checks `lint`, `build`, `test` and `frozen-tests`.
+  Use `pnpm test:rust`, `test:unit`, `test:integration`, `test:tooling` or
+  `test:e2e` to run one suite.
 - Use standard packages: **vitest** for unit and integration tests, and
-  **Playwright** for UI flows and demo videos.
+  **Playwright** for UI flows and demo videos. The Rust backend's unit tests
+  use `cargo test` and are named after their test case too
+  (`fn tc_3_a_member_can_leave_a_session_chat()`). Anything that exercises
+  the running backend is a vitest integration test in `tests/integration/`.
 - Anything that talks to atproto (PLC, PDS, relay, Jetstream, Constellation,
   Slingshot, OAuth, spaces) runs against **vivarium**
-  (`~/Code/atproto/vivarium`, [tangled.org/chris.pardy.family/vivarium](https://tangled.org/chris.pardy.family/vivarium)),
-  never the live network. Start it with `--no-upstream` so tests are sealed.
-  - In vitest, use `@vivarium/client/vitest`: add its global setup and use
-    the `viv` fixture (scoped and safe in parallel). Use `vivFresh` only when
-    a test needs a pristine world.
-  - `VIVARIUM_URL` attaches to a running box and `VIVARIUM_BIN` picks the
-    binary. In CI, run the `atcr.io/chris.pardy.family/vivarium` image as a
-    service and set `VIVARIUM_URL`.
+  ([tangled.org/chris.pardy.family/vivarium](https://tangled.org/chris.pardy.family/vivarium)),
+  never the live network.
+  - It comes from npm: `@vivarium-dev/cli` (prebuilt binaries, no Bun or
+    Docker) and `@vivarium-dev/client`, both pinned devDependencies. Never
+    install with `--omit=optional`, which drops the binary.
+  - `scripts/with-vivarium.ts` starts one sealed (`--no-upstream`) box for a
+    whole run and exports `VIVARIUM_URL`. `check:test`, `test:integration`,
+    `test:tooling` and `test:e2e` use it, and
+    it attaches to an existing box when `VIVARIUM_URL` is already set.
+    `VIVARIUM_BIN` overrides the binary, e.g. for a local vivarium checkout.
+    CI never runs vivarium as a service container or through Docker.
+  - In vitest, use `@vivarium-dev/client/vitest` and the `viv` fixture
+    (scoped and safe in parallel). Use `vivFresh` only when a test needs a
+    pristine world.
+  - Integration tests get the backend through `inject('serverUrl')`, or
+    start their own with `spawnServer(env)` from `tests/support/server.ts`.
 - Name every automated test after the test case it covers, e.g.
   `test('TC-3: a member can leave a session chat', …)`.
+- Format test files (`pnpm lint:fix`) before freezing them: frozen files
+  can never be reformatted afterwards.
