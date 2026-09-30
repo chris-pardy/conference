@@ -1,0 +1,11 @@
+{
+  "description": "an interactive block with no id",
+  "card": {
+    "$type": "app.gather.block.card",
+    "blocks": [
+      { "$type": "app.gather.block.defs#button", "label": "Ik kom!", "action": "going", "variant": "primary" }
+    ],
+    "createdAt": "2027-04-30T07:00:00.000Z"
+  },
+  "error": { "path": "/blocks/0/id", "reason": "required" }
+}

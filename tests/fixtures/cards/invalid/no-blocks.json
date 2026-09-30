@@ -1,0 +1,9 @@
+{
+  "description": "a card with no blocks",
+  "card": {
+    "$type": "app.gather.block.card",
+    "blocks": [],
+    "createdAt": "2027-04-30T07:00:00.000Z"
+  },
+  "error": { "path": "/blocks", "reason": "min-length" }
+}
