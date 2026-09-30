@@ -2,7 +2,7 @@
 status: ready
 impact: cross-cutting
 depends-on: [ci-pipeline]
-branch:
+branch: feature/ui-blocks
 tests-commit:
 ---
 
