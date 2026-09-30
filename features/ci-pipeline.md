@@ -1,5 +1,5 @@
 ---
-status: blocked
+status: complete
 impact: cross-cutting
 depends-on: []
 branch: feature/ci-pipeline
@@ -7,11 +7,6 @@ tests-commit: 1e253c62660da8051a2e231e43cd1d4b41aa8372
 ---
 
 # CI pipeline
-
-> **Blocked: waiting for a ship decision.** All five review rounds are done,
-> and round 5 found only minor issues, all now fixed. The pipeline's
-> five-round cap still needs a human to decide whether to ship. See Round 5
-> in the review log.
 
 ## Summary
 
@@ -968,5 +963,5 @@ deliberately adversarial branch. The bypasses went: running the PR's own
 scripts, then `.npmrc`, pre/post scripts, `node_modules/.bin`, and
 `.pnpmfile.cjs`. Round 4 closed that class by also running main's script
 directly in a clean environment, and round 5 found no bypass. Everything
-round 5 found is fixed. The user decides whether to ship, or to run a
+round 5 found is fixed. **The user chose to ship** rather than run a
 sixth round.
