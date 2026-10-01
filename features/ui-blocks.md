@@ -1,5 +1,5 @@
 ---
-status: blocked
+status: implementing
 impact: cross-cutting
 depends-on: [ci-pipeline]
 branch: feature/ui-blocks
@@ -1511,3 +1511,6 @@ to unstable fixes.
 2. Run more review rounds.
 3. Narrow what's reviewed, e.g. accept the state lifecycle and validation
    parity as they stand and review only what changed in a round.
+
+**Decision (user, 2026-10-01):** more review rounds, until a round comes
+back clean. Unblocked.
