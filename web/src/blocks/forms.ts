@@ -41,19 +41,22 @@ export class FormStore {
   }
 }
 
-/** Registers an input with its form, reading the latest callbacks at submit time. */
-export function useField(field: Field): void {
+/**
+ * Registers an input with its form, reading the latest callbacks at submit
+ * time. An input that isn't shown (`enabled: false`) stays out of the form.
+ */
+export function useField(field: Field, enabled = true): void {
   const form = useContext(FormContext)
   const latest = useRef(field)
   latest.current = field
   const id = field.id
   useEffect(() => {
-    if (!form) return
+    if (!form || !enabled) return
     return form.register({
       id,
       value: () => latest.current.value(),
       validate: () => latest.current.validate(),
       clear: () => latest.current.clear(),
     })
-  }, [form, id])
+  }, [form, id, enabled])
 }

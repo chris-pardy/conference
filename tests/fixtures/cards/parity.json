@@ -2293,5 +2293,200 @@
     "expect": {
       "ok": true
     }
+  },
+  {
+    "name": "aspectRatio is an empty array",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#image",
+          "alt": "x",
+          "aspectRatio": []
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/aspectRatio/width",
+      "reason": "required"
+    }
+  },
+  {
+    "name": "aspectRatio is an array",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#image",
+          "alt": "x",
+          "aspectRatio": [16, 9]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/aspectRatio/width",
+      "reason": "required"
+    }
+  },
+  {
+    "name": "opens is an empty array",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#button",
+          "id": "b",
+          "label": "x",
+          "opens": []
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/opens/blocks",
+      "reason": "required"
+    }
+  },
+  {
+    "name": "header bind is an empty array",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "bind": []
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/bind/at",
+      "reason": "type"
+    }
+  },
+  {
+    "name": "time bind is an array of bindings",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#time",
+          "bind": [
+            {
+              "source": "s"
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/bind/at",
+      "reason": "type"
+    }
+  },
+  {
+    "name": "source is an array",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [[]]
+    },
+    "expect": {
+      "path": "/sources/0/name",
+      "reason": "required"
+    }
+  },
+  {
+    "name": "facet index is an array",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#richText",
+          "text": "hi",
+          "facets": [
+            {
+              "index": [0, 1],
+              "features": []
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/facets/0/index/byteStart",
+      "reason": "required"
+    }
+  },
+  {
+    "name": "record ref is an array",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#recordSource",
+            "record": []
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/sources/0/ref/record/space",
+      "reason": "required"
+    }
+  },
+  {
+    "name": "column is an array",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#columns",
+          "columns": [[]]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/columns/0/blocks",
+      "reason": "required"
+    }
+  },
+  {
+    "name": "list items binding is an array",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#list",
+          "items": ["q"],
+          "template": []
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/items/source",
+      "reason": "required"
+    }
   }
 ]

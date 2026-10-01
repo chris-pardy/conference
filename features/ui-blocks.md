@@ -1351,3 +1351,35 @@ fixed.
 Also from a visual check of the gallery on a phone: the latest intent now
 shows briefly at the bottom of the screen, since the log is far below the
 cards.
+
+### Round 2
+
+Reviewed `99fa7b4`. All gates passed. Not clean: 0 blocking, 3 major, 2
+minor, 1 nit. Everything was fixed, and each fix has a regression test in
+`regressions.test.tsx` or in the parity fixtures.
+
+1. **[major] A button's bound `value` was dropped**, so every button in a
+   list sent the same intent. **Fixed:** the button binds `value` and
+   sends it.
+2. **[major] QR codes truncated non-ASCII characters** (qrcode-generator
+   keeps only the low byte by default). **Fixed:** values are encoded as
+   UTF-8. A value too long to encode shows as unavailable instead of
+   throwing.
+3. **[major] A countdown whose end is more than about 24.8 days away
+   overflowed `setTimeout`** and re-rendered every millisecond. **Fixed:**
+   the delay is capped at a day.
+4. **[minor] An array in an object's position failed at a different path
+   in Rust.** **Fixed:** Rust reads an array's properties as JavaScript
+   does (indices, `length` and inherited methods such as `at`). Ten array
+   cases were added to the parity fixtures (now 120), and all match.
+5. **[minor] A block that threw stayed unavailable after its source
+   recovered.** **Fixed:** while a block is down, its error boundary keeps
+   watching the block's own sources, and retries when one changes or when
+   the block itself changes.
+6. **[nit] Hidden inputs on a compact card still joined its form.**
+   **Fixed:** they don't register.
+
+**Decided by the user during this round:** the NSID namespace becomes
+`app.eventside` (domain `eventside.app`). The frozen tests use
+`app.gather.*`, so the rename lands as its own PR right after this one
+merges, not on this branch.

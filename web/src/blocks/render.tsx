@@ -1,5 +1,6 @@
 import { Component, type ReactNode } from 'react'
-import type { BlockData } from './bindings'
+import type { Binding, BlockData } from './bindings'
+import { CardContext, type CardScope } from './context'
 import { Placeholder } from './frame'
 import { registry } from './registry'
 
@@ -33,12 +34,64 @@ export function Blocks({ blocks }: { blocks: unknown }) {
   return blocks.map((block, i) => <RenderBlock key={i} block={block} />)
 }
 
-/** A block that throws while rendering shows as unavailable; the rest of the card carries on. */
+/**
+ * A block that throws while rendering shows as unavailable; the rest of the
+ * card carries on. It tries again when the block changes, or when any of the
+ * card's sources does (its data may have been the problem).
+ */
 class BlockBoundary extends Component<{ type: string; block: BlockData; children: ReactNode }, { failed: boolean }> {
+  static contextType = CardContext
+  declare context: CardScope | null
   state = { failed: false }
+  private stopWatching?: () => void
 
   static getDerivedStateFromError() {
     return { failed: true }
+  }
+
+  componentDidMount() {
+    this.watch()
+  }
+
+  componentDidUpdate(prev: { block: BlockData }) {
+    if (this.state.failed && prev.block !== this.props.block) {
+      this.setState({ failed: false })
+      return
+    }
+    this.watch()
+  }
+
+  componentWillUnmount() {
+    this.stopWatching?.()
+  }
+
+  /**
+   * While failed, keeps the block's own sources watched (the block itself
+   * is gone) and retries when one of them changes. Once it renders again,
+   * lets go a tick later, after the block has picked the sources up.
+   */
+  private watch() {
+    const store = this.context?.store
+    if (!store) return
+    if (!this.state.failed) {
+      const stop = this.stopWatching
+      this.stopWatching = undefined
+      if (stop) setTimeout(stop)
+      return
+    }
+    if (this.stopWatching) return
+    const { block } = this.props
+    const bindings = [...Object.values(block.bind ?? {}), block.items as Binding | undefined]
+    const sources = bindings.flatMap((b) => {
+      const named = b && typeof b.source === 'string' ? store.named(b.source) : null
+      return named ? [named] : []
+    })
+    const keys = sources.map(([key]) => key)
+    let seen: string | undefined
+    this.stopWatching = store.subscribe(sources, () => {
+      if (seen !== undefined && store.version(keys) !== seen) this.setState({ failed: false })
+    })
+    seen = store.version(keys)
   }
 
   render() {

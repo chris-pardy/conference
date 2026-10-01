@@ -29,7 +29,7 @@ function useSend() {
 export function Button({ block }: Props) {
   const { surface, compactPrimary } = useCard()
   const send = useSend()
-  const bound = useBound(block, ['label'])
+  const bound = useBound(block, ['label', 'value'])
   const [open, setOpen] = useState(false)
   const opener = useRef<HTMLButtonElement>(null)
   const variant = variantOf(block)
@@ -53,7 +53,7 @@ export function Button({ block }: Props) {
         aria-expanded={sheet ? open : undefined}
         onClick={() => {
           if (sheet) setOpen(true)
-          else if (id && action) send(id, action, block.value)
+          else if (id && action) send(id, action, bound.value.state === 'ready' ? bound.value.value : undefined)
         }}
       >
         {label}
@@ -118,20 +118,23 @@ export function TextInput({ block }: Props) {
     if (min !== undefined && length(v) < min) return `Use at least ${min} characters.`
     return null
   }
-  useField({
-    id,
-    // Whitespace alone counts as empty, as in validation.
-    value: () => (value.trim() === '' ? undefined : value),
-    validate: () => {
-      const problem = check(value)
-      setError(problem)
-      return problem === null
+  useField(
+    {
+      id,
+      // Whitespace alone counts as empty, as in validation.
+      value: () => (value.trim() === '' ? undefined : value),
+      validate: () => {
+        const problem = check(value)
+        setError(problem)
+        return problem === null
+      },
+      clear: () => {
+        setValue('')
+        setError(null)
+      },
     },
-    clear: () => {
-      setValue('')
-      setError(null)
-    },
-  })
+    surface !== 'compact',
+  )
   if (surface === 'compact') return null
 
   const Field = block.multiline === true ? 'textarea' : 'input'
@@ -182,21 +185,28 @@ export function Select({ block }: Props) {
   const limit = multiple && typeof block.maxSelections === 'number' ? block.maxSelections : undefined
   const required = block.required === true
 
-  useField({
-    id,
-    // Selections are sent in the options' order.
-    value: () =>
-      multiple ? options.map((o) => o.value).filter((v) => chosen.includes(v)) : chosen.length ? chosen[0] : undefined,
-    validate: () => {
-      const problem = required && chosen.length === 0 ? 'Choose an option.' : null
-      setError(problem)
-      return problem === null
+  useField(
+    {
+      id,
+      // Selections are sent in the options' order.
+      value: () =>
+        multiple
+          ? options.map((o) => o.value).filter((v) => chosen.includes(v))
+          : chosen.length
+            ? chosen[0]
+            : undefined,
+      validate: () => {
+        const problem = required && chosen.length === 0 ? 'Choose an option.' : null
+        setError(problem)
+        return problem === null
+      },
+      clear: () => {
+        setChosen([])
+        setError(null)
+      },
     },
-    clear: () => {
-      setChosen([])
-      setError(null)
-    },
-  })
+    surface !== 'compact',
+  )
   if (surface === 'compact') return null
 
   const full = limit !== undefined && chosen.length >= limit

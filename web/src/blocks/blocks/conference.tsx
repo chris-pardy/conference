@@ -150,9 +150,13 @@ function nextChange(now: number, at: number | undefined, end: number | undefined
   const left = at - now
   if (left > 60_000) return left % 60_000 || 60_000
   if (left > 0) return left % 1000 || 1000
-  if (end !== undefined && now < end) return end - now
+  // setTimeout fires at once for delays past 2^31 - 1 ms (about 24.8 days),
+  // so a far-off end is checked again daily instead.
+  if (end !== undefined && now < end) return Math.min(end - now, DAY)
   return null
 }
+
+const DAY = 24 * 60 * 60_000
 
 /**
  * The current time, updated whenever `next` says the display will change.
@@ -262,12 +266,20 @@ export function Copyable({ block }: Props) {
   )
 }
 
-/** A QR code's modules, as an SVG path of unit squares. */
+// qrcode-generator's Byte mode keeps only the low byte of each character by
+// default; scanners expect UTF-8, so accents and emoji must be encoded as such.
+qrcode.stringToBytes = (s: string) => [...new TextEncoder().encode(s)]
+
+/** A QR code's modules, as an SVG path of unit squares, or null when the value is too long to encode. */
 function useQrPath(value: string) {
   return useMemo(() => {
     const qr = qrcode(0, 'M')
-    qr.addData(value, 'Byte')
-    qr.make()
+    try {
+      qr.addData(value, 'Byte')
+      qr.make()
+    } catch {
+      return null
+    }
     const size = qr.getModuleCount()
     let d = ''
     for (let row = 0; row < size; row++) {
@@ -284,7 +296,9 @@ export function Qr({ block }: Props) {
   const value = text(bound.value)
   const qr = useQrPath(value ?? '')
   if (surface === 'compact') return null
-  if (state !== 'ready' || !value) return <Placeholder type="qr" block={block} state={loadingOr(state)} />
+  if (state !== 'ready' || !value || !qr) {
+    return <Placeholder type="qr" block={block} state={state === 'loading' ? 'loading' : 'unavailable'} />
+  }
   const label = text(bound.label)
   // A quiet zone of four modules. The code stays black on white whatever the
   // theme, since scanners need that contrast.

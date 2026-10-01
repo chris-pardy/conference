@@ -137,15 +137,92 @@ fn one_of(path: &Path, def: &Value, value: &Value) -> Result {
     }
 }
 
-fn object(path: &Path, def: &Value, value: &Value) -> Result {
-    let Some(obj) = value.as_object() else {
-        return Err(path.fail("type", "must be an object"));
+// What `value[key]` finds on a JavaScript array or plain object without that
+// own key: inherited methods. A function fails every lexicon type check, as
+// JSON null does, so null stands in for one.
+const OBJECT_PROTO: &[&str] = &[
+    "constructor",
+    "hasOwnProperty",
+    "isPrototypeOf",
+    "propertyIsEnumerable",
+    "toLocaleString",
+    "toString",
+    "valueOf",
+    "__defineGetter__",
+    "__defineSetter__",
+    "__lookupGetter__",
+    "__lookupSetter__",
+    "__proto__",
+];
+const ARRAY_PROTO: &[&str] = &[
+    "at",
+    "concat",
+    "copyWithin",
+    "entries",
+    "every",
+    "fill",
+    "filter",
+    "find",
+    "findIndex",
+    "findLast",
+    "findLastIndex",
+    "flat",
+    "flatMap",
+    "forEach",
+    "includes",
+    "indexOf",
+    "join",
+    "keys",
+    "lastIndexOf",
+    "map",
+    "pop",
+    "push",
+    "reduce",
+    "reduceRight",
+    "reverse",
+    "shift",
+    "slice",
+    "some",
+    "sort",
+    "splice",
+    "toReversed",
+    "toSorted",
+    "toSpliced",
+    "unshift",
+    "values",
+    "with",
+];
+
+/// `value[key]` as JavaScript reads it from a parsed JSON object or array.
+fn property(value: &Value, key: &str) -> Option<Value> {
+    let inherited = |extra: &[&str]| {
+        (OBJECT_PROTO.contains(&key) || extra.contains(&key)).then_some(Value::Null)
     };
+    match value {
+        Value::Object(obj) => obj.get(key).cloned().or_else(|| inherited(&[])),
+        Value::Array(items) => {
+            let index = key.parse::<usize>().ok().filter(|i| i.to_string() == key);
+            match index {
+                Some(i) => items.get(i).cloned(),
+                None if key == "length" => Some(Value::from(items.len())),
+                None => inherited(ARRAY_PROTO),
+            }
+        }
+        _ => None,
+    }
+}
+
+fn object(path: &Path, def: &Value, value: &Value) -> Result {
+    // As in @atproto/lexicon, an array is an object too: its properties are
+    // read the way JavaScript would.
+    if !value.is_object() && !value.is_array() {
+        return Err(path.fail("type", "must be an object"));
+    }
     let required =
         |key: &str| def["required"].as_array().is_some_and(|r| r.iter().any(|k| k == key));
     let empty = Map::new();
     for (key, prop) in def["properties"].as_object().unwrap_or(&empty) {
-        match obj.get(key) {
+        match property(value, key).as_ref() {
             None if required(key) => {
                 return Err(path
                     .child(key.as_str())
