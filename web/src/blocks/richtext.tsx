@@ -10,7 +10,9 @@ interface Facet {
 /** An image source: a web URL, or an inline raster or SVG image (which an <img> can't run scripts from). */
 export function safeImageSrc(uri: unknown): string | undefined {
   if (typeof uri === 'string' && /^data:image\/(png|jpeg|gif|webp|svg\+xml)[;,]/.test(uri)) return uri
-  return safeHref(uri)
+  // Images load by themselves, so never over plain http (mixed content on the PWA).
+  const href = safeHref(uri)
+  return href?.startsWith('https:') ? href : undefined
 }
 
 /** Only web links become anchors; anything else (javascript:, data:) stays text. */

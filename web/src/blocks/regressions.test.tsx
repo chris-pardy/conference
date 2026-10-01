@@ -286,3 +286,84 @@ test('TC-15: a block that failed on bad data recovers when its source changes', 
   expect(within(stat).getByText('413')).toBeTruthy()
   errors.mockRestore()
 })
+
+test('TC-27: a time with no offset is wall-clock time in the card zone, whatever the device zone', () => {
+  // Tokyo is never the test machine's zone here, so the device can't line up by chance.
+  const { container } = renderCard(
+    card(
+      [
+        block('sessionRef', { title: 'Keynote', start: '2027-04-30T19:00:00', end: '2027-04-30T19:45:00' }),
+        block('time', { label: 'Doors', at: '2027-04-30T08:30:00' }),
+      ],
+      { timeZone: 'Asia/Tokyo' },
+    ),
+  )
+  expect(blocksOfType(container, 'sessionRef')[0].textContent).toMatch(/19:00–19:45/)
+  expect(blocksOfType(container, 'time')[0].textContent).toMatch(/08:30/)
+})
+
+test('TC-27: a wall-clock time just after a daylight-saving change still lands right', () => {
+  // Europe/Amsterdam moves to summer time at 02:00 on 28 March 2027.
+  const { container } = renderCard(
+    card([block('time', { label: 'Early train', at: '2027-03-28T03:15:00' })], { timeZone: 'Europe/Amsterdam' }),
+  )
+  expect(blocksOfType(container, 'time')[0].textContent).toMatch(/03:15/)
+})
+
+test('TC-13: a source reloading keeps what was typed in its blocks', async () => {
+  const user = userEvent.setup()
+  const resolver = new FixtureResolver({ wifi: { label: 'Report a problem' } })
+  renderCard(
+    card(
+      [
+        block('button', {
+          id: 'report',
+          bind: { label: binding('wifi', '/label') },
+          opens: { title: 'Report', blocks: [block('textInput', { id: 'problem', label: 'Problem' })] },
+        }),
+      ],
+      { sources: [recordSource('wifi')] },
+    ),
+    { resolver },
+  )
+  await user.click(screen.getByRole('button', { name: 'Report a problem' }))
+  await user.type(screen.getByRole('textbox', { name: 'Problem' }), 'Is there a bike rack?')
+
+  act(() => resolver.set('wifi', FixtureResolver.loading()))
+  act(() => resolver.set('wifi', { label: 'Report a problem' }))
+
+  expect((screen.getByRole('textbox', { name: 'Problem' }) as HTMLInputElement).value).toBe('Is there a bike rack?')
+})
+
+test('TC-29: copy falls back when there is no Clipboard API, and says when it cannot copy', async () => {
+  const clipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
+  Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true })
+  const execCommand = vi.fn(() => true)
+  Object.defineProperty(document, 'execCommand', { value: execCommand, configurable: true })
+  try {
+    renderCard(card([block('copyable', { label: 'Wifi password', value: 'stroopwafel-2027' })]))
+    fireEvent.click(screen.getByRole('button', { name: /copy/i }))
+    expect(await screen.findByText('Copied')).toBeTruthy()
+    expect(execCommand).toHaveBeenCalledWith('copy')
+    expect(window.getSelection()?.toString()).toBe('stroopwafel-2027')
+
+    execCommand.mockReturnValue(false)
+    fireEvent.click(screen.getByRole('button', { name: /copy/i }))
+    expect(await screen.findByText(/couldn't copy/i)).toBeTruthy()
+  } finally {
+    if (clipboard) Object.defineProperty(navigator, 'clipboard', clipboard)
+    else Reflect.deleteProperty(navigator, 'clipboard')
+    Reflect.deleteProperty(document, 'execCommand')
+  }
+})
+
+test('TC-7: an image over plain http is not loaded', () => {
+  const { container } = renderCard(card([block('image', { url: 'http://tracker.example/px.gif', alt: 'Venue' })]))
+  expect(container.querySelector('img')).toBeNull()
+  expect(screen.getByText('Venue')).toBeTruthy()
+})
+
+test('TC-10: a progress bar past its maximum announces a value within range', () => {
+  renderCard(card([block('progress', { label: 'Hangers', value: 150, max: 100 })]))
+  expect(screen.getByRole('progressbar', { name: 'Hangers' }).getAttribute('aria-valuenow')).toBe('100')
+})

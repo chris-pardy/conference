@@ -1383,3 +1383,37 @@ minor, 1 nit. Everything was fixed, and each fix has a regression test in
 `app.eventside` (domain `eventside.app`). The frozen tests use
 `app.gather.*`, so the rename lands as its own PR right after this one
 merges, not on this branch.
+
+### Round 3
+
+Reviewed `484b396`. All gates passed. Not clean: 0 blocking, 1 major, 4
+minor, 2 nits. Each fix below has a regression test.
+
+1. **[major] A datetime with no offset passes validation, but rendered in
+   the device's zone.** **Fixed:** a time with no offset is wall-clock time
+   in the card's `timeZone` (the viewer's when the card has none), handling
+   daylight-saving changes correctly (`web/src/blocks/time.ts`).
+2. **[minor] A source going back to `loading` unmounted bound blocks**,
+   wiping text typed into a sheet or list item. **Fixed:** once a source
+   has answered, reloading keeps its last value (stale while revalidating).
+   Only the first load shows a skeleton.
+3. **[minor] Inputs sharing an id in one form overwrote each other.**
+   **Fixed:** both validators add the same rule after the lexicon check:
+   ids are unique within each form (the card, each sheet, each list
+   template), and so are a select's option values. Ten cases were added to
+   the parity fixtures (now 130), and all match.
+4. **[minor] Copy did nothing, silently, without the Clipboard API.**
+   **Fixed:** it falls back to selecting the text and using the older copy
+   command. If that fails too, it says "Couldn't copy: select the text to
+   copy it".
+5. **[minor] Card image URLs are fetched from each viewer's device**, which
+   would let a third-party author track views. **Partly fixed:** images and
+   avatars no longer load over plain http. **Deferred:** routing media
+   through blob refs or an appview proxy is a design decision for the
+   features where third parties author cards (`feed-templates`,
+   `feed-apps`) and for `block-actions`' live sources. Today only the
+   organizer authors cards. To be raised when those features are specced.
+6. **[nit] The QR fix patched qrcode-generator globally.** **Fixed:** the
+   value goes in as UTF-8 bytes, with no global change.
+7. **[nit] `aria-valuenow` could fall outside its range.** **Fixed:** it's
+   clamped to `0..max`, as the bar already was.

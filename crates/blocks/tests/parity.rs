@@ -1,6 +1,7 @@
-//! The backend validator against results recorded from `@atproto/lexicon`
-//! (web/src/blocks/validate-parity.test.ts checks the same file), so the
-//! appview and the PWA accept exactly the same cards.
+//! The backend validator against results recorded from the frontend's
+//! `validateCard` (`@atproto/lexicon` plus our card rules), which
+//! web/src/blocks/validate-parity.test.ts checks against the same file, so
+//! the appview and the PWA accept exactly the same cards.
 
 use std::fs;
 use std::path::Path;

@@ -2488,5 +2488,292 @@
       "path": "/blocks/0/items/source",
       "reason": "required"
     }
+  },
+  {
+    "name": "duplicate input ids",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#textInput",
+          "id": "q",
+          "label": "q"
+        },
+        {
+          "$type": "app.gather.block.defs#textInput",
+          "id": "q",
+          "label": "q"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/1/id",
+      "reason": "duplicate"
+    }
+  },
+  {
+    "name": "duplicate id nested in a section",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#textInput",
+          "id": "q",
+          "label": "q"
+        },
+        {
+          "$type": "app.gather.block.defs#section",
+          "blocks": [
+            {
+              "$type": "app.gather.block.defs#textInput",
+              "id": "q",
+              "label": "q"
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/1/blocks/0/id",
+      "reason": "duplicate"
+    }
+  },
+  {
+    "name": "duplicate id across columns",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#columns",
+          "columns": [
+            {
+              "blocks": [
+                {
+                  "$type": "app.gather.block.defs#textInput",
+                  "id": "a",
+                  "label": "a"
+                }
+              ]
+            },
+            {
+              "blocks": [
+                {
+                  "$type": "app.gather.block.defs#textInput",
+                  "id": "a",
+                  "label": "a"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/columns/1/blocks/0/id",
+      "reason": "duplicate"
+    }
+  },
+  {
+    "name": "same id in the card and its sheet",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#textInput",
+          "id": "q",
+          "label": "q"
+        },
+        {
+          "$type": "app.gather.block.defs#button",
+          "id": "b",
+          "label": "x",
+          "opens": {
+            "blocks": [
+              {
+                "$type": "app.gather.block.defs#textInput",
+                "id": "q",
+                "label": "q"
+              }
+            ]
+          }
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "duplicate id inside a sheet",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#button",
+          "id": "b",
+          "label": "x",
+          "opens": {
+            "blocks": [
+              {
+                "$type": "app.gather.block.defs#textInput",
+                "id": "q",
+                "label": "q"
+              },
+              {
+                "$type": "app.gather.block.defs#textInput",
+                "id": "q",
+                "label": "q"
+              }
+            ]
+          }
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/opens/blocks/1/id",
+      "reason": "duplicate"
+    }
+  },
+  {
+    "name": "same id in the card and a list template",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#textInput",
+          "id": "q",
+          "label": "q"
+        },
+        {
+          "$type": "app.gather.block.defs#list",
+          "items": {
+            "source": "s"
+          },
+          "template": [
+            {
+              "$type": "app.gather.block.defs#textInput",
+              "id": "q",
+              "label": "q"
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "duplicate id inside a list template",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#list",
+          "items": {
+            "source": "s"
+          },
+          "template": [
+            {
+              "$type": "app.gather.block.defs#textInput",
+              "id": "q",
+              "label": "q"
+            },
+            {
+              "$type": "app.gather.block.defs#textInput",
+              "id": "q",
+              "label": "q"
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/template/1/id",
+      "reason": "duplicate"
+    }
+  },
+  {
+    "name": "duplicate id on an unknown block type",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#textInput",
+          "id": "q",
+          "label": "q"
+        },
+        {
+          "$type": "app.gather.future#hologram",
+          "id": "q"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "duplicate select option values",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#select",
+          "id": "s",
+          "label": "x",
+          "options": [
+            {
+              "label": "A",
+              "value": "a"
+            },
+            {
+              "label": "B",
+              "value": "b"
+            },
+            {
+              "label": "A again",
+              "value": "a"
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/options/2/value",
+      "reason": "duplicate"
+    }
+  },
+  {
+    "name": "button and input sharing an id",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#button",
+          "id": "q",
+          "label": "x"
+        },
+        {
+          "$type": "app.gather.block.defs#textInput",
+          "id": "q",
+          "label": "q"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/1/id",
+      "reason": "duplicate"
+    }
   }
 ]

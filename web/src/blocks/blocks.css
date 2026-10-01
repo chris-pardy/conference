@@ -471,6 +471,14 @@ textarea.g-input {
   color: var(--g-color-success);
 }
 
+.g-copyable__status--failed {
+  color: var(--g-color-danger);
+}
+
+.g-copyable__value {
+  user-select: all;
+}
+
 .g-qr {
   display: flex;
   flex-direction: column;

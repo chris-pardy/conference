@@ -70,6 +70,10 @@ export class SourceStore {
 
   private start(key: string, ref: SourceRef, entry: Entry) {
     const update = (state: SourceState) => {
+      // Once a source has answered, reloading keeps its last value on screen
+      // (stale while revalidating), so blocks don't unmount and lose what
+      // someone typed into them. Only the first load shows a skeleton.
+      if (state.state === 'loading' && entry.state.state === 'ready') return
       entry.state = state
       entry.version++
       for (const listener of [...entry.listeners]) listener()

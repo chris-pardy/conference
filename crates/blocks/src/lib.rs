@@ -46,7 +46,8 @@ pub fn validate_card(record: &Value) -> Result<(), CardError> {
             message: format!("/$type must be {CARD_NSID}"),
         });
     }
-    lexicon::validate_record(&format!("{CARD_NSID}#main"), record)
+    lexicon::validate_record(&format!("{CARD_NSID}#main"), record)?;
+    lexicon::check_card(record)
 }
 
 /// A card record. Blocks and sources stay as JSON: the renderer, not the

@@ -413,3 +413,63 @@ fn is_cid(s: &str) -> bool {
         _ => false,
     }
 }
+
+const DEFS_PREFIX: &str = "app.gather.block.defs#";
+
+/// Rules the lexicon can't express, checked after it passes (the same rules,
+/// in the same order, as `checkCard` in web/src/blocks/validate.ts):
+/// - block ids are unique within each form: the card, each sheet and each
+///   list template, since a submit sends `{id: value}` for its form
+/// - a select's option values are unique
+///
+/// Blocks are visited depth first, in document order.
+pub(crate) fn check_card(card: &Value) -> Result {
+    visit(&card["blocks"], "/blocks", &mut Vec::new())
+}
+
+fn visit(blocks: &Value, path: &str, ids: &mut Vec<String>) -> Result {
+    let duplicate =
+        |at: String, message: String| CardError { path: at, reason: "duplicate".into(), message };
+    for (i, block) in blocks.as_array().into_iter().flatten().enumerate() {
+        let at = format!("{path}/{i}");
+        let Some(kind) = block["$type"].as_str().and_then(|t| t.strip_prefix(DEFS_PREFIX)) else {
+            continue;
+        };
+        if let Some(id) = block["id"].as_str() {
+            if ids.iter().any(|seen| seen == id) {
+                return Err(duplicate(
+                    format!("{at}/id"),
+                    format!("{at}/id \"{id}\" is already used in this form"),
+                ));
+            }
+            ids.push(id.to_owned());
+        }
+        if kind == "select" {
+            let mut values: Vec<&str> = Vec::new();
+            for (j, option) in block["options"].as_array().into_iter().flatten().enumerate() {
+                let value = option["value"].as_str().unwrap_or_default();
+                if values.contains(&value) {
+                    return Err(duplicate(
+                        format!("{at}/options/{j}/value"),
+                        format!("{at}/options/{j}/value \"{value}\" is already an option"),
+                    ));
+                }
+                values.push(value);
+            }
+        }
+        match kind {
+            "section" | "stack" => visit(&block["blocks"], &format!("{at}/blocks"), ids)?,
+            "columns" => {
+                for (j, column) in block["columns"].as_array().into_iter().flatten().enumerate() {
+                    visit(&column["blocks"], &format!("{at}/columns/{j}/blocks"), ids)?;
+                }
+            }
+            "list" => visit(&block["template"], &format!("{at}/template"), &mut Vec::new())?,
+            "button" if !block["opens"].is_null() => {
+                visit(&block["opens"]["blocks"], &format!("{at}/opens/blocks"), &mut Vec::new())?
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}

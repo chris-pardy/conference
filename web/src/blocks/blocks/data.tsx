@@ -78,7 +78,7 @@ export function Progress({ block }: Props) {
         aria-labelledby={label ? labelId : undefined}
         aria-valuemin={0}
         aria-valuemax={max}
-        aria-valuenow={value}
+        aria-valuenow={Math.min(Math.max(value, 0), max)}
         aria-valuetext={`${percent}%`}
         className="g-progress__track"
       >

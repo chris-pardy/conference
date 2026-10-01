@@ -3,7 +3,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { type BlockData, settle, text, useBound, useSourceStates } from '../bindings'
 import { useCard } from '../context'
 import { blockAttrs, Placeholder } from '../frame'
-import { safeHref } from '../richtext'
+import { safeHref, safeImageSrc } from '../richtext'
+import { parseDatetime } from '../time'
 
 type Props = { block: BlockData }
 
@@ -31,7 +32,7 @@ export function Person({ block }: Props) {
   const handle = typeof p.handle === 'string' && p.handle ? p.handle : undefined
   const name = typeof p.displayName === 'string' && p.displayName.trim() ? p.displayName : undefined
   if (!name && !handle) return <Placeholder type="person" block={block} state="unavailable" />
-  const avatar = safeHref(p.avatar)
+  const avatar = safeImageSrc(p.avatar)
   return (
     <div {...blockAttrs('person', block)} className="g-block g-person">
       {avatar ? (
@@ -76,11 +77,9 @@ function day(date: Date, timeZone?: string): string {
   }
 }
 
-function dateOf(state: Parameters<typeof text>[0]): Date | undefined {
+function dateOf(state: Parameters<typeof text>[0], timeZone: string | undefined): Date | undefined {
   const s = text(state)
-  if (!s) return undefined
-  const date = new Date(s)
-  return Number.isNaN(date.getTime()) ? undefined : date
+  return s ? parseDatetime(s, timeZone) : undefined
 }
 
 export function SessionRef({ block }: Props) {
@@ -89,8 +88,8 @@ export function SessionRef({ block }: Props) {
   const state = settle(bound)
   const title = text(bound.title)
   if (state !== 'ready' || !title) return <Placeholder type="sessionRef" block={block} state={loadingOr(state)} />
-  const start = dateOf(bound.start)
-  const end = dateOf(bound.end)
+  const start = dateOf(bound.start, timeZone)
+  const end = dateOf(bound.end, timeZone)
   const room = text(bound.room)
   const href = safeHref(block.uri)
   return (
@@ -191,13 +190,13 @@ export function Time({ block }: Props) {
   const { timeZone } = useCard()
   const bound = useBound(block, ['at', 'end', 'label'])
   const countdown = block.mode === 'countdown'
-  const atMs = dateOf(bound.at)?.getTime()
-  const endMs = dateOf(bound.end)?.getTime()
+  const atMs = dateOf(bound.at, timeZone)?.getTime()
+  const endMs = dateOf(bound.end, timeZone)?.getTime()
   const now = useNow((t) => (countdown ? nextChange(t, atMs, endMs) : null), `${countdown}:${atMs}:${endMs}`)
   const state = settle(bound)
-  const at = dateOf(bound.at)
+  const at = dateOf(bound.at, timeZone)
   if (state !== 'ready' || !at) return <Placeholder type="time" block={block} state={loadingOr(state)} />
-  const end = dateOf(bound.end)
+  const end = dateOf(bound.end, timeZone)
   const label = text(bound.label)
 
   let status: string | undefined
@@ -226,14 +225,41 @@ export function Time({ block }: Props) {
   )
 }
 
+/**
+ * Copies with the Clipboard API, or, where there is none (plain http, some
+ * webviews), by selecting the shown text and using the older copy command.
+ */
+async function copy(value: string, shown: HTMLElement | null): Promise<boolean> {
+  try {
+    if (navigator.clipboard) {
+      await navigator.clipboard.writeText(value)
+      return true
+    }
+  } catch {
+    // denied: try the fallback
+  }
+  if (!shown) return false
+  const selection = window.getSelection()
+  const range = document.createRange()
+  range.selectNodeContents(shown)
+  selection?.removeAllRanges()
+  selection?.addRange(range)
+  try {
+    return document.execCommand?.('copy') === true
+  } catch {
+    return false
+  }
+}
+
 export function Copyable({ block }: Props) {
   const bound = useBound(block, ['label', 'value'])
-  const [copied, setCopied] = useState(false)
+  const [status, setStatus] = useState<'copied' | 'failed' | null>(null)
+  const shown = useRef<HTMLElement>(null)
   useEffect(() => {
-    if (!copied) return
-    const timer = setTimeout(() => setCopied(false), 2000)
+    if (status !== 'copied') return
+    const timer = setTimeout(() => setStatus(null), 2000)
     return () => clearTimeout(timer)
-  }, [copied])
+  }, [status])
   const state = settle(bound)
   const value = text(bound.value)
   if (state !== 'ready' || value === undefined) {
@@ -244,38 +270,42 @@ export function Copyable({ block }: Props) {
     <div {...blockAttrs('copyable', block)} className="g-block g-copyable">
       {label && <span className="g-label">{label}</span>}
       <span className="g-copyable__row">
-        <code className="g-copyable__value">{value}</code>
+        <code ref={shown} className="g-copyable__value">
+          {value}
+        </code>
         <button
           type="button"
           className="g-button g-button--default"
           aria-label={label ? `Copy ${label}` : 'Copy'}
           onClick={() => {
-            navigator.clipboard?.writeText(value).then(
-              () => setCopied(true),
-              () => {},
-            )
+            copy(value, shown.current).then((ok) => setStatus(ok ? 'copied' : 'failed'))
           }}
         >
           Copy
         </button>
       </span>
-      <span className="g-copyable__status" role="status">
-        {copied ? 'Copied' : ''}
+      <span className={`g-copyable__status g-copyable__status--${status ?? 'idle'}`} role="status">
+        {status === 'copied' ? 'Copied' : status === 'failed' ? "Couldn't copy: select the text to copy it" : ''}
       </span>
     </div>
   )
 }
 
-// qrcode-generator's Byte mode keeps only the low byte of each character by
-// default; scanners expect UTF-8, so accents and emoji must be encoded as such.
-qrcode.stringToBytes = (s: string) => [...new TextEncoder().encode(s)]
+/**
+ * qrcode-generator's Byte mode keeps only the low byte of each character,
+ * and scanners expect UTF-8. So the value goes in as its UTF-8 bytes, one
+ * character per byte, without changing the library's global encoder.
+ */
+function utf8Bytes(value: string): string {
+  return Array.from(new TextEncoder().encode(value), (b) => String.fromCharCode(b)).join('')
+}
 
 /** A QR code's modules, as an SVG path of unit squares, or null when the value is too long to encode. */
 function useQrPath(value: string) {
   return useMemo(() => {
     const qr = qrcode(0, 'M')
     try {
-      qr.addData(value, 'Byte')
+      qr.addData(utf8Bytes(value), 'Byte')
       qr.make()
     } catch {
       return null

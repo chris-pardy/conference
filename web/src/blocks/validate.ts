@@ -49,6 +49,70 @@ function toCardError(message: string): CardError {
   return { path: pointer(segments), reason, message: human }
 }
 
+const DEFS_PREFIX = 'app.gather.block.defs#'
+
+type Node = Record<string, unknown>
+const asArray = (v: unknown): unknown[] => (Array.isArray(v) ? v : [])
+
+/**
+ * Rules the lexicon can't express, checked after it passes (the same rules,
+ * in the same order, as crates/blocks/src/lexicon.rs `check_card`):
+ * - block ids are unique within each form: the card, each sheet and each
+ *   list template, since a submit sends `{id: value}` for its form
+ * - a select's option values are unique
+ * Blocks are visited depth first, in document order.
+ */
+function checkCard(card: Node): CardError | null {
+  const visit = (blocks: unknown[], path: string, ids: Set<string>): CardError | null => {
+    for (const [i, raw] of blocks.entries()) {
+      const block = raw as Node
+      const at = `${path}/${i}`
+      if (typeof block?.$type !== 'string' || !block.$type.startsWith(DEFS_PREFIX)) continue
+      const type = block.$type.slice(DEFS_PREFIX.length)
+      if (typeof block.id === 'string') {
+        if (ids.has(block.id)) {
+          return {
+            path: `${at}/id`,
+            reason: 'duplicate',
+            message: `${at}/id "${block.id}" is already used in this form`,
+          }
+        }
+        ids.add(block.id)
+      }
+      if (type === 'select') {
+        const values = new Set<string>()
+        for (const [j, option] of asArray(block.options).entries()) {
+          const value = (option as Node).value as string
+          if (values.has(value)) {
+            return {
+              path: `${at}/options/${j}/value`,
+              reason: 'duplicate',
+              message: `${at}/options/${j}/value "${value}" is already an option`,
+            }
+          }
+          values.add(value)
+        }
+      }
+      const nested =
+        type === 'section' || type === 'stack'
+          ? visit(asArray(block.blocks), `${at}/blocks`, ids)
+          : type === 'columns'
+            ? asArray(block.columns).reduce<CardError | null>(
+                (err, column, j) => err ?? visit(asArray((column as Node).blocks), `${at}/columns/${j}/blocks`, ids),
+                null,
+              )
+            : type === 'list'
+              ? visit(asArray(block.template), `${at}/template`, new Set())
+              : type === 'button' && block.opens
+                ? visit(asArray((block.opens as Node).blocks), `${at}/opens/blocks`, new Set())
+                : null
+      if (nested) return nested
+    }
+    return null
+  }
+  return visit(asArray(card.blocks), '/blocks', new Set())
+}
+
 /** Validates an `app.gather.block.card` record against the lexicons. */
 export function validateCard(record: unknown): CardValidation {
   if (typeof record !== 'object' || record === null || Array.isArray(record)) {
@@ -62,5 +126,7 @@ export function validateCard(record: unknown): CardValidation {
     }
   }
   const result = lexicons.validate(CARD_NSID, record)
-  return result.success ? { ok: true } : { ok: false, error: toCardError(result.error.message) }
+  if (!result.success) return { ok: false, error: toCardError(result.error.message) }
+  const error = checkCard(record as Node)
+  return error ? { ok: false, error } : { ok: true }
 }
