@@ -16,6 +16,12 @@ export type SourceRef = { $type: string; [field: string]: unknown }
  * the card.
  */
 export interface SourceResolver {
+  /**
+   * Watches one source of a card. `name` is the card's name for it, or ""
+   * for a lookup the renderer makes itself, such as a person block's
+   * profile, which `ref` alone identifies. Cache or dedupe by `ref`, not
+   * by name.
+   */
   watch(card: CardRef, name: string, ref: SourceRef): Observable<SourceState>
 }
 

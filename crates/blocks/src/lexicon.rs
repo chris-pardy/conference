@@ -463,6 +463,40 @@ pub(crate) fn check_depth(card: &Value) -> Result {
     Ok(())
 }
 
+/// The first `cid` string, anywhere in the record, that isn't ASCII. CIDs are
+/// ASCII, but the base58 decoder inside @atproto/lexicon accepts characters
+/// above U+00FF, which `is_cid` rightly doesn't; checking this first, the
+/// same way on both sides, keeps the validators agreeing. It walks with its
+/// own stack (no recursion) in `Object.entries` order, as `checkCids` does in
+/// web/src/blocks/validate.ts.
+pub(crate) fn check_cids(record: &Value) -> Result {
+    let mut stack: Vec<(&Value, String, bool)> = vec![(record, String::new(), false)];
+    while let Some((value, at, is_cid)) = stack.pop() {
+        if let (true, Some(s)) = (is_cid, value.as_str())
+            && !s.is_ascii()
+        {
+            return Err(CardError {
+                message: format!("{at} must be a cid string (ASCII)"),
+                path: at,
+                reason: "format".into(),
+            });
+        }
+        let entries: Vec<(String, &Value, bool)> = match value {
+            Value::Object(map) => {
+                js_entries(map).into_iter().map(|(k, v)| (k.clone(), v, k == "cid")).collect()
+            }
+            Value::Array(items) => {
+                items.iter().enumerate().map(|(i, v)| (i.to_string(), v, false)).collect()
+            }
+            _ => continue,
+        };
+        for (key, child, under_cid) in entries.into_iter().rev() {
+            stack.push((child, format!("{at}/{}", segment(&key)), under_cid));
+        }
+    }
+    Ok(())
+}
+
 /// Rules the lexicon can't express, checked after it passes (the same rules,
 /// in the same order, as `checkCard` in web/src/blocks/validate.ts):
 /// - block ids are unique across the whole card, sheets and list templates

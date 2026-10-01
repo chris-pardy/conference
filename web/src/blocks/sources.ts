@@ -113,7 +113,9 @@ export class SourceStore {
       return
     }
     try {
-      const name = key.startsWith('source:') ? key.slice('source:'.length) : key
+      // Lookups the renderer makes itself (a person's profile) have no source
+      // name: "" can't collide with one, since card source names can't be empty.
+      const name = key.startsWith('source:') ? key.slice('source:'.length) : ''
       const subscription = this.resolver.watch(this.card(), name, ref).subscribe((state) => {
         // A resolver may answer after its block unmounted.
         if (this.entries.get(key) === entry) update(state)

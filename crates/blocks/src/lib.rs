@@ -47,6 +47,7 @@ pub fn validate_card(record: &Value) -> Result<(), CardError> {
         });
     }
     lexicon::check_depth(record)?;
+    lexicon::check_cids(record)?;
     lexicon::validate_record(&format!("{CARD_NSID}#main"), record)?;
     lexicon::check_card(record)
 }

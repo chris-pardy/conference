@@ -1,4 +1,14 @@
-import { type KeyboardEvent, useEffect, useId, useMemo, useRef, useState } from 'react'
+import {
+  createContext,
+  type KeyboardEvent,
+  type RefObject,
+  useContext,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { createPortal } from 'react-dom'
 import { CardContext, FormContext, useCard } from './context'
 import { FormStore } from './forms'
@@ -21,6 +31,9 @@ function lockScroll(): () => void {
     if (--openSheets === 0) document.body.style.overflow = savedOverflow
   }
 }
+
+/** The dialog of the sheet a block is inside, if any. */
+const EnclosingSheet = createContext<RefObject<HTMLDivElement | null> | null>(null)
 
 /** Open sheets, innermost last: Escape closes only the innermost. */
 const openStack: symbol[] = []
@@ -71,6 +84,7 @@ export function Sheet({
   const card = useCard()
   const cardRoot = useRef(card.root)
   cardRoot.current = card.root
+  const enclosing = useRef(useContext(EnclosingSheet))
   const scope = useMemo(() => ({ ...card, surface: 'sheet' as const, compactPrimary: undefined }), [card])
   const [form] = useState(() => new FormStore())
   const titleId = useId()
@@ -106,8 +120,11 @@ export function Sheet({
       unlockScroll()
       for (const el of behind) el.removeAttribute('inert')
       // Only now: browsers won't focus an element that's still inert.
-      // If an edit removed the opener, the card itself takes focus instead.
-      const target = returnTo.current?.isConnected ? returnTo.current : cardRoot.current?.current
+      // If an edit removed the opener, focus goes to the sheet this one was
+      // opened from (the card behind it is still inert), else to the card.
+      const target = returnTo.current?.isConnected
+        ? returnTo.current
+        : (enclosing.current?.current ?? cardRoot.current?.current)
       target?.focus()
     }
   }, [])
@@ -166,9 +183,11 @@ export function Sheet({
         </div>
         <CardContext value={scope}>
           <FormContext value={form}>
-            <div className="g-sheet__body">
-              <Blocks blocks={blocks} />
-            </div>
+            <EnclosingSheet value={dialog}>
+              <div className="g-sheet__body">
+                <Blocks blocks={blocks} />
+              </div>
+            </EnclosingSheet>
           </FormContext>
         </CardContext>
       </div>

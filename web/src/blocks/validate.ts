@@ -205,6 +205,33 @@ function checkDepth(card: Node): CardError | null {
   return null
 }
 
+/**
+ * The first `cid` string, anywhere in the record, that isn't ASCII. CIDs are
+ * ASCII, but the base58 decoder inside @atproto/lexicon accepts characters
+ * above U+00FF, which the Rust validator rightly doesn't; checking this
+ * first, the same way on both sides, keeps them agreeing. It walks with its
+ * own stack (no recursion) in Object.entries order, as `check_cids` does in
+ * crates/blocks/src/lexicon.rs.
+ */
+function checkCids(record: unknown): CardError | null {
+  // Each entry: a value, its pointer, and whether it sits under an object key "cid".
+  const stack: [unknown, string, boolean][] = [[record, '', false]]
+  while (stack.length > 0) {
+    const [value, at, isCid] = stack.pop() as [unknown, string, boolean]
+    if (isCid && typeof value === 'string' && [...value].some((c) => c.charCodeAt(0) > 0x7f)) {
+      return { path: at, reason: 'format', message: `${at} must be a cid string (ASCII)` }
+    }
+    if (value === null || typeof value !== 'object') continue
+    const array = Array.isArray(value)
+    const entries = array ? value.map((v, i) => [String(i), v] as const) : Object.entries(value as Node)
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const [key, child] = entries[i]
+      stack.push([child, `${at}${pointer([key])}`, !array && key === 'cid'])
+    }
+  }
+  return null
+}
+
 /** Validates an `app.gather.block.card` record against the lexicons. */
 export function validateCard(record: unknown): CardValidation {
   if (typeof record !== 'object' || record === null || Array.isArray(record)) {
@@ -217,8 +244,8 @@ export function validateCard(record: unknown): CardValidation {
       error: { path: '/$type', reason: 'const', message: `/$type must be ${CARD_NSID}` },
     }
   }
-  const tooDeep = checkDepth(record as Node)
-  if (tooDeep) return { ok: false, error: tooDeep }
+  const early = checkDepth(record as Node) ?? checkCids(record)
+  if (early) return { ok: false, error: early }
   const result = lexicons.validate(CARD_NSID, record)
   if (!result.success) return { ok: false, error: toCardError(result.error.message) }
   const error = checkCard(record as Node)

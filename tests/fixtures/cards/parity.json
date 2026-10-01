@@ -4136,6 +4136,87 @@
     }
   },
   {
+    "name": "base58 cid with a character above U+00FF",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#recordSource",
+            "record": {
+              "space": "ats://x",
+              "did": "did:plc:organizer",
+              "collection": "app.gather.demo.item",
+              "rkey": "r1",
+              "cid": "QmYwAPJzv5CZsnA625s3中f2nemtYgPpHdWEz79ojWnPbdG"
+            }
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/sources/0/ref/record/cid",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "cid field with an emoji in an unknown block",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.future#hologram",
+          "cid": "bafy😀"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/cid",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "non-ascii cid after a lexicon error",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": 42
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#recordSource",
+            "record": {
+              "space": "x",
+              "did": "did:plc:a",
+              "collection": "a.b.c",
+              "rkey": "r",
+              "cid": "Qmé"
+            }
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/sources/0/ref/record/cid",
+      "reason": "format"
+    }
+  },
+  {
     "name": "button with neither action nor sheet",
     "card": {
       "$type": "app.gather.block.card",

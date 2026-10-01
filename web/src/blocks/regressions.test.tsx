@@ -14,7 +14,16 @@ import {
   SourceResolverContext,
   type SourceState,
 } from './SourceResolver'
-import { binding, block, blocksOfType, CARD_REF, card, recordSource, renderCard } from './test-support'
+import {
+  binding,
+  block,
+  blocksOfType,
+  CARD_REF,
+  card,
+  collectionSource,
+  recordSource,
+  renderCard,
+} from './test-support'
 import { parseDatetime } from './time'
 import { validateCard } from './validate'
 
@@ -1282,4 +1291,92 @@ test('TC-32: when an edit removes the button whose sheet is open, focus goes to 
   edit([block('header', { text: 'Wifi' })])
   expect(screen.queryByRole('dialog')).toBeNull()
   expect(document.activeElement).toBe(container.querySelector('[data-card]'))
+})
+
+test('TC-26: a profile lookup never shares a name with a card source', () => {
+  const watched: [string, string][] = []
+  const resolver: SourceResolver = {
+    watch(_card, name, ref) {
+      watched.push([name, ref.$type])
+      return {
+        subscribe: (next) => {
+          next({ state: 'unavailable' })
+          return { unsubscribe() {} }
+        },
+      }
+    },
+  }
+  render(
+    <SourceResolverContext value={resolver}>
+      <ActionContext value={{ onAction() {} }}>
+        <BlockCard
+          cardRef={CARD_REF}
+          card={card(
+            [
+              block('person', { did: 'did:plc:alice' }),
+              block('stat', { bind: { value: binding('profile:did:plc:alice') } }),
+            ],
+            { sources: [collectionSource('profile:did:plc:alice')] },
+          )}
+          surface="feed"
+        />
+      </ActionContext>
+    </SourceResolverContext>,
+  )
+  expect(watched).toContainEqual(['', 'app.gather.block.defs#profileSource'])
+  expect(watched).toContainEqual(['profile:did:plc:alice', 'app.gather.block.defs#collectionSource'])
+})
+
+test('TC-32: when an edit removes a nested sheet’s opener, focus goes to the outer sheet', async () => {
+  const user = userEvent.setup()
+  const inner = block('button', {
+    id: 'more',
+    label: 'More',
+    opens: { title: 'More', blocks: [block('context', { text: 'Inside' })] },
+  })
+  const outer = (blocks: unknown[]) =>
+    block('button', { id: 'details', label: 'Details', opens: { title: 'Details', blocks } })
+  const { edit } = editable([outer([block('context', { text: 'Outer' }), inner])])
+  await user.click(screen.getByRole('button', { name: 'Details' }))
+  await user.click(screen.getByRole('button', { name: 'More' }))
+  edit([outer([block('context', { text: 'Outer' })])])
+  expect(screen.queryByRole('dialog', { name: 'More' })).toBeNull()
+  expect(document.activeElement).toBe(screen.getByRole('dialog', { name: 'Details' }))
+})
+
+test('TC-26: an avatar that fails to load falls back to the initial', () => {
+  const resolver = new FixtureResolver(
+    {},
+    {
+      profiles: {
+        'did:plc:alice': { handle: 'alice.test', displayName: 'Alice', avatar: 'https://cdn.example/dead.jpg' },
+      },
+    },
+  )
+  const { container } = renderCard(card([block('person', { did: 'did:plc:alice' })]), { resolver })
+  fireEvent.error(container.querySelector('img') as HTMLImageElement)
+  expect(container.querySelector('img')).toBeNull()
+  expect(container.querySelector('.g-person__avatar--none')?.textContent).toBe('A')
+})
+
+test('TC-5: an unsafe link does not hide a mention later in the same facet', () => {
+  const { container } = renderCard(
+    card([
+      block('richText', {
+        text: '@alice.test',
+        facets: [
+          {
+            index: { byteStart: 0, byteEnd: 11 },
+            features: [
+              { $type: 'app.gather.block.defs#link', uri: 'javascript:alert(1)' },
+              { $type: 'app.gather.block.defs#mention', did: 'did:plc:alice' },
+            ],
+          },
+        ],
+      }),
+    ]),
+  )
+  const links = container.querySelectorAll('a')
+  expect(links).toHaveLength(1)
+  expect(links[0].getAttribute('href')).toContain('did:plc:alice')
 })

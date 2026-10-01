@@ -22,6 +22,8 @@ export function Person({ block }: Props) {
   const did = text(bound.did)
   const sources = did?.startsWith('did:') ? [store.profile(did)] : []
   const [profile] = useSourceStates(sources)
+  // An avatar that fails to load falls back to the initial, as having none does.
+  const [failedAvatar, setFailedAvatar] = useState<string | null>(null)
   const state = settle(bound)
   if (state !== 'ready') return <Placeholder type="person" block={block} state={loadingOr(state)} />
   if (!profile || profile.state === 'unavailable')
@@ -32,11 +34,12 @@ export function Person({ block }: Props) {
   const handle = typeof p.handle === 'string' && p.handle ? p.handle : undefined
   const name = typeof p.displayName === 'string' && p.displayName.trim() ? p.displayName : undefined
   if (!name && !handle) return <Placeholder type="person" block={block} state="unavailable" />
-  const avatar = safeImageSrc(p.avatar)
+  const src = safeImageSrc(p.avatar)
+  const avatar = src !== failedAvatar ? src : undefined
   return (
     <div {...blockAttrs('person', block)} className="g-block g-person">
       {avatar ? (
-        <img className="g-person__avatar" src={avatar} alt="" />
+        <img className="g-person__avatar" src={avatar} alt="" onError={() => setFailedAvatar(avatar)} />
       ) : (
         <span className="g-person__avatar g-person__avatar--none" aria-hidden="true">
           {(name ?? handle ?? '?').slice(0, 1).toUpperCase()}

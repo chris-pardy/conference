@@ -1791,3 +1791,29 @@ nits. Everything was fixed, each with a regression test.
 3. **[nit] If an edit removed a sheet's opener, closing the sheet left
    focus on `<body>`.** **Fixed:** the card root (focusable with
    `tabIndex=-1`) takes focus instead.
+
+### Round 17
+
+Reviewed `6eedf6c`. All gates passed. The reviewer fuzzed both validators
+with 190,000 cards and rendered 4,000 fuzzed cards. Not clean, with no
+majors for the second round running: 0 blocking, 0 major, 2 minor, 3
+nits. Everything was fixed, each with a regression test or parity cases.
+
+1. **[minor] A base58 CID with a character above U+00FF passed the TS
+   validator (a quirk of the decoder inside @atproto/lexicon) but not
+   Rust.** **Fixed:** both validators check first that every `cid` string
+   in the record is ASCII (an iterative walk in `Object.entries` order on
+   both sides), rather than copying the quirk. Three parity cases (now
+   171), and all match.
+2. **[minor] Profile lookups reached the resolver under a made-up name a
+   card source could also use.** **Fixed:** they pass the name `""` (card
+   source names can't be empty). The `SourceResolver.watch` contract says
+   so, and that resolvers should cache by ref.
+3. **[nit] A nested sheet whose opener an edit removed sent focus to the
+   inert card root.** **Fixed:** focus goes to the enclosing open sheet,
+   and to the card root only when no sheet is open.
+4. **[nit] A person's avatar that failed to load showed a broken image.**
+   **Fixed:** it falls back to the initial.
+5. **[nit] An unsafe link hid a valid mention later in the same facet.**
+   **Fixed:** a link or mention counts as applied only when it makes an
+   anchor.
