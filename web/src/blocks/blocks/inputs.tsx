@@ -68,10 +68,8 @@ export function Button({ block }: Props) {
         <Sheet
           title={str(sheet.title) ?? label}
           blocks={sheet.blocks}
-          onClose={() => {
-            setOpen(false)
-            opener.current?.focus()
-          }}
+          onClose={() => setOpen(false)}
+          returnFocus={opener.current}
         />
       )}
     </div>

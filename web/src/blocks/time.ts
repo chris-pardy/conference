@@ -4,6 +4,7 @@ function zoneOffset(instant: number, timeZone: string): number {
     new Intl.DateTimeFormat('en-US', {
       timeZone,
       hourCycle: 'h23',
+      era: 'short',
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
@@ -12,10 +13,14 @@ function zoneOffset(instant: number, timeZone: string): number {
       second: '2-digit',
     })
       .formatToParts(instant)
-      .map((p) => [p.type, Number(p.value)]),
+      .map((p) => [p.type, p.value]),
   )
-  const asUtc = utc(parts.year, parts.month, parts.day, parts.hour, parts.minute, parts.second, 0)
-  return asUtc - (instant - (instant % 1000))
+  const n = (type: string) => Number(parts[type])
+  // Intl counts years by era: year 0 is "1 BC", -1 is "2 BC".
+  const year = parts.era === 'BC' ? 1 - n('year') : n('year')
+  const asUtc = utc(year, n('month'), n('day'), n('hour'), n('minute'), n('second'), 0)
+  // Whole seconds, rounding down (also before 1970, where % is negative).
+  return asUtc - (instant - (((instant % 1000) + 1000) % 1000))
 }
 
 // The forms the lexicon's lenient datetime check accepts (see

@@ -70,8 +70,16 @@ function compactLayout(blocks: unknown[]): { blocks: unknown[]; primary: unknown
 /**
  * Renders a card for a surface. Sources come from the SourceResolver in
  * context, and interactive blocks hand their intents to the ActionContext.
+ *
+ * A different card (a new uri) is a fresh start: nothing typed, chosen or
+ * dismissed on one card carries over to another shown in the same place.
+ * A new cid is the same card, edited, and keeps all of that.
  */
-export function BlockCard({ cardRef, card, surface, onDismiss }: BlockCardProps) {
+export function BlockCard(props: BlockCardProps) {
+  return <CardBody key={props.cardRef.uri} {...props} />
+}
+
+function CardBody({ cardRef, card, surface, onDismiss }: BlockCardProps) {
   const resolver = useContext(SourceResolverContext)
   const [dismissed, setDismissed] = useState(false)
   const [form] = useState(() => new FormStore())
@@ -94,12 +102,12 @@ export function BlockCard({ cardRef, card, surface, onDismiss }: BlockCardProps)
   // starts from nothing.
   const current = useRef({ uri, cid })
   current.current = { uri, cid }
-  const previous = useRef<{ uri: string; store: SourceStore } | null>(null)
-  const store = useMemo(() => {
-    const before = previous.current?.uri === uri ? previous.current.store : undefined
-    return new SourceStore(resolver, () => current.current, refs, before)
-  }, [resolver, uri, refs])
-  previous.current = { uri, store }
+  const previous = useRef<SourceStore | undefined>(undefined)
+  const store = useMemo(
+    () => new SourceStore(resolver, () => current.current, refs, previous.current),
+    [resolver, refs],
+  )
+  previous.current = store
 
   const all = Array.isArray(card.blocks) ? (card.blocks as unknown[]) : []
   const compact = useMemo(() => (surface === 'compact' ? compactLayout(all) : null), [surface, all])

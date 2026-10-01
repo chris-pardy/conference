@@ -7,7 +7,7 @@
 //! enum, const and format constraints. Blobs, bytes and cid-links aren't used
 //! and are rejected as unsupported.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
 use regex::Regex;
@@ -430,7 +430,7 @@ const DEFS_PREFIX: &str = "app.gather.block.defs#";
 /// Within a block: its id, its options, its button rule, its bindings (in
 /// `bind` order, then a list's `items`), then the blocks inside it.
 pub(crate) fn check_card(card: &Value) -> Result {
-    let mut names: Vec<&str> = Vec::new();
+    let mut names: HashSet<&str> = HashSet::new();
     for (i, source) in card["sources"].as_array().into_iter().flatten().enumerate() {
         let name = source["name"].as_str().unwrap_or_default();
         let at = format!("/sources/{i}/name");
@@ -448,14 +448,14 @@ pub(crate) fn check_card(card: &Value) -> Result {
                 reason: "duplicate".into(),
             });
         }
-        names.push(name);
+        names.insert(name);
     }
-    let declared: Vec<&str> = names;
-    visit(&card["blocks"], "/blocks", &mut Vec::new(), &declared, false)
+    let declared = names;
+    visit(&card["blocks"], "/blocks", &mut HashSet::new(), &declared, false)
 }
 
 /// A binding must name a declared source, or `$item` inside a list template.
-fn check_binding(binding: &Value, at: &str, declared: &[&str], in_list: bool) -> Result {
+fn check_binding(binding: &Value, at: &str, declared: &HashSet<&str>, in_list: bool) -> Result {
     let Some(source) = binding.get("source").and_then(Value::as_str) else {
         return Ok(());
     };
@@ -478,8 +478,8 @@ fn check_binding(binding: &Value, at: &str, declared: &[&str], in_list: bool) ->
 fn visit(
     blocks: &Value,
     path: &str,
-    ids: &mut Vec<String>,
-    declared: &[&str],
+    ids: &mut HashSet<String>,
+    declared: &HashSet<&str>,
     in_list: bool,
 ) -> Result {
     let duplicate =
@@ -490,16 +490,16 @@ fn visit(
             continue;
         };
         if let Some(id) = block["id"].as_str() {
-            if ids.iter().any(|seen| seen == id) {
+            if ids.contains(id) {
                 return Err(duplicate(
                     format!("{at}/id"),
                     format!("{at}/id \"{id}\" is already used on this card"),
                 ));
             }
-            ids.push(id.to_owned());
+            ids.insert(id.to_owned());
         }
         if kind == "select" {
-            let mut values: Vec<&str> = Vec::new();
+            let mut values: HashSet<&str> = HashSet::new();
             for (j, option) in block["options"].as_array().into_iter().flatten().enumerate() {
                 let value = option["value"].as_str().unwrap_or_default();
                 if values.contains(&value) {
@@ -508,7 +508,7 @@ fn visit(
                         format!("{at}/options/{j}/value \"{value}\" is already an option"),
                     ));
                 }
-                values.push(value);
+                values.insert(value);
             }
         }
         if kind == "button" {

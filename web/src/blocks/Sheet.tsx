@@ -33,7 +33,20 @@ function tabStops(root: HTMLElement): HTMLElement[] {
  * while it's open, and the page behind doesn't scroll. Escape, the close
  * button or the backdrop closes it.
  */
-export function Sheet({ title, blocks, onClose }: { title: string; blocks: unknown; onClose: () => void }) {
+export function Sheet({
+  title,
+  blocks,
+  onClose,
+  returnFocus,
+}: {
+  title: string
+  blocks: unknown
+  onClose: () => void
+  /** Where focus goes when the sheet closes, once the page behind is interactive again. */
+  returnFocus?: HTMLElement | null
+}) {
+  const returnTo = useRef(returnFocus)
+  returnTo.current = returnFocus
   const card = useCard()
   const scope = useMemo(() => ({ ...card, surface: 'sheet' as const, compactPrimary: undefined }), [card])
   const [form] = useState(() => new FormStore())
@@ -52,6 +65,8 @@ export function Sheet({ title, blocks, onClose }: { title: string; blocks: unkno
     return () => {
       document.body.style.overflow = overflow
       for (const el of behind) el.removeAttribute('inert')
+      // Only now: browsers won't focus an element that's still inert.
+      returnTo.current?.focus()
     }
   }, [])
 

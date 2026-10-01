@@ -1606,3 +1606,26 @@ or parity cases.
 4. **[nit] `19:00:7` is read as 19:00 and 0.7 seconds.** Not fixed: that
    is how the validator's own grammar reads it (`.` then digits is a
    fraction), and displayed times only show hours and minutes.
+
+### Round 9
+
+Reviewed `c20c001`. All gates passed. Not clean: 0 blocking, 1 major, 2
+minor, 1 nit. Everything was fixed.
+
+1. **[major] Closing a sheet never gave focus back to its opener in a real
+   browser.** Focus was returned while the page was still `inert` (from
+   round 5), which browsers ignore; jsdom doesn't enforce `inert`, so the
+   unit test passed. **Fixed:** the sheet removes `inert` first, then
+   returns focus. A Playwright test (`e2e/sheet-focus.spec.ts`) checks
+   this in Chromium for Escape and for the Close button.
+2. **[minor] A `BlockCard` given a different card (a new uri) kept the
+   previous card's dismissed state, form and typed text.** **Fixed:** the
+   card body is keyed by uri, so a different card starts fresh. A new cid
+   (the same card, edited) still keeps everything. Regression test added.
+3. **[minor] The Rust id-uniqueness check was quadratic** (about 1.2 s for
+   a 2.3 MB card). **Fixed:** ids, option values and source names use hash
+   sets.
+4. **[nit] Year 0 without an offset came out about 3 years off** (Intl
+   counts it as 1 BC). **Fixed:** BC years are mapped back. Seconds also
+   round down correctly before 1970, which was found while fixing this.
+   Regression test added.

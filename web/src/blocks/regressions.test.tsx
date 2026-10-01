@@ -887,3 +887,37 @@ test('TC-19: list items sharing a key are told apart by position', async () => {
   for (const name of ['First', 'Second', 'Third']) await user.click(screen.getByRole('button', { name }))
   expect(onAction.mock.calls.map(([intent]) => intent.item)).toEqual([0, 1, 'q2'])
 })
+
+test('TC-31: a different card in the same place starts fresh', async () => {
+  const user = userEvent.setup()
+  const ask = (text: string) =>
+    card([
+      block('header', { text }),
+      block('textInput', { id: 'question', label: 'Question' }),
+      block('submit', { id: 'send', label: 'Send', action: 'ask' }),
+    ])
+  const view = (uri: string, record: ReturnType<typeof card>, surface: 'feed' | 'ephemeral') => (
+    <SourceResolverContext value={new FixtureResolver({})}>
+      <ActionContext value={{ onAction() {} }}>
+        <BlockCard cardRef={{ uri }} card={record} surface={surface} />
+      </ActionContext>
+    </SourceResolverContext>
+  )
+  // Text typed on one card doesn't appear on the next.
+  const { rerender } = render(view('at://x/card/a', ask('Keynote'), 'feed'))
+  await user.type(screen.getByRole('textbox', { name: 'Question' }), 'private note for keynote')
+  rerender(view('at://x/card/b', ask('Workshop'), 'feed'))
+  expect((screen.getByRole('textbox', { name: 'Question' }) as HTMLInputElement).value).toBe('')
+
+  // Dismissing one ephemeral card doesn't hide the next.
+  rerender(view('at://x/card/c', ask('Received'), 'ephemeral'))
+  await user.click(screen.getByRole('button', { name: /dismiss/i }))
+  expect(screen.queryByRole('heading', { name: 'Received' })).toBeNull()
+  rerender(view('at://x/card/d', ask('Also received'), 'ephemeral'))
+  expect(screen.getByRole('heading', { name: 'Also received' })).toBeTruthy()
+})
+
+test('TC-27: year 0 without an offset is read in the card zone correctly', () => {
+  expect(parseDatetime('0000-06-01T12:00', 'Europe/Amsterdam')?.getUTCFullYear()).toBe(0)
+  expect(parseDatetime('1950-06-01T12:00:00', 'Europe/Amsterdam')?.toISOString()).toBe('1950-06-01T11:00:00.000Z')
+})
