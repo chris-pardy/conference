@@ -4,6 +4,7 @@
 //! serving them. It validates exactly as the PWA does, against the same
 //! lexicons in `lexicons/`.
 
+mod datetime;
 mod lexicon;
 
 use serde::{Deserialize, Serialize};

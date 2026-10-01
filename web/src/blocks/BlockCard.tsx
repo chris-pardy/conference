@@ -28,14 +28,43 @@ const COMPACT_BLOCKS = 3
 /** Blocks a compact card leaves out: media and inputs. */
 const NOT_COMPACT = new Set(['image', 'qr', 'textInput', 'select', 'submit', 'buttonGroup', 'button'])
 
-/** The first few blocks, without media or inputs, then the first primary button. */
-function compactBlocks(blocks: unknown[]): unknown[] {
-  const shown = blocks.filter((b) => {
-    const type = blockType(b)
-    return type !== null && !NOT_COMPACT.has(type)
-  })
-  const primary = blocks.find((b) => blockType(b) === 'button' && variantOf(b as never) === 'primary')
-  return [...shown.slice(0, COMPACT_BLOCKS), ...(primary ? [primary] : [])]
+/** A layout block's children: what's rendered inside it on the card itself (not in lists or sheets). */
+function children(block: unknown): unknown[] {
+  const b = block as { blocks?: unknown; columns?: unknown }
+  switch (blockType(block)) {
+    case 'section':
+    case 'stack':
+      return Array.isArray(b.blocks) ? b.blocks : []
+    case 'columns':
+      return Array.isArray(b.columns) ? b.columns.flatMap((c) => (Array.isArray(c?.blocks) ? c.blocks : [])) : []
+    default:
+      return []
+  }
+}
+
+/** Every block in the tree, in document order. */
+function* walk(blocks: unknown[]): Generator<unknown> {
+  for (const block of blocks) {
+    yield block
+    yield* walk(children(block))
+  }
+}
+
+/**
+ * What a compact card shows: its first few top-level blocks, leaving out
+ * media and inputs (nested ones hide themselves), and the first primary
+ * button anywhere in the card, which is the only button it keeps.
+ */
+function compactLayout(blocks: unknown[]): { blocks: unknown[]; primary: unknown } {
+  const shown = blocks
+    .filter((b) => {
+      const type = blockType(b)
+      return type !== null && !NOT_COMPACT.has(type)
+    })
+    .slice(0, COMPACT_BLOCKS)
+  const primary = [...walk(blocks)].find((b) => blockType(b) === 'button' && variantOf(b as never) === 'primary')
+  const inside = primary !== undefined && [...walk(shown)].includes(primary)
+  return { blocks: primary && !inside ? [...shown, primary] : shown, primary }
 }
 
 /**
@@ -47,28 +76,35 @@ export function BlockCard({ cardRef, card, surface, onDismiss }: BlockCardProps)
   const [dismissed, setDismissed] = useState(false)
   const [form] = useState(() => new FormStore())
 
+  // Keyed on the sources' content, so a host that re-fetches or re-parses the
+  // same card keeps its store, and bound blocks don't drop back to loading.
+  const sourcesKey = JSON.stringify(Array.isArray(card.sources) ? card.sources : [])
   const refs = useMemo(() => {
     const map = new Map<string, SourceRef>()
-    for (const source of Array.isArray(card.sources) ? card.sources : []) {
-      const ref = source?.ref as SourceRef | undefined
+    for (const source of JSON.parse(sourcesKey) as { name?: unknown; ref?: SourceRef }[]) {
+      const ref = source?.ref
       if (typeof source?.name === 'string' && ref && typeof ref.$type === 'string') map.set(source.name, ref)
     }
     return map
-  }, [card.sources])
+  }, [sourcesKey])
   const { uri, cid } = cardRef
   const store = useMemo(() => new SourceStore(resolver, { uri, cid }, refs), [resolver, uri, cid, refs])
+
+  const all = Array.isArray(card.blocks) ? (card.blocks as unknown[]) : []
+  const compact = useMemo(() => (surface === 'compact' ? compactLayout(all) : null), [surface, all])
   const scope = useMemo(
     () => ({
       cardRef: { uri, cid },
       store,
       surface,
       timeZone: typeof card.timeZone === 'string' ? card.timeZone : undefined,
+      compactPrimary: compact?.primary,
     }),
-    [uri, cid, store, surface, card.timeZone],
+    [uri, cid, store, surface, card.timeZone, compact],
   )
 
   if (dismissed) return null
-  const blocks = Array.isArray(card.blocks) ? (card.blocks as unknown[]) : []
+  const blocks = compact ? compact.blocks : all
 
   return (
     <CardContext value={scope}>
@@ -89,7 +125,7 @@ export function BlockCard({ cardRef, card, surface, onDismiss }: BlockCardProps)
               </button>
             </div>
           )}
-          <Blocks blocks={surface === 'compact' ? compactBlocks(blocks) : blocks} />
+          <Blocks blocks={blocks} />
         </article>
       </FormContext>
     </CardContext>

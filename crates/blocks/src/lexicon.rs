@@ -257,7 +257,7 @@ fn string(path: &Path, def: &Value, value: &Value) -> Result {
         Some(format) => {
             let (ok, message) = match format {
                 "datetime" => (
-                    is_datetime(s),
+                    crate::datetime::is_datetime_lenient(s),
                     "must be an valid atproto datetime (both RFC-3339 and ISO-8601)",
                 ),
                 "uri" => (URI.is_match(s), "must be a uri"),
@@ -297,8 +297,12 @@ fn join(values: &[Value]) -> String {
         .join("|")
 }
 
-// The patterns @atproto/syntax uses.
-static URI: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\w+:(?://)?[^\s/][^\s]*$").unwrap());
+// The patterns @atproto/syntax uses. JavaScript's `\w` is ASCII and its `\s`
+// is its own set, unlike Rust's Unicode classes, so both are spelled out.
+static URI: LazyLock<Regex> = LazyLock::new(|| {
+    let space = r"\t\n\x0B\x0C\r \u{a0}\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}";
+    Regex::new(&format!(r"^[A-Za-z0-9_]+:(?://)?[^{space}/][^{space}]*$")).unwrap()
+});
 static DID: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^did:[a-z]+:[a-zA-Z0-9._:%-]*[a-zA-Z0-9._-]$").unwrap());
 static NSID: LazyLock<Regex> = LazyLock::new(|| {
@@ -309,28 +313,26 @@ static NSID: LazyLock<Regex> = LazyLock::new(|| {
 });
 static RECORD_KEY: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[a-zA-Z0-9_~.:-]{1,512}$").unwrap());
-static DATETIME: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^\d{4}-\d{2}-\d{2}(?:[Tt ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:[Zz]|[+-]\d{2}(?::?\d{2})?)?)?$").unwrap()
-});
-static CID_V1: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^b[a-z2-7]{8,}$").unwrap());
-static CID_V0: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^Qm[1-9A-HJ-NP-Za-km-z]{44}$").unwrap());
-
-/// An ISO-8601 date or date-time, with its fields in range.
-fn is_datetime(s: &str) -> bool {
-    if !DATETIME.is_match(s) {
-        return false;
-    }
-    let num = |range: std::ops::Range<usize>| {
-        s.get(range).and_then(|p| p.parse::<u32>().ok()).unwrap_or(99)
-    };
-    let (month, day) = (num(5..7), num(8..10));
-    let time_ok = s.len() < 16
-        || (num(11..13) < 24 && num(14..16) < 60 && (s.len() < 19 || num(17..19) < 61));
-    (1..=12).contains(&month) && (1..=31).contains(&day) && time_ok
-}
-
-/// A CIDv1 in base32 or a CIDv0 in base58: the string forms records use.
+/// A CID string as multiformats' `CID.parse` takes it: a bare base58 CIDv0
+/// (`Q…`), or a CIDv1 in base58btc (`z`), base32 (`b`) or base36 (`k`), with
+/// no bytes left over.
 fn is_cid(s: &str) -> bool {
-    CID_V1.is_match(s) || CID_V0.is_match(s)
+    use cid::multibase::Base;
+    let base = match s.chars().next() {
+        Some('Q') => None,
+        Some('z') => Some(Base::Base58Btc),
+        Some('b') => Some(Base::Base32Lower),
+        Some('k') => Some(Base::Base36Lower),
+        _ => return false,
+    };
+    let Ok(parsed) = cid::Cid::try_from(s) else {
+        return false;
+    };
+    // Re-encoding must give the string back: that rules out trailing bytes,
+    // and a CIDv0 behind a multibase prefix, which multiformats rejects.
+    match (base, parsed.version()) {
+        (None, cid::Version::V0) => parsed.to_string() == s,
+        (Some(base), cid::Version::V1) => parsed.to_string_of_base(base).is_ok_and(|e| e == s),
+        _ => false,
+    }
 }

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ActionContext, type ActionIntent } from '../../blocks/ActionContext'
 import { BlockCard, type Card, type Surface } from '../../blocks/BlockCard'
 import { FixtureResolver, SourceResolverContext } from '../../blocks/SourceResolver'
@@ -53,10 +53,20 @@ function GalleryCard({ uri, entry }: { uri: string; entry: GalleryEntry }) {
 /** The block gallery: every block, surface and state, rendered from fixtures, with the intents cards send. */
 export default function BlockGallery() {
   const [log, setLog] = useState<Logged[]>([])
+  const [toast, setToast] = useState<Logged | null>(null)
   const host = useMemo(
     () => ({ onAction: (intent: ActionIntent) => setLog((now) => [...now, { ...intent, n: now.length + 1 }]) }),
     [],
   )
+  // On a phone the log is far below the card that sent the intent, so the
+  // latest one also shows briefly at the bottom of the screen.
+  const latest = log.at(-1)
+  useEffect(() => {
+    if (!latest) return
+    setToast(latest)
+    const timer = setTimeout(() => setToast(null), 3000)
+    return () => clearTimeout(timer)
+  }, [latest])
 
   return (
     <main className="gallery">
@@ -74,6 +84,13 @@ export default function BlockGallery() {
           ))}
         </div>
       </ActionContext>
+      {toast && (
+        // Visual only: the log below is the live region screen readers hear.
+        <div className="gallery__toast" aria-hidden="true">
+          <span className="gallery__toast-label">Intent #{toast.n}</span> {toast.blockId} → {toast.actionId}{' '}
+          <code>{JSON.stringify(toast.value) ?? ''}</code>
+        </div>
+      )}
       <section className="gallery__log" aria-labelledby="intents-title">
         <h2 id="intents-title">Action intents</h2>
         <div role="log" aria-labelledby="intents-title">

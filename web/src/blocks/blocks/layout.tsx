@@ -68,7 +68,8 @@ export function RichTextBlock({ block }: Props) {
 export function Image({ block }: Props) {
   const { surface } = useCard()
   const bound = useBound(block, ['url', 'alt'])
-  const [failed, setFailed] = useState(false)
+  // Failure belongs to a URL: a new URL (say, a corrected binding) gets a fresh try.
+  const [failedUrl, setFailedUrl] = useState<string | null>(null)
   if (surface === 'compact') return null
   const state = settle(bound)
   const url = safeImageSrc(text(bound.url))
@@ -76,7 +77,7 @@ export function Image({ block }: Props) {
   if (state === 'loading') return <Placeholder type="image" block={block} state="loading" />
   const ratio = block.aspectRatio as { width?: number; height?: number } | undefined
   const aspectRatio = ratio?.width && ratio.height ? `${ratio.width} / ${ratio.height}` : undefined
-  if (!url || failed) {
+  if (!url || failedUrl === url) {
     return (
       <div {...blockAttrs('image', block)} className="g-block g-image g-image--failed" style={{ aspectRatio }}>
         <span>{alt || 'Unavailable'}</span>
@@ -85,7 +86,7 @@ export function Image({ block }: Props) {
   }
   return (
     <div {...blockAttrs('image', block)} className="g-block g-image" style={{ aspectRatio }}>
-      <img src={url} alt={alt} loading="lazy" onError={() => setFailed(true)} />
+      <img src={url} alt={alt} loading="lazy" onError={() => setFailedUrl(url)} />
     </div>
   )
 }

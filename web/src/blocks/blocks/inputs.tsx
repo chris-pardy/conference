@@ -27,14 +27,14 @@ function useSend() {
 }
 
 export function Button({ block }: Props) {
-  const { surface } = useCard()
+  const { surface, compactPrimary } = useCard()
   const send = useSend()
   const bound = useBound(block, ['label'])
   const [open, setOpen] = useState(false)
   const opener = useRef<HTMLButtonElement>(null)
   const variant = variantOf(block)
-  // A compact card keeps only its primary button.
-  if (surface === 'compact' && variant !== 'primary') return null
+  // A compact card keeps only its one primary button.
+  if (surface === 'compact' && block !== compactPrimary) return null
   const state = settle(bound)
   const label = text(bound.label)
   if (state !== 'ready' || !label) {
@@ -120,7 +120,8 @@ export function TextInput({ block }: Props) {
   }
   useField({
     id,
-    value: () => (value === '' ? undefined : value),
+    // Whitespace alone counts as empty, as in validation.
+    value: () => (value.trim() === '' ? undefined : value),
     validate: () => {
       const problem = check(value)
       setError(problem)

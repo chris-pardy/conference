@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react'
+import { type ReactNode, useContext } from 'react'
+import { ProfileLinkContext } from './context'
 import { DEFS } from './render'
 
 interface Facet {
@@ -26,12 +27,12 @@ export function safeHref(uri: unknown): string | undefined {
 // The DID syntax: only characters that are safe in a URL path.
 const DID = /^did:[a-z]+:[a-zA-Z0-9._:%-]*[a-zA-Z0-9._-]$/
 
-/** Where a mention opens: the DID's profile. */
-export function profileHref(did: string): string {
-  return `https://bsky.app/profile/${did}`
-}
-
-function applyFeature(feature: unknown, children: ReactNode, key: number): ReactNode {
+function applyFeature(
+  feature: unknown,
+  children: ReactNode,
+  key: number,
+  profileHref: (did: string) => string,
+): ReactNode {
   const f = feature as { $type?: string; did?: unknown; uri?: unknown; tag?: unknown }
   switch (f?.$type) {
     case `${DEFS}#mention`:
@@ -72,6 +73,7 @@ function applyFeature(feature: unknown, children: ReactNode, key: number): React
  * overlap an earlier one, or fall outside the text, are ignored.
  */
 export function RichText({ text, facets }: { text: string; facets?: unknown }): ReactNode {
+  const profileHref = useContext(ProfileLinkContext)
   const bytes = new TextEncoder().encode(text)
   const decode = (start: number, end: number) => new TextDecoder().decode(bytes.slice(start, end))
   const ranges = (Array.isArray(facets) ? (facets as Facet[]) : [])
@@ -91,7 +93,7 @@ export function RichText({ text, facets }: { text: string; facets?: unknown }): 
     if (range.start > at) out.push(decode(at, range.start))
     let node: ReactNode = decode(range.start, range.end)
     range.features.forEach((feature, i) => {
-      node = applyFeature(feature, node, i)
+      node = applyFeature(feature, node, i, profileHref)
     })
     out.push(<span key={range.start}>{node}</span>)
     at = range.end

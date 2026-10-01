@@ -1305,3 +1305,49 @@ Friday 30 April (day 2), 24-hour clock, and the `Atmosphere-Gast` wifi.
   check), and the gallery is at its own address
 
 ## Review log
+
+### Round 1
+
+Reviewed `4f5b512`. All gates passed (`pnpm check`, frozen tests
+unchanged). Not clean: 0 blocking, 2 major, 6 minor, 1 nit. Everything was
+fixed.
+
+1. **[major] The Rust validator didn't accept the same records as
+   `@atproto/lexicon`.** It diverged on date-only and lowercase datetimes,
+   `T24:00` and junk CIDs. **Fixed:**
+   - `crates/blocks/src/datetime.rs` ports `isDatetimeStringLenient` rule
+     for rule (`iso-datestring-validator` plus the strict atproto check),
+     quirks included.
+   - CIDs are parsed with the `cid` crate, limited to the prefixes
+     multiformats accepts, and re-encoded to rule out trailing bytes.
+   - The URI pattern spells out JavaScript's ASCII `\w` and its `\s` set.
+   - 110 parity cases, recorded from `@atproto/lexicon`
+     (`tests/fixtures/cards/parity.json`), now run on both sides
+     (`validate-parity.test.ts`, `crates/blocks/tests/parity.rs`).
+2. **[major] A sheet opened from a compact card hid its inputs.**
+   **Fixed:** the sheet renders its blocks on the `sheet` surface.
+   Regression test added.
+3. **[minor] An optional input holding only whitespace was sent.**
+   **Fixed:** whitespace alone counts as empty. Regression test added.
+4. **[minor] A failed image never retried after its bound URL changed.**
+   **Fixed:** the failure is tied to the URL that failed. Regression test
+   added.
+5. **[minor] A compact card could show more than one primary button.**
+   **Fixed:** the card picks the first primary button anywhere in its tree,
+   and only that button renders. Regression test added.
+6. **[minor] A countdown re-rendered every second forever.** **Fixed:** it
+   re-renders only when its text changes (every minute, then every second
+   in the last minute), and stops once it has ended. Regression tests added.
+7. **[minor] The source store was rebuilt whenever `card.sources` changed
+   identity.** **Fixed:** the store is keyed on the sources' content, so a
+   re-parsed card keeps its watches. Regression test added.
+8. **[minor] The sheet had no focus trap and didn't lock page scroll.**
+   **Fixed:** Tab and Shift+Tab wrap inside the sheet, the page behind
+   doesn't scroll, and Escape closes the sheet and returns focus to its
+   button. Regression test added.
+9. **[nit] Mentions hard-coded bsky.app.** **Fixed:** `ProfileLinkContext`
+   lets hosts route mentions, and bsky.app stays the default.
+
+Also from a visual check of the gallery on a phone: the latest intent now
+shows briefly at the bottom of the screen, since the log is far below the
+cards.

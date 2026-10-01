@@ -1,0 +1,2297 @@
+[
+  {
+    "name": "createdAt \"2027-04-30T07:00:00.000Z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-30T19:00:00+02:00\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T19:00:00+02:00"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-30T19:00:00-05:30\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T19:00:00-05:30"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-30T19:00:00+05:45\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T19:00:00+05:45"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-30T19:00:00+14:00\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T19:00:00+14:00"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-30T19:00:00-12:00\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T19:00:00-12:00"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-30T19:00:00+02:45\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T19:00:00+02:45"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-30T19:00:00+00:30\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T19:00:00+00:30"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-30T19:00:00-00:00\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T19:00:00-00:00"
+    },
+    "expect": {
+      "path": "/createdAt",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-30T19:00:00+0200\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T19:00:00+0200"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-30\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30"
+    },
+    "expect": {
+      "path": "/createdAt",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-30t19:00:00z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30t19:00:00z"
+    },
+    "expect": {
+      "path": "/createdAt",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-30 19:00:00Z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30 19:00:00Z"
+    },
+    "expect": {
+      "path": "/createdAt",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-30T19:00Z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T19:00Z"
+    },
+    "expect": {
+      "path": "/createdAt",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-30T19:00\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T19:00"
+    },
+    "expect": {
+      "path": "/createdAt",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-30T19:00:00\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T19:00:00"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-30T24:00:00Z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T24:00:00Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-30T24:30:00Z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T24:30:00Z"
+    },
+    "expect": {
+      "path": "/createdAt",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-30T23:59:60Z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T23:59:60Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"2027-02-29T00:00:00Z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-02-29T00:00:00Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"2028-02-29T00:00:00Z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2028-02-29T00:00:00Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"2027-02-30T00:00:00Z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-02-30T00:00:00Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-31T00:00:00Z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-31T00:00:00Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"2027-13-01T00:00:00Z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-13-01T00:00:00Z"
+    },
+    "expect": {
+      "path": "/createdAt",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "createdAt \"2027-00-10T00:00:00Z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-00-10T00:00:00Z"
+    },
+    "expect": {
+      "path": "/createdAt",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "createdAt \"2027-0,-10T00:00:00Z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-0,-10T00:00:00Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"0000-01-01T00:00:00Z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "0000-01-01T00:00:00Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"0000-01-01T00:00:00+01:00\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "0000-01-01T00:00:00+01:00"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"9999-12-31T23:59:59Z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "9999-12-31T23:59:59Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"9999-12-31T23:59:59-01:00\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "9999-12-31T23:59:59-01:00"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"1985-04-12T23:20:50.1235678912345Z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "1985-04-12T23:20:50.1235678912345Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"1985-04-12T23:20:50.123456789Z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "1985-04-12T23:20:50.123456789Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"1985-04-12T23:20:50,5Z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "1985-04-12T23:20:50,5Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"20270430T190000Z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "20270430T190000Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-30T19:00:00.Z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T19:00:00.Z"
+    },
+    "expect": {
+      "path": "/createdAt",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-30T19:00:7Z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T19:00:7Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-30T10:00:00+01:00-05\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T10:00:00+01:00-05"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"yesterday\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "yesterday"
+    },
+    "expect": {
+      "path": "/createdAt",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "createdAt \"\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": ""
+    },
+    "expect": {
+      "path": "/createdAt",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "time.at date only",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#time",
+          "at": "2027-04-30"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/at",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "cid \"bafyreidfayvfuwqa7qlnopdjiqrxzs6blmoeu4rujcjtnci5beludirz2a\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#recordSource",
+            "record": {
+              "space": "ats://x",
+              "did": "did:plc:organizer",
+              "collection": "app.gather.demo.item",
+              "rkey": "r1",
+              "cid": "bafyreidfayvfuwqa7qlnopdjiqrxzs6blmoeu4rujcjtnci5beludirz2a"
+            }
+          }
+        }
+      ]
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "cid \"bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#recordSource",
+            "record": {
+              "space": "ats://x",
+              "did": "did:plc:organizer",
+              "collection": "app.gather.demo.item",
+              "rkey": "r1",
+              "cid": "bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku"
+            }
+          }
+        }
+      ]
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "cid \"QmPK1s3pNYLi9ERiq3BDxKa4XosgWwFRQUydHUtz4YgpqB\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#recordSource",
+            "record": {
+              "space": "ats://x",
+              "did": "did:plc:organizer",
+              "collection": "app.gather.demo.item",
+              "rkey": "r1",
+              "cid": "QmPK1s3pNYLi9ERiq3BDxKa4XosgWwFRQUydHUtz4YgpqB"
+            }
+          }
+        }
+      ]
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "cid \"zdj7WhuEjrB52m1BisYCtmjH1hSKa7yZ3jEZ9JcXaFRD51wVz\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#recordSource",
+            "record": {
+              "space": "ats://x",
+              "did": "did:plc:organizer",
+              "collection": "app.gather.demo.item",
+              "rkey": "r1",
+              "cid": "zdj7WhuEjrB52m1BisYCtmjH1hSKa7yZ3jEZ9JcXaFRD51wVz"
+            }
+          }
+        }
+      ]
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "cid \"babcdefghij\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#recordSource",
+            "record": {
+              "space": "ats://x",
+              "did": "did:plc:organizer",
+              "collection": "app.gather.demo.item",
+              "rkey": "r1",
+              "cid": "babcdefghij"
+            }
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/sources/0/ref/record/cid",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "cid \"BAFYREIDFAYVFUWQA7QLNOPDJIQRXZS6BLMOEU4RUJCJTNCI5BELUDIRZ2A\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#recordSource",
+            "record": {
+              "space": "ats://x",
+              "did": "did:plc:organizer",
+              "collection": "app.gather.demo.item",
+              "rkey": "r1",
+              "cid": "BAFYREIDFAYVFUWQA7QLNOPDJIQRXZS6BLMOEU4RUJCJTNCI5BELUDIRZ2A"
+            }
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/sources/0/ref/record/cid",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "cid \"f01711220a8b1f0bd2e5a1b1cd4e56a4e2c1ea1d5c7b0e6b4a1e4b8f9c7c9d0e1f2a3b4c5\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#recordSource",
+            "record": {
+              "space": "ats://x",
+              "did": "did:plc:organizer",
+              "collection": "app.gather.demo.item",
+              "rkey": "r1",
+              "cid": "f01711220a8b1f0bd2e5a1b1cd4e56a4e2c1ea1d5c7b0e6b4a1e4b8f9c7c9d0e1f2a3b4c5"
+            }
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/sources/0/ref/record/cid",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "cid \"Qm\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#recordSource",
+            "record": {
+              "space": "ats://x",
+              "did": "did:plc:organizer",
+              "collection": "app.gather.demo.item",
+              "rkey": "r1",
+              "cid": "Qm"
+            }
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/sources/0/ref/record/cid",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "cid \"\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#recordSource",
+            "record": {
+              "space": "ats://x",
+              "did": "did:plc:organizer",
+              "collection": "app.gather.demo.item",
+              "rkey": "r1",
+              "cid": ""
+            }
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/sources/0/ref/record/cid",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "did \"did:plc:alice\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#person",
+          "did": "did:plc:alice"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "did \"did:web:example.com\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#person",
+          "did": "did:web:example.com"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "did \"did:PLC:alice\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#person",
+          "did": "did:PLC:alice"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/did",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "did \"did:plc:\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#person",
+          "did": "did:plc:"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/did",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "did \"did:plc:alice%\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#person",
+          "did": "did:plc:alice%"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/did",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "did \"alice\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#person",
+          "did": "alice"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/did",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "uri \"https://atmosphereconf.org/2027\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#image",
+          "url": "https://atmosphereconf.org/2027",
+          "alt": "x"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "uri \"at://did:plc:x/app.bsky.feed.post/1\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#image",
+          "url": "at://did:plc:x/app.bsky.feed.post/1",
+          "alt": "x"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "uri \"mailto:hi@example.com\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#image",
+          "url": "mailto:hi@example.com",
+          "alt": "x"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "uri \"https:/x\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#image",
+          "url": "https:/x",
+          "alt": "x"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/url",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "uri \"https://\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#image",
+          "url": "https://",
+          "alt": "x"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/url",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "uri \"no scheme\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#image",
+          "url": "no scheme",
+          "alt": "x"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/url",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "uri \"https://example.com/a b\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#image",
+          "url": "https://example.com/a b",
+          "alt": "x"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/url",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "uri \"é:x\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#image",
+          "url": "é:x",
+          "alt": "x"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/url",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "uri \"https://example.com/ \"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#image",
+          "url": "https://example.com/ ",
+          "alt": "x"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/url",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "uri \"https://example.com/\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#image",
+          "url": "https://example.com/",
+          "alt": "x"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "nsid \"app.gather.demo.question\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "c",
+          "ref": {
+            "$type": "app.gather.block.defs#collectionSource",
+            "collection": "app.gather.demo.question"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "nsid \"app.gather\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "c",
+          "ref": {
+            "$type": "app.gather.block.defs#collectionSource",
+            "collection": "app.gather"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/sources/0/ref/collection",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "nsid \"app.gather.demo.1question\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "c",
+          "ref": {
+            "$type": "app.gather.block.defs#collectionSource",
+            "collection": "app.gather.demo.1question"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/sources/0/ref/collection",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "nsid \"a.b.c\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "c",
+          "ref": {
+            "$type": "app.gather.block.defs#collectionSource",
+            "collection": "a.b.c"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "nsid \"app..demo\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "c",
+          "ref": {
+            "$type": "app.gather.block.defs#collectionSource",
+            "collection": "app..demo"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/sources/0/ref/collection",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "nsid \"com.example.fooBar\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "c",
+          "ref": {
+            "$type": "app.gather.block.defs#collectionSource",
+            "collection": "com.example.fooBar"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "rkey \"self\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#recordSource",
+            "record": {
+              "space": "ats://x",
+              "did": "did:plc:organizer",
+              "collection": "app.gather.demo.item",
+              "rkey": "self"
+            }
+          }
+        }
+      ]
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "rkey \"3lwelkom2027\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#recordSource",
+            "record": {
+              "space": "ats://x",
+              "did": "did:plc:organizer",
+              "collection": "app.gather.demo.item",
+              "rkey": "3lwelkom2027"
+            }
+          }
+        }
+      ]
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "rkey \".\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#recordSource",
+            "record": {
+              "space": "ats://x",
+              "did": "did:plc:organizer",
+              "collection": "app.gather.demo.item",
+              "rkey": "."
+            }
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/sources/0/ref/record/rkey",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "rkey \"..\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#recordSource",
+            "record": {
+              "space": "ats://x",
+              "did": "did:plc:organizer",
+              "collection": "app.gather.demo.item",
+              "rkey": ".."
+            }
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/sources/0/ref/record/rkey",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "rkey \"a/b\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#recordSource",
+            "record": {
+              "space": "ats://x",
+              "did": "did:plc:organizer",
+              "collection": "app.gather.demo.item",
+              "rkey": "a/b"
+            }
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/sources/0/ref/record/rkey",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "rkey \"a b\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#recordSource",
+            "record": {
+              "space": "ats://x",
+              "did": "did:plc:organizer",
+              "collection": "app.gather.demo.item",
+              "rkey": "a b"
+            }
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/sources/0/ref/record/rkey",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "rkey \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#recordSource",
+            "record": {
+              "space": "ats://x",
+              "did": "did:plc:organizer",
+              "collection": "app.gather.demo.item",
+              "rkey": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+            }
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/sources/0/ref/record/rkey",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "string 300 ascii bytes",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "string 301 ascii bytes",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/text",
+      "reason": "max-length"
+    }
+  },
+  {
+    "name": "string 100 euro signs (300 bytes)",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "string 101 euro signs (303 bytes)",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/text",
+      "reason": "max-length"
+    }
+  },
+  {
+    "name": "string 75 emoji (300 bytes)",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "string 76 emoji (304 bytes)",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/text",
+      "reason": "max-length"
+    }
+  },
+  {
+    "name": "source name empty",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/sources/0/name",
+      "reason": "min-length"
+    }
+  },
+  {
+    "name": "text is a number",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": 42
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/text",
+      "reason": "type"
+    }
+  },
+  {
+    "name": "text is null",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": null
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/text",
+      "reason": "type"
+    }
+  },
+  {
+    "name": "progress value 62",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#progress",
+          "value": 62
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "progress value 62.5",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#progress",
+          "value": 62.5
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/value",
+      "reason": "type"
+    }
+  },
+  {
+    "name": "progress value -1",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#progress",
+          "value": -1
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/value",
+      "reason": "minimum"
+    }
+  },
+  {
+    "name": "progress value \"62\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#progress",
+          "value": "62"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/value",
+      "reason": "type"
+    }
+  },
+  {
+    "name": "progress max 0",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#progress",
+          "value": 1,
+          "max": 0
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/max",
+      "reason": "minimum"
+    }
+  },
+  {
+    "name": "required is a string",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#textInput",
+          "id": "t",
+          "label": "x",
+          "required": "yes"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/required",
+      "reason": "type"
+    }
+  },
+  {
+    "name": "blocks is an object",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": {},
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks",
+      "reason": "type"
+    }
+  },
+  {
+    "name": "blocks has 51 items",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks",
+      "reason": "max-length"
+    }
+  },
+  {
+    "name": "block without $type",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "text": "no type"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/$type",
+      "reason": "required"
+    }
+  },
+  {
+    "name": "block is a string",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": ["header"],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/$type",
+      "reason": "required"
+    }
+  },
+  {
+    "name": "unknown block type",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.future#hologram",
+          "size": 3
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "unknown block type without #",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.future",
+          "size": 3
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "nested error",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#section",
+          "blocks": [
+            {
+              "$type": "app.gather.block.defs#button",
+              "label": "x"
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/blocks/0/id",
+      "reason": "required"
+    }
+  },
+  {
+    "name": "list without template",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#list",
+          "items": {
+            "source": "q"
+          }
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/template",
+      "reason": "required"
+    }
+  },
+  {
+    "name": "columns empty",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#columns",
+          "columns": []
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/columns",
+      "reason": "min-length"
+    }
+  },
+  {
+    "name": "facet feature without $type",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#richText",
+          "text": "hi",
+          "facets": [
+            {
+              "index": {
+                "byteStart": 0,
+                "byteEnd": 1
+              },
+              "features": [{}]
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/facets/0/features/0/$type",
+      "reason": "required"
+    }
+  },
+  {
+    "name": "collection filter is a string",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "c",
+          "ref": {
+            "$type": "app.gather.block.defs#collectionSource",
+            "collection": "a.b.c",
+            "filter": "x"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/sources/0/ref/filter",
+      "reason": "type"
+    }
+  },
+  {
+    "name": "collection filter is an array",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "c",
+          "ref": {
+            "$type": "app.gather.block.defs#collectionSource",
+            "collection": "a.b.c",
+            "filter": []
+          }
+        }
+      ]
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "missing createdAt",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#divider"
+        }
+      ]
+    },
+    "expect": {
+      "path": "/createdAt",
+      "reason": "required"
+    }
+  },
+  {
+    "name": "wrong $type",
+    "card": {
+      "$type": "app.gather.block.other",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/$type",
+      "reason": "const"
+    }
+  },
+  {
+    "name": "card is an array",
+    "card": [],
+    "expect": {
+      "path": "",
+      "reason": "type"
+    }
+  },
+  {
+    "name": "bind value is a string",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#stat",
+          "bind": {
+            "value": "stats"
+          }
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/bind/value",
+      "reason": "type"
+    }
+  },
+  {
+    "name": "extra unknown property",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "pinned": true
+    },
+    "expect": {
+      "ok": true
+    }
+  }
+]

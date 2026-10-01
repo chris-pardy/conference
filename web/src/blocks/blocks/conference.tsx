@@ -1,5 +1,5 @@
 import qrcode from 'qrcode-generator'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { type BlockData, settle, text, useBound, useSourceStates } from '../bindings'
 import { useCard } from '../context'
 import { blockAttrs, Placeholder } from '../frame'
@@ -140,14 +140,46 @@ function remaining(ms: number): string {
   return m ? `in ${h} h ${m} min` : `in ${h} h`
 }
 
-/** The current time, ticking every second while mounted. */
-function useNow(active: boolean): number {
+/**
+ * How long until a countdown's text next changes, or null once it never
+ * will: every minute while minutes show, every second in the last minute,
+ * then at the end, then never.
+ */
+function nextChange(now: number, at: number | undefined, end: number | undefined): number | null {
+  if (at === undefined) return null
+  const left = at - now
+  if (left > 60_000) return left % 60_000 || 60_000
+  if (left > 0) return left % 1000 || 1000
+  if (end !== undefined && now < end) return end - now
+  return null
+}
+
+/**
+ * The current time, updated whenever `next` says the display will change.
+ * The timer re-arms itself rather than waiting for a render, so ticks don't
+ * drift. `key` restarts it when what it counts towards changes.
+ */
+function useNow(next: (now: number) => number | null, key: string): number {
   const [now, setNow] = useState(() => Date.now())
+  const latest = useRef(next)
+  latest.current = next
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `key` stands for what `next` depends on
   useEffect(() => {
-    if (!active) return
-    const timer = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(timer)
-  }, [active])
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const schedule = (from: number) => {
+      const delay = latest.current(from)
+      if (delay === null) return
+      timer = setTimeout(() => {
+        const t = Date.now()
+        setNow(t)
+        schedule(t)
+      }, delay)
+    }
+    const t = Date.now()
+    setNow(t)
+    schedule(t)
+    return () => clearTimeout(timer)
+  }, [key])
   return now
 }
 
@@ -155,7 +187,9 @@ export function Time({ block }: Props) {
   const { timeZone } = useCard()
   const bound = useBound(block, ['at', 'end', 'label'])
   const countdown = block.mode === 'countdown'
-  const now = useNow(countdown)
+  const atMs = dateOf(bound.at)?.getTime()
+  const endMs = dateOf(bound.end)?.getTime()
+  const now = useNow((t) => (countdown ? nextChange(t, atMs, endMs) : null), `${countdown}:${atMs}:${endMs}`)
   const state = settle(bound)
   const at = dateOf(bound.at)
   if (state !== 'ready' || !at) return <Placeholder type="time" block={block} state={loadingOr(state)} />

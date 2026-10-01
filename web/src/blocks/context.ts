@@ -11,6 +11,8 @@ export interface CardScope {
   surface: Surface
   /** IANA zone for the card's times; undefined means the viewer's. */
   timeZone?: string
+  /** On a compact card, the one button it keeps, wherever that button is in the tree. */
+  compactPrimary?: unknown
 }
 
 export const CardContext = createContext<CardScope | null>(null)
@@ -26,3 +28,6 @@ export const ItemContext = createContext<{ item: unknown } | null>(null)
 
 /** The inputs a submit block sends: the nearest list item, sheet or card. */
 export const FormContext = createContext<FormStore | null>(null)
+
+/** Where a mention of a DID links to. Hosts can route mentions in-app; the default opens the profile on Bluesky. */
+export const ProfileLinkContext = createContext<(did: string) => string>((did) => `https://bsky.app/profile/${did}`)
