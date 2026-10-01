@@ -1,6 +1,6 @@
 import { useContext, useId, useState } from 'react'
 import { type BlockData, numeric, readPointer, settle, text, useBound } from '../bindings'
-import { FormContext, ItemContext } from '../context'
+import { FormContext, ItemContext, type ItemStep } from '../context'
 import { FormStore } from '../forms'
 import { blockAttrs, Placeholder } from '../frame'
 import { Blocks } from '../render'
@@ -35,8 +35,9 @@ export function List({ block }: Props) {
         const unique = counts.get(keys[i]) === 1
         const read = reads[i]
         const key = unique ? keys[i] : `${keys[i]}#${i}`
-        // Intents from inside the item name it by its key, else its position.
-        const itemKey = read.found && unique ? read.value : i
+        // Intents from inside the item name it by its key, else its position,
+        // tagged so the two can never be confused.
+        const itemKey = read.found && unique ? { key: read.value } : { index: i }
         return <ListItem key={key} item={item} itemKey={itemKey} template={block.template} />
       })}
     </ul>
@@ -44,7 +45,7 @@ export function List({ block }: Props) {
 }
 
 /** One element of a list: the template, seeing the element as `$item`, as its own form. */
-function ListItem({ item, itemKey, template }: { item: unknown; itemKey: unknown; template: unknown }) {
+function ListItem({ item, itemKey, template }: { item: unknown; itemKey: ItemStep; template: unknown }) {
   // Inside another list's item, the path starts with that item's.
   const outer = useContext(ItemContext)
   const [form] = useState(() => new FormStore())

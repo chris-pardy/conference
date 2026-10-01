@@ -218,7 +218,7 @@ test('TC-19: a button in a list sends its own bound value', async () => {
     blockId: 'up',
     actionId: 'upvote',
     value: 'at://did:plc:bob/q/2',
-    item: ['at://did:plc:bob/q/2'],
+    item: [{ key: 'at://did:plc:bob/q/2' }],
   })
 })
 
@@ -804,7 +804,7 @@ test('TC-21: a submit inside a list item says which item it came from', async ()
     blockId: 'reply',
     actionId: 'answer',
     value: { answer: 'Ja' },
-    item: ['q2'],
+    item: [{ key: 'q2' }],
   })
 })
 
@@ -885,7 +885,7 @@ test('TC-19: list items sharing a key are told apart by position', async () => {
     { resolver },
   )
   for (const name of ['First', 'Second', 'Third']) await user.click(screen.getByRole('button', { name }))
-  expect(onAction.mock.calls.map(([intent]) => intent.item)).toEqual([[0], [1], ['q2']])
+  expect(onAction.mock.calls.map(([intent]) => intent.item)).toEqual([[{ index: 0 }], [{ index: 1 }], [{ key: 'q2' }]])
 })
 
 test('TC-31: a different card in the same place starts fresh', async () => {
@@ -1057,8 +1057,8 @@ test('TC-19: intents from a nested list carry the path of item keys', async () =
   await user.click(screen.getByRole('button', { name: 'Recorded?' }))
   await user.click(screen.getByRole('button', { name: 'Laptops?' }))
   expect(onAction.mock.calls.map(([intent]) => intent.item)).toEqual([
-    ['s1', 1],
-    ['s2', 1],
+    [{ key: 's1' }, { key: 1 }],
+    [{ key: 's2' }, { key: 1 }],
   ])
 })
 
@@ -1076,4 +1076,56 @@ test('TC-32: a sheet an edit removed and restored does not reopen by itself', as
   expect(screen.queryByRole('dialog')).toBeNull()
   edit([withSheet])
   expect(screen.queryByRole('dialog')).toBeNull()
+})
+
+test('TC-19: an item named by position never looks like one named by a numeric key', async () => {
+  const user = userEvent.setup()
+  const resolver = new FixtureResolver({
+    qs: [
+      { n: 2, text: 'Dup A' },
+      { n: 2, text: 'Dup B' },
+      { n: 0, text: 'Zero' },
+    ],
+  })
+  const { onAction } = renderCard(
+    card(
+      [
+        block('list', {
+          items: binding('qs'),
+          key: '/n',
+          template: [block('button', { id: 'up', action: 'upvote', bind: { label: binding('$item', '/text') } })],
+        }),
+      ],
+      { sources: [recordSource('qs')] },
+    ),
+    { resolver },
+  )
+  await user.click(screen.getByRole('button', { name: 'Dup A' }))
+  await user.click(screen.getByRole('button', { name: 'Zero' }))
+  expect(onAction.mock.calls.map(([intent]) => intent.item)).toEqual([[{ index: 0 }], [{ key: 0 }]])
+})
+
+test('TC-21: moving one input out of a container keeps the container and the other input', async () => {
+  const user = userEvent.setup()
+  const x = block('textInput', { id: 'x', label: 'X' })
+  const y = block('textInput', { id: 'y', label: 'Y' })
+  const { edit } = editable([block('stack', { blocks: [x, y] })])
+  await user.type(screen.getByRole('textbox', { name: 'Y' }), 'kept')
+  edit([x, block('stack', { blocks: [y] })])
+  expect((screen.getByRole('textbox', { name: 'Y' }) as HTMLInputElement).value).toBe('kept')
+})
+
+test('TC-21: with duplicate ids (an invalid card), typed text stays put across re-renders', async () => {
+  const user = userEvent.setup()
+  const record = [
+    block('section', { blocks: [block('textInput', { id: 'x', label: 'First' })] }),
+    block('section', { blocks: [block('textInput', { id: 'x', label: 'Second' })] }),
+  ]
+  const { edit } = editable(record)
+  await user.type(screen.getByRole('textbox', { name: 'First' }), 'abc')
+  for (let i = 0; i < 3; i++) {
+    edit([...record])
+    expect((screen.getByRole('textbox', { name: 'First' }) as HTMLInputElement).value).toBe('abc')
+    expect((screen.getByRole('textbox', { name: 'Second' }) as HTMLInputElement).value).toBe('')
+  }
 })

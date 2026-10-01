@@ -23,30 +23,61 @@ export function idsIn(blocks: unknown): string[] {
 }
 
 /**
- * React keys that follow content across card edits. An item holding any id
- * it held before keeps its old key, so adding a block, column or container
- * anywhere doesn't remount the ones that were there (and lose what was typed
- * in them). Items with no ids fall back to `fallback`, e.g. type and place.
+ * React keys that follow content across card edits, so adding, removing or
+ * moving a block, column or container doesn't remount the ones that stayed
+ * (and lose what was typed in them).
+ *
+ * Each previous key goes to the item of the same kind that kept the most of
+ * the ids it had: a key moving to another kind would remount anyway, so it
+ * isn't worth taking from the item that stayed. Items left over get a key
+ * from their first id, or from `fallback` (e.g. type and place) if they hold
+ * none.
  */
 export function useStableKeys<T>(
   items: readonly T[],
   idsOf: (item: T) => string[],
+  kindOf: (item: T) => string,
   fallback: (item: T, index: number) => string,
 ): string[] {
-  const previous = useRef(new Map<string, string>())
+  const previous = useRef(new Map<string, { key: string; kind: string }>())
+  const ids = items.map(idsOf)
+  const kinds = items.map(kindOf)
+
+  // How many of its old ids each item kept, per previous key of its kind.
+  const claims: { item: number; key: string; kept: number }[] = []
+  ids.forEach((list, item) => {
+    const kept = new Map<string, number>()
+    for (const id of list) {
+      const was = previous.current.get(id)
+      if (was && was.kind === kinds[item]) kept.set(was.key, (kept.get(was.key) ?? 0) + 1)
+    }
+    for (const [key, n] of kept) claims.push({ item, key, kept: n })
+  })
+  // Most ids kept first; ties go to the earlier item.
+  claims.sort((a, b) => b.kept - a.kept || a.item - b.item)
+  const keys: (string | undefined)[] = items.map(() => undefined)
   const used = new Set<string>()
-  const next = new Map<string, string>()
-  const keys = items.map((item, i) => {
-    const ids = idsOf(item)
-    let key = ids.map((id) => previous.current.get(id)).find((k) => k !== undefined && !used.has(k))
-    key ??= ids.length > 0 ? `#${ids[0]}` : fallback(item, i)
+  for (const { item, key } of claims) {
+    if (keys[item] !== undefined || used.has(key)) continue
+    keys[item] = key
+    used.add(key)
+  }
+  const result = keys.map((assigned, i) => {
+    if (assigned !== undefined) return assigned
+    let key = ids[i].length > 0 ? `#${ids[i][0]}` : fallback(items[i], i)
     if (used.has(key)) key = `${key}@${i}`
     used.add(key)
-    for (const id of ids) next.set(id, key)
     return key
+  })
+
+  // The first item holding an id keeps it (ids should be unique, but an
+  // invalid card mustn't make keys swap on every render).
+  const next = new Map<string, { key: string; kind: string }>()
+  result.forEach((key, i) => {
+    for (const id of ids[i]) if (!next.has(id)) next.set(id, { key, kind: kinds[i] })
   })
   // Rendering the same items again gives the same keys, so this is safe to
   // repeat (StrictMode renders twice).
   previous.current = next
-  return keys
+  return result
 }

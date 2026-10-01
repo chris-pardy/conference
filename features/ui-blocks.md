@@ -974,10 +974,11 @@ The lexicons are in `lexicons/app/gather/block/{defs,card}.json`.
     with `loading()`, `forbidden()`, `failing()` and `set(name, value)`.
     A name it doesn't know is missing.
   - `ActionContext` holding `{onAction}`. An intent is `{card, blockId,
-    actionId, value}`, plus `item` when sent from inside a list item:
-    always an array of keys (each list item's `key` value, else its index),
-    outermost list first, so `["q2"]` for a single list. Added in round 7
-    and made a path in round 11, both by the user's decision.
+    actionId, value}`, plus `item` when sent from inside a list item: an
+    array of steps, outermost list first, each `{key}` (the list's `key`
+    value) or `{index}` (the position, when the item has no unique key).
+    So `[{key: "q2"}]` for a single list. Added in round 7, made a path in
+    round 11 and tagged in round 12, each by the user's decision.
   - `validateCard(record)`, which returns `{ok: true}` or
     `{ok: false, error: {path, reason, message}}`, and
     `conference_blocks::validate_card`, which returns a `CardError` with
@@ -1677,3 +1678,19 @@ minor. Everything was fixed, each with a regression test.
    and unknown fields). **Fixed:** it keeps `$type`, and unknown fields on
    the card and its sources; empty and missing lists stay distinct.
    `crates/blocks/tests/card.rs` checks the round trip.
+
+### Round 12
+
+Reviewed `79e23e0`. All gates passed. Not clean: 0 blocking, 2 major, 1
+nit. Everything was fixed, each with a regression test.
+
+1. **[major] A position fallback in `item` could equal another item's
+   numeric key**, so two items sent the same path. It touched the intent
+   contract, so it went to the user, who chose **tagged steps**: each step
+   is `{key}` or `{index}`. The test contract above is updated.
+2. **[major] Moving an input out of a container could remount the
+   container that stayed** (the moved input took the old key first).
+   **Fixed:** a previous key goes only to an item of the same kind, and to
+   the one that kept the most of its ids, whatever their order.
+3. **[nit] With duplicate ids (an invalid card), keys swapped on each
+   render.** **Fixed:** the first item holding an id keeps it.

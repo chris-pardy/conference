@@ -12,11 +12,12 @@ export interface ActionIntent {
   actionId: string
   value: unknown
   /**
-   * Sent from inside a list item: the keys of that item and of every list
-   * item it's inside, outermost first (one key for a single list). Absent
-   * outside lists.
+   * Sent from inside a list item: a step for that item and every list item
+   * it's inside, outermost first. A step is `{key}` (the list's `key` value)
+   * or `{index}` (its position, when it has no unique key). Absent outside
+   * lists.
    */
-  item?: unknown[]
+  item?: ({ key: unknown } | { index: number })[]
 }
 
 export interface ActionHost {

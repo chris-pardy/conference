@@ -109,6 +109,7 @@ export function Columns({ block }: Props) {
   const keys = useStableKeys(
     columns,
     (column) => idsIn(column?.blocks),
+    () => 'column',
     (_, i) => `@${i}`,
   )
   return (

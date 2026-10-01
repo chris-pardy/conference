@@ -38,6 +38,7 @@ export function Blocks({ blocks }: { blocks: unknown }) {
   const keys = useStableKeys(
     list,
     (block) => idsIn([block]),
+    (block) => String((block as BlockData | null)?.$type),
     (block, i) => `${(block as BlockData | null)?.$type}@${nth[i]}`,
   )
   if (!Array.isArray(blocks)) return null

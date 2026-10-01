@@ -23,13 +23,16 @@ export function useCard(): CardScope {
   return scope
 }
 
+/** One step of an item path: an item's key (the list's `key` value), or its position when it has no unique key. */
+export type ItemStep = { key: unknown } | { index: number }
+
 /**
  * The element a list is repeating over, seen by bindings as the source
- * `$item`, and its path: the keys (the list's `key` pointer value, else the
- * position) of this item and every list item it's inside, outermost first.
- * Intents sent from inside it carry the path as `item`.
+ * `$item`, and its path: a step for this item and every list item it's
+ * inside, outermost first. Intents sent from inside it carry the path as
+ * `item`.
  */
-export const ItemContext = createContext<{ item: unknown; path: unknown[] } | null>(null)
+export const ItemContext = createContext<{ item: unknown; path: ItemStep[] } | null>(null)
 
 /** The inputs a submit block sends: the nearest list item, sheet or card. */
 export const FormContext = createContext<FormStore | null>(null)
