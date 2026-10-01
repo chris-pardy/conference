@@ -23,7 +23,7 @@ const entries = Object.entries(files)
   .sort(([a], [b]) => a.localeCompare(b))
   .map(([path, entry]) => {
     const name = path.split('/').pop()?.replace('.card.json', '') ?? path
-    return { name, uri: `at://did:plc:organizer/app.gather.block.card/${name}`, entry }
+    return { name, uri: `at://did:plc:organizer/app.eventside.block.card/${name}`, entry }
   })
 
 type Logged = ActionIntent & { n: number }

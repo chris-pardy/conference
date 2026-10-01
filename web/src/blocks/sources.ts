@@ -55,7 +55,7 @@ export class SourceStore {
 
   /** The key and ref for a DID's profile. */
   profile(did: string): [string, SourceRef] {
-    return [`profile:${did}`, { $type: 'app.gather.block.defs#profileSource', did }]
+    return [`profile:${did}`, { $type: 'app.eventside.block.defs#profileSource', did }]
   }
 
   get(key: string): SourceState {

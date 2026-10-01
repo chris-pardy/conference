@@ -12,11 +12,11 @@ import {
 
 const is$typed = _is$typed,
   validate = _validate
-const id = 'app.gather.block.defs'
+const id = 'app.eventside.block.defs'
 
 /** A group of blocks with an optional title. */
 export interface Section {
-  $type?: 'app.gather.block.defs#section'
+  $type?: 'app.eventside.block.defs#section'
   /** Names the block in action intents. Required on interactive blocks. */
   id?: string
   title?: string
@@ -63,7 +63,7 @@ export function validateSection<V>(v: V) {
 
 /** A heading. */
 export interface Header {
-  $type?: 'app.gather.block.defs#header'
+  $type?: 'app.eventside.block.defs#header'
   /** Names the block in action intents. Required on interactive blocks. */
   id?: string
   text?: string
@@ -82,7 +82,7 @@ export function validateHeader<V>(v: V) {
 
 /** A horizontal rule. */
 export interface Divider {
-  $type?: 'app.gather.block.defs#divider'
+  $type?: 'app.eventside.block.defs#divider'
   /** Names the block in action intents. Required on interactive blocks. */
   id?: string
 }
@@ -99,7 +99,7 @@ export function validateDivider<V>(v: V) {
 
 /** Small print. */
 export interface Context {
-  $type?: 'app.gather.block.defs#context'
+  $type?: 'app.eventside.block.defs#context'
   /** Names the block in action intents. Required on interactive blocks. */
   id?: string
   text?: string
@@ -118,7 +118,7 @@ export function validateContext<V>(v: V) {
 
 /** Text with facets: mentions, links, tags and emphasis. */
 export interface RichText {
-  $type?: 'app.gather.block.defs#richText'
+  $type?: 'app.eventside.block.defs#richText'
   /** Names the block in action intents. Required on interactive blocks. */
   id?: string
   text?: string
@@ -138,7 +138,7 @@ export function validateRichText<V>(v: V) {
 
 /** An image from a URL. */
 export interface Image {
-  $type?: 'app.gather.block.defs#image'
+  $type?: 'app.eventside.block.defs#image'
   /** Names the block in action intents. Required on interactive blocks. */
   id?: string
   url?: string
@@ -160,7 +160,7 @@ export function validateImage<V>(v: V) {
 
 /** Blocks laid out vertically. */
 export interface Stack {
-  $type?: 'app.gather.block.defs#stack'
+  $type?: 'app.eventside.block.defs#stack'
   /** Names the block in action intents. Required on interactive blocks. */
   id?: string
   /** The stacked blocks. */
@@ -206,7 +206,7 @@ export function validateStack<V>(v: V) {
 
 /** Blocks laid out side by side. */
 export interface Columns {
-  $type?: 'app.gather.block.defs#columns'
+  $type?: 'app.eventside.block.defs#columns'
   /** Names the block in action intents. Required on interactive blocks. */
   id?: string
   columns: Column[]
@@ -224,7 +224,7 @@ export function validateColumns<V>(v: V) {
 
 /** A button. It sends an action intent, or opens a sheet. */
 export interface Button {
-  $type?: 'app.gather.block.defs#button'
+  $type?: 'app.eventside.block.defs#button'
   /** Names the block in action intents. Required on interactive blocks. */
   id: string
   label?: string
@@ -249,7 +249,7 @@ export function validateButton<V>(v: V) {
 
 /** A row of buttons sharing one action; the intent carries the chosen value. */
 export interface ButtonGroup {
-  $type?: 'app.gather.block.defs#buttonGroup'
+  $type?: 'app.eventside.block.defs#buttonGroup'
   /** Names the block in action intents. Required on interactive blocks. */
   id: string
   /** Accessible name of the group. */
@@ -270,7 +270,7 @@ export function validateButtonGroup<V>(v: V) {
 
 /** A text field. A submit block in the same form sends its value. */
 export interface TextInput {
-  $type?: 'app.gather.block.defs#textInput'
+  $type?: 'app.eventside.block.defs#textInput'
   /** Names the block in action intents. Required on interactive blocks. */
   id: string
   label: string
@@ -293,7 +293,7 @@ export function validateTextInput<V>(v: V) {
 
 /** A single or multiple choice. A submit block in the same form sends its value. */
 export interface Select {
-  $type?: 'app.gather.block.defs#select'
+  $type?: 'app.eventside.block.defs#select'
   /** Names the block in action intents. Required on interactive blocks. */
   id: string
   label: string
@@ -315,7 +315,7 @@ export function validateSelect<V>(v: V) {
 
 /** Sends one intent whose value maps each input's id to its value, for every input in its form: the nearest list item, sheet or card. */
 export interface Submit {
-  $type?: 'app.gather.block.defs#submit'
+  $type?: 'app.eventside.block.defs#submit'
   /** Names the block in action intents. Required on interactive blocks. */
   id: string
   label: string
@@ -335,7 +335,7 @@ export function validateSubmit<V>(v: V) {
 
 /** Repeats a template for each element of a bound array. The element is the source $item. */
 export interface List {
-  $type?: 'app.gather.block.defs#list'
+  $type?: 'app.eventside.block.defs#list'
   /** Names the block in action intents. Required on interactive blocks. */
   id?: string
   items: Binding
@@ -386,7 +386,7 @@ export function validateList<V>(v: V) {
 
 /** A progress or result bar. */
 export interface Progress {
-  $type?: 'app.gather.block.defs#progress'
+  $type?: 'app.eventside.block.defs#progress'
   /** Names the block in action intents. Required on interactive blocks. */
   id?: string
   label?: string
@@ -407,7 +407,7 @@ export function validateProgress<V>(v: V) {
 
 /** A number with a label. */
 export interface Stat {
-  $type?: 'app.gather.block.defs#stat'
+  $type?: 'app.eventside.block.defs#stat'
   /** Names the block in action intents. Required on interactive blocks. */
   id?: string
   value?: string
@@ -427,7 +427,7 @@ export function validateStat<V>(v: V) {
 
 /** A short tag in a semantic tone. */
 export interface Badge {
-  $type?: 'app.gather.block.defs#badge'
+  $type?: 'app.eventside.block.defs#badge'
   /** Names the block in action intents. Required on interactive blocks. */
   id?: string
   text?: string
@@ -447,7 +447,7 @@ export function validateBadge<V>(v: V) {
 
 /** A DID shown as avatar and name, from its profile. */
 export interface Person {
-  $type?: 'app.gather.block.defs#person'
+  $type?: 'app.eventside.block.defs#person'
   /** Names the block in action intents. Required on interactive blocks. */
   id?: string
   did?: string
@@ -466,7 +466,7 @@ export function validatePerson<V>(v: V) {
 
 /** A session: title, times and room. */
 export interface SessionRef {
-  $type?: 'app.gather.block.defs#sessionRef'
+  $type?: 'app.eventside.block.defs#sessionRef'
   /** Names the block in action intents. Required on interactive blocks. */
   id?: string
   title?: string
@@ -490,7 +490,7 @@ export function validateSessionRef<V>(v: V) {
 
 /** A room or location. */
 export interface Room {
-  $type?: 'app.gather.block.defs#room'
+  $type?: 'app.eventside.block.defs#room'
   /** Names the block in action intents. Required on interactive blocks. */
   id?: string
   name?: string
@@ -511,7 +511,7 @@ export function validateRoom<V>(v: V) {
 
 /** A time, or a countdown to it that says "now" until end and then "ended". */
 export interface Time {
-  $type?: 'app.gather.block.defs#time'
+  $type?: 'app.eventside.block.defs#time'
   /** Names the block in action intents. Required on interactive blocks. */
   id?: string
   label?: string
@@ -533,7 +533,7 @@ export function validateTime<V>(v: V) {
 
 /** A value with a copy button, e.g. a wifi password. */
 export interface Copyable {
-  $type?: 'app.gather.block.defs#copyable'
+  $type?: 'app.eventside.block.defs#copyable'
   /** Names the block in action intents. Required on interactive blocks. */
   id?: string
   label?: string
@@ -553,7 +553,7 @@ export function validateCopyable<V>(v: V) {
 
 /** A QR code generated on the client. */
 export interface Qr {
-  $type?: 'app.gather.block.defs#qr'
+  $type?: 'app.eventside.block.defs#qr'
   /** Names the block in action intents. Required on interactive blocks. */
   id?: string
   label?: string
@@ -573,7 +573,7 @@ export function validateQr<V>(v: V) {
 
 /** Reserved for block-sandbox: a wasm module that returns blocks. */
 export interface Custom {
-  $type?: 'app.gather.block.defs#custom'
+  $type?: 'app.eventside.block.defs#custom'
   /** Names the block in action intents. Required on interactive blocks. */
   id?: string
   module: ModuleRef
@@ -593,7 +593,7 @@ export function validateCustom<V>(v: V) {
 
 /** Reserved for block-sandbox: draw commands from a module, reporting taps. */
 export interface Canvas {
-  $type?: 'app.gather.block.defs#canvas'
+  $type?: 'app.eventside.block.defs#canvas'
   /** Names the block in action intents. Required on interactive blocks. */
   id?: string
   module: ModuleRef
@@ -614,7 +614,7 @@ export function validateCanvas<V>(v: V) {
 
 /** One column of a columns block. */
 export interface Column {
-  $type?: 'app.gather.block.defs#column'
+  $type?: 'app.eventside.block.defs#column'
   blocks: (
     | $Typed<Section>
     | $Typed<Header>
@@ -657,7 +657,7 @@ export function validateColumn<V>(v: V) {
 
 /** Blocks shown in a bottom sheet. */
 export interface Sheet {
-  $type?: 'app.gather.block.defs#sheet'
+  $type?: 'app.eventside.block.defs#sheet'
   title?: string
   blocks: (
     | $Typed<Section>
@@ -701,7 +701,7 @@ export function validateSheet<V>(v: V) {
 
 /** A labelled value. */
 export interface Option {
-  $type?: 'app.gather.block.defs#option'
+  $type?: 'app.eventside.block.defs#option'
   label: string
   value: string
 }
@@ -717,7 +717,7 @@ export function validateOption<V>(v: V) {
 }
 
 export interface AspectRatio {
-  $type?: 'app.gather.block.defs#aspectRatio'
+  $type?: 'app.eventside.block.defs#aspectRatio'
   width: number
   height: number
 }
@@ -734,7 +734,7 @@ export function validateAspectRatio<V>(v: V) {
 
 /** A value read from a named source of the card, or $item inside a list. */
 export interface Binding {
-  $type?: 'app.gather.block.defs#binding'
+  $type?: 'app.eventside.block.defs#binding'
   source: string
   /** A JSON pointer into the source value. Empty means the whole value. */
   path?: string
@@ -752,7 +752,7 @@ export function validateBinding<V>(v: V) {
 
 /** Bindings for a block's properties, by property name. A bound property replaces the literal one. */
 export interface Bind {
-  $type?: 'app.gather.block.defs#bind'
+  $type?: 'app.eventside.block.defs#bind'
   text?: Binding
   title?: Binding
   label?: Binding
@@ -781,7 +781,7 @@ export function validateBind<V>(v: V) {
 
 /** Reserved for block-sandbox: a value computed by a wasm module from declared sources. */
 export interface Computed {
-  $type?: 'app.gather.block.defs#computed'
+  $type?: 'app.eventside.block.defs#computed'
   module: ModuleRef
   export: string
   inputs?: string[]
@@ -799,7 +799,7 @@ export function validateComputed<V>(v: V) {
 
 /** A named source that bindings refer to. */
 export interface Source {
-  $type?: 'app.gather.block.defs#source'
+  $type?: 'app.eventside.block.defs#source'
   name: string
   ref:
     | $Typed<RecordSource>
@@ -821,7 +821,7 @@ export function validateSource<V>(v: V) {
 
 /** One record in a space. */
 export interface RecordSource {
-  $type?: 'app.gather.block.defs#recordSource'
+  $type?: 'app.eventside.block.defs#recordSource'
   record: SpaceRecordRef
 }
 
@@ -837,7 +837,7 @@ export function validateRecordSource<V>(v: V) {
 
 /** A collection in the card's space. */
 export interface CollectionSource {
-  $type?: 'app.gather.block.defs#collectionSource'
+  $type?: 'app.eventside.block.defs#collectionSource'
   collection: string
   filter?: { [_ in string]: unknown }
 }
@@ -854,7 +854,7 @@ export function validateCollectionSource<V>(v: V) {
 
 /** A DID's profile. */
 export interface ProfileSource {
-  $type?: 'app.gather.block.defs#profileSource'
+  $type?: 'app.eventside.block.defs#profileSource'
   did: string
 }
 
@@ -870,7 +870,7 @@ export function validateProfileSource<V>(v: V) {
 
 /** A quasi-record computed by the appview (see block-actions). */
 export interface ViewSource {
-  $type?: 'app.gather.block.defs#viewSource'
+  $type?: 'app.eventside.block.defs#viewSource'
   view: string
   params?: { [_ in string]: unknown }
 }
@@ -887,7 +887,7 @@ export function validateViewSource<V>(v: V) {
 
 /** A record in a space. Space record URIs have more segments than at-uris, so strongRef does not fit. */
 export interface SpaceRecordRef {
-  $type?: 'app.gather.block.defs#spaceRecordRef'
+  $type?: 'app.eventside.block.defs#spaceRecordRef'
   /** The space URI. */
   space: string
   /** The author. */
@@ -909,7 +909,7 @@ export function validateSpaceRecordRef<V>(v: V) {
 
 /** A wasm module, optionally with a script for the shared JS runtime. */
 export interface ModuleRef {
-  $type?: 'app.gather.block.defs#moduleRef'
+  $type?: 'app.eventside.block.defs#moduleRef'
   wasm: ModuleBlob
   script?: ModuleBlob
   exports?: string[]
@@ -927,7 +927,7 @@ export function validateModuleRef<V>(v: V) {
 
 /** A blob by CID, with the DID of the repo that holds it. */
 export interface ModuleBlob {
-  $type?: 'app.gather.block.defs#moduleBlob'
+  $type?: 'app.eventside.block.defs#moduleBlob'
   cid: string
   did: string
 }
@@ -944,7 +944,7 @@ export function validateModuleBlob<V>(v: V) {
 
 /** A declarative animation the host runs. */
 export interface Animate {
-  $type?: 'app.gather.block.defs#animate'
+  $type?: 'app.eventside.block.defs#animate'
   property: string
   from: string
   to: string
@@ -967,7 +967,7 @@ export function validateAnimate<V>(v: V) {
 
 /** Annotates a byte range of the text, as in app.bsky.richtext.facet. */
 export interface Facet {
-  $type?: 'app.gather.block.defs#facet'
+  $type?: 'app.eventside.block.defs#facet'
   index: ByteSlice
   features: (
     | $Typed<Mention>
@@ -991,7 +991,7 @@ export function validateFacet<V>(v: V) {
 
 /** A range of UTF-8 bytes: start inclusive, end exclusive. */
 export interface ByteSlice {
-  $type?: 'app.gather.block.defs#byteSlice'
+  $type?: 'app.eventside.block.defs#byteSlice'
   byteStart: number
   byteEnd: number
 }
@@ -1007,7 +1007,7 @@ export function validateByteSlice<V>(v: V) {
 }
 
 export interface Mention {
-  $type?: 'app.gather.block.defs#mention'
+  $type?: 'app.eventside.block.defs#mention'
   did: string
 }
 
@@ -1022,7 +1022,7 @@ export function validateMention<V>(v: V) {
 }
 
 export interface Link {
-  $type?: 'app.gather.block.defs#link'
+  $type?: 'app.eventside.block.defs#link'
   uri: string
 }
 
@@ -1037,7 +1037,7 @@ export function validateLink<V>(v: V) {
 }
 
 export interface Tag {
-  $type?: 'app.gather.block.defs#tag'
+  $type?: 'app.eventside.block.defs#tag'
   tag: string
 }
 
@@ -1052,7 +1052,7 @@ export function validateTag<V>(v: V) {
 }
 
 export interface Bold {
-  $type?: 'app.gather.block.defs#bold'
+  $type?: 'app.eventside.block.defs#bold'
 }
 
 const hashBold = 'bold'
@@ -1066,7 +1066,7 @@ export function validateBold<V>(v: V) {
 }
 
 export interface Italic {
-  $type?: 'app.gather.block.defs#italic'
+  $type?: 'app.eventside.block.defs#italic'
 }
 
 const hashItalic = 'italic'

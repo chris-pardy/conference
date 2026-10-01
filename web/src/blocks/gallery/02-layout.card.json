@@ -1,37 +1,37 @@
 {
   "title": "Layout: a stack and columns of stats",
   "card": {
-    "$type": "app.gather.block.card",
+    "$type": "app.eventside.block.card",
     "blocks": [
       {
-        "$type": "app.gather.block.defs#header",
+        "$type": "app.eventside.block.defs#header",
         "text": "Dag 2 in cijfers"
       },
       {
-        "$type": "app.gather.block.defs#stack",
+        "$type": "app.eventside.block.defs#stack",
         "blocks": [
           {
-            "$type": "app.gather.block.defs#badge",
+            "$type": "app.eventside.block.defs#badge",
             "text": "Live",
             "tone": "success"
           },
           {
-            "$type": "app.gather.block.defs#richText",
+            "$type": "app.eventside.block.defs#richText",
             "text": "Numbers update as people check in at the garderobe."
           },
           {
-            "$type": "app.gather.block.defs#context",
+            "$type": "app.eventside.block.defs#context",
             "text": "Checked in since 08:30"
           }
         ]
       },
       {
-        "$type": "app.gather.block.defs#columns",
+        "$type": "app.eventside.block.defs#columns",
         "columns": [
           {
             "blocks": [
               {
-                "$type": "app.gather.block.defs#stat",
+                "$type": "app.eventside.block.defs#stat",
                 "label": "attendees",
                 "bind": {
                   "value": {
@@ -45,7 +45,7 @@
           {
             "blocks": [
               {
-                "$type": "app.gather.block.defs#stat",
+                "$type": "app.eventside.block.defs#stat",
                 "value": "38",
                 "label": "talks"
               }
@@ -54,7 +54,7 @@
           {
             "blocks": [
               {
-                "$type": "app.gather.block.defs#stat",
+                "$type": "app.eventside.block.defs#stat",
                 "value": "3",
                 "label": "rooms"
               }
@@ -69,11 +69,11 @@
       {
         "name": "stats",
         "ref": {
-          "$type": "app.gather.block.defs#recordSource",
+          "$type": "app.eventside.block.defs#recordSource",
           "record": {
-            "space": "ats://did:plc:organizer/app.gather.conference/amsterdam-2027",
+            "space": "ats://did:plc:organizer/app.eventside.conference/amsterdam-2027",
             "did": "did:plc:organizer",
-            "collection": "app.gather.demo.item",
+            "collection": "app.eventside.demo.item",
             "rkey": "stats"
           }
         }

@@ -1,6 +1,6 @@
 {
   "lexicon": 1,
-  "id": "app.gather.block.card",
+  "id": "app.eventside.block.card",
   "defs": {
     "main": {
       "type": "record",
@@ -16,31 +16,31 @@
             "items": {
               "type": "union",
               "refs": [
-                "app.gather.block.defs#section",
-                "app.gather.block.defs#header",
-                "app.gather.block.defs#divider",
-                "app.gather.block.defs#context",
-                "app.gather.block.defs#richText",
-                "app.gather.block.defs#image",
-                "app.gather.block.defs#stack",
-                "app.gather.block.defs#columns",
-                "app.gather.block.defs#button",
-                "app.gather.block.defs#buttonGroup",
-                "app.gather.block.defs#textInput",
-                "app.gather.block.defs#select",
-                "app.gather.block.defs#submit",
-                "app.gather.block.defs#list",
-                "app.gather.block.defs#progress",
-                "app.gather.block.defs#stat",
-                "app.gather.block.defs#badge",
-                "app.gather.block.defs#person",
-                "app.gather.block.defs#sessionRef",
-                "app.gather.block.defs#room",
-                "app.gather.block.defs#time",
-                "app.gather.block.defs#copyable",
-                "app.gather.block.defs#qr",
-                "app.gather.block.defs#custom",
-                "app.gather.block.defs#canvas"
+                "app.eventside.block.defs#section",
+                "app.eventside.block.defs#header",
+                "app.eventside.block.defs#divider",
+                "app.eventside.block.defs#context",
+                "app.eventside.block.defs#richText",
+                "app.eventside.block.defs#image",
+                "app.eventside.block.defs#stack",
+                "app.eventside.block.defs#columns",
+                "app.eventside.block.defs#button",
+                "app.eventside.block.defs#buttonGroup",
+                "app.eventside.block.defs#textInput",
+                "app.eventside.block.defs#select",
+                "app.eventside.block.defs#submit",
+                "app.eventside.block.defs#list",
+                "app.eventside.block.defs#progress",
+                "app.eventside.block.defs#stat",
+                "app.eventside.block.defs#badge",
+                "app.eventside.block.defs#person",
+                "app.eventside.block.defs#sessionRef",
+                "app.eventside.block.defs#room",
+                "app.eventside.block.defs#time",
+                "app.eventside.block.defs#copyable",
+                "app.eventside.block.defs#qr",
+                "app.eventside.block.defs#custom",
+                "app.eventside.block.defs#canvas"
               ]
             },
             "maxLength": 50,
@@ -50,7 +50,7 @@
             "type": "array",
             "items": {
               "type": "ref",
-              "ref": "app.gather.block.defs#source"
+              "ref": "app.eventside.block.defs#source"
             },
             "maxLength": 20
           },
@@ -59,7 +59,7 @@
             "description": "Reserved for block-actions.",
             "items": {
               "type": "ref",
-              "ref": "app.gather.block.defs#moduleRef"
+              "ref": "app.eventside.block.defs#moduleRef"
             },
             "maxLength": 10
           },

@@ -2,14 +2,14 @@
   "title": "Compact surface: the first blocks and the primary button",
   "surface": "compact",
   "card": {
-    "$type": "app.gather.block.card",
+    "$type": "app.eventside.block.card",
     "blocks": [
       {
-        "$type": "app.gather.block.defs#header",
+        "$type": "app.eventside.block.defs#header",
         "text": "Keukenhof trip"
       },
       {
-        "$type": "app.gather.block.defs#image",
+        "$type": "app.eventside.block.defs#image",
         "url": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMjAgMTYwIj48cmVjdCB3aWR0aD0iMzIwIiBoZWlnaHQ9IjE2MCIgZmlsbD0iI2RmZTdmNSIvPjxyZWN0IHk9IjExOCIgd2lkdGg9IjMyMCIgaGVpZ2h0PSI0MiIgZmlsbD0iIzdkOWJkMSIvPjxnIGZpbGw9IiMxZjRlZDgiPjxwYXRoIGQ9Ik0yMCAxMThWNjBsMTgtMTggMTggMTh2NTh6Ii8+PHBhdGggZD0iTTYyIDExOFY1MGwxNC0xNiAxNCAxNnY2OHoiLz48cGF0aCBkPSJNOTYgMTE4VjY2bDIwLTIwIDIwIDIwdjUyeiIvPjxwYXRoIGQ9Ik0xNDIgMTE4VjQ0bDE2LTE4IDE2IDE4djc0eiIvPjxwYXRoIGQ9Ik0xODAgMTE4VjU4bDE4LTIwIDE4IDIwdjYweiIvPjxwYXRoIGQ9Ik0yMjIgMTE4VjQ4bDE0LTE2IDE0IDE2djcweiIvPjxwYXRoIGQ9Ik0yNTYgMTE4VjYybDIyLTIyIDIyIDIydjU2eiIvPjwvZz48ZyBmaWxsPSIjZWVmMWY3Ij48cmVjdCB4PSIzMCIgeT0iNzAiIHdpZHRoPSI2IiBoZWlnaHQ9IjkiLz48cmVjdCB4PSI0MiIgeT0iNzAiIHdpZHRoPSI2IiBoZWlnaHQ9IjkiLz48cmVjdCB4PSI3MiIgeT0iNjAiIHdpZHRoPSI4IiBoZWlnaHQ9IjEwIi8+PHJlY3QgeD0iMTA4IiB5PSI3OCIgd2lkdGg9IjYiIGhlaWdodD0iOSIvPjxyZWN0IHg9IjEyMCIgeT0iNzgiIHdpZHRoPSI2IiBoZWlnaHQ9IjkiLz48cmVjdCB4PSIxNTIiIHk9IjU0IiB3aWR0aD0iOCIgaGVpZ2h0PSIxMCIvPjxyZWN0IHg9IjE5MCIgeT0iNzAiIHdpZHRoPSI2IiBoZWlnaHQ9IjkiLz48cmVjdCB4PSIyMDIiIHk9IjcwIiB3aWR0aD0iNiIgaGVpZ2h0PSI5Ii8+PHJlY3QgeD0iMjMyIiB5PSI1OCIgd2lkdGg9IjgiIGhlaWdodD0iMTAiLz48cmVjdCB4PSIyNjgiIHk9Ijc0IiB3aWR0aD0iNiIgaGVpZ2h0PSI5Ii8+PHJlY3QgeD0iMjgyIiB5PSI3NCIgd2lkdGg9IjYiIGhlaWdodD0iOSIvPjwvZz48L3N2Zz4=",
         "alt": "Tulip fields",
         "aspectRatio": {
@@ -18,16 +18,16 @@
         }
       },
       {
-        "$type": "app.gather.block.defs#richText",
+        "$type": "app.eventside.block.defs#richText",
         "text": "Saturday bus leaves Centraal at 09:15. Bring a raincoat."
       },
       {
-        "$type": "app.gather.block.defs#textInput",
+        "$type": "app.eventside.block.defs#textInput",
         "id": "note",
         "label": "Anything we should know?"
       },
       {
-        "$type": "app.gather.block.defs#button",
+        "$type": "app.eventside.block.defs#button",
         "id": "join",
         "label": "Join the trip",
         "action": "join",

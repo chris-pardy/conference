@@ -6,7 +6,7 @@ import { idsIn, useStableKeys } from './keys'
 import { MAX_DEPTH } from './limits'
 import { registry } from './registry'
 
-export const DEFS = 'app.gather.block.defs'
+export const DEFS = 'app.eventside.block.defs'
 
 /** A block's vocabulary type, e.g. "header", or null for anything this version doesn't know. */
 export function blockType(block: unknown): string | null {

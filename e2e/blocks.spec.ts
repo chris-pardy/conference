@@ -23,7 +23,7 @@ async function openGallery(page: Page) {
 
 /** The vocabulary: every block type in the card lexicon's union, minus the two block-sandbox renders. */
 function vocabulary(): string[] {
-  const lexicon = JSON.parse(readFileSync(resolve(ROOT, 'lexicons/app/gather/block/card.json'), 'utf8'))
+  const lexicon = JSON.parse(readFileSync(resolve(ROOT, 'lexicons/app/eventside/block/card.json'), 'utf8'))
   const refs: string[] = lexicon.defs.main.record.properties.blocks.items.refs
   return refs.map((ref) => ref.split('#')[1]).filter((type) => type !== 'custom' && type !== 'canvas')
 }
@@ -42,7 +42,7 @@ function testTheme(tokens: { colors: string[]; fonts: string[] }) {
   const colors = Object.fromEntries(
     tokens.colors.map((name, i) => [name, `rgb(${11 + i * 9}, ${201 - i * 7}, ${97 + i * 5})`]),
   )
-  const fonts = Object.fromEntries(tokens.fonts.map((name, i) => [name, `"Gather Test Font ${i}"`]))
+  const fonts = Object.fromEntries(tokens.fonts.map((name, i) => [name, `"Eventside Test Font ${i}"`]))
   const css = `:root:root { ${Object.entries({ ...colors, ...fonts })
     .map(([name, value]) => `${name}: ${value} !important;`)
     .join(' ')} }`

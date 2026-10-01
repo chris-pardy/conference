@@ -1,5 +1,5 @@
 import { useContext, useMemo, useRef, useState } from 'react'
-import type { Main as CardRecord } from '../lexicon/types/app/gather/block/card'
+import type { Main as CardRecord } from '../lexicon/types/app/eventside/block/card'
 import type { CardRef } from './ActionContext'
 import { variantOf } from './blocks/inputs'
 import { CardContext, FormContext } from './context'
@@ -13,7 +13,7 @@ import './blocks.css'
 /** Where a card is shown. */
 export type Surface = 'feed' | 'compact' | 'sheet' | 'ephemeral'
 
-/** An `app.gather.block.card` record. */
+/** An `app.eventside.block.card` record. */
 export type Card = CardRecord
 
 export interface BlockCardProps {

@@ -1,6 +1,6 @@
 {
   "lexicon": 1,
-  "id": "app.gather.block.defs",
+  "id": "app.eventside.block.defs",
   "defs": {
     "section": {
       "type": "object",

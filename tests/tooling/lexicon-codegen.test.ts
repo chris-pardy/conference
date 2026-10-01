@@ -9,7 +9,7 @@ afterAll(() => copy?.remove())
 
 test('TC-3: generated types cannot drift from the lexicons', async () => {
   copy = await copyProject()
-  const lexicon = join(copy.dir, 'lexicons/app/gather/block/card.json')
+  const lexicon = join(copy.dir, 'lexicons/app/eventside/block/card.json')
   const doc = JSON.parse(readFileSync(lexicon, 'utf8'))
   doc.defs.main.record.properties.pinnedUntil = { type: 'string', format: 'datetime' }
   writeFileSync(lexicon, `${JSON.stringify(doc, null, 2)}\n`)

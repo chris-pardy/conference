@@ -2,10 +2,10 @@
   {
     "name": "createdAt \"2027-04-30T07:00:00.000Z\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -18,10 +18,10 @@
   {
     "name": "createdAt \"2027-04-30T19:00:00+02:00\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -34,10 +34,10 @@
   {
     "name": "createdAt \"2027-04-30T19:00:00-05:30\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -50,10 +50,10 @@
   {
     "name": "createdAt \"2027-04-30T19:00:00+05:45\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -66,10 +66,10 @@
   {
     "name": "createdAt \"2027-04-30T19:00:00+14:00\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -82,10 +82,10 @@
   {
     "name": "createdAt \"2027-04-30T19:00:00-12:00\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -98,10 +98,10 @@
   {
     "name": "createdAt \"2027-04-30T19:00:00+02:45\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -114,10 +114,10 @@
   {
     "name": "createdAt \"2027-04-30T19:00:00+00:30\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -130,10 +130,10 @@
   {
     "name": "createdAt \"2027-04-30T19:00:00-00:00\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -147,10 +147,10 @@
   {
     "name": "createdAt \"2027-04-30T19:00:00+0200\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -163,10 +163,10 @@
   {
     "name": "createdAt \"2027-04-30\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -180,10 +180,10 @@
   {
     "name": "createdAt \"2027-04-30t19:00:00z\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -197,10 +197,10 @@
   {
     "name": "createdAt \"2027-04-30 19:00:00Z\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -214,10 +214,10 @@
   {
     "name": "createdAt \"2027-04-30T19:00Z\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -231,10 +231,10 @@
   {
     "name": "createdAt \"2027-04-30T19:00\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -248,10 +248,10 @@
   {
     "name": "createdAt \"2027-04-30T19:00:00\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -264,10 +264,10 @@
   {
     "name": "createdAt \"2027-04-30T24:00:00Z\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -280,10 +280,10 @@
   {
     "name": "createdAt \"2027-04-30T24:30:00Z\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -297,10 +297,10 @@
   {
     "name": "createdAt \"2027-04-30T23:59:60Z\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -313,10 +313,10 @@
   {
     "name": "createdAt \"2027-02-29T00:00:00Z\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -329,10 +329,10 @@
   {
     "name": "createdAt \"2028-02-29T00:00:00Z\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -345,10 +345,10 @@
   {
     "name": "createdAt \"2027-02-30T00:00:00Z\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -361,10 +361,10 @@
   {
     "name": "createdAt \"2027-04-31T00:00:00Z\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -377,10 +377,10 @@
   {
     "name": "createdAt \"2027-13-01T00:00:00Z\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -394,10 +394,10 @@
   {
     "name": "createdAt \"2027-00-10T00:00:00Z\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -411,10 +411,10 @@
   {
     "name": "createdAt \"2027-0,-10T00:00:00Z\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -427,10 +427,10 @@
   {
     "name": "createdAt \"0000-01-01T00:00:00Z\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -443,10 +443,10 @@
   {
     "name": "createdAt \"0000-01-01T00:00:00+01:00\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -459,10 +459,10 @@
   {
     "name": "createdAt \"9999-12-31T23:59:59Z\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -475,10 +475,10 @@
   {
     "name": "createdAt \"9999-12-31T23:59:59-01:00\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -491,10 +491,10 @@
   {
     "name": "createdAt \"1985-04-12T23:20:50.1235678912345Z\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -507,10 +507,10 @@
   {
     "name": "createdAt \"1985-04-12T23:20:50.123456789Z\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -523,10 +523,10 @@
   {
     "name": "createdAt \"1985-04-12T23:20:50,5Z\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -539,10 +539,10 @@
   {
     "name": "createdAt \"20270430T190000Z\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -555,10 +555,10 @@
   {
     "name": "createdAt \"2027-04-30T19:00:00.Z\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -572,10 +572,10 @@
   {
     "name": "createdAt \"2027-04-30T19:00:7Z\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -588,10 +588,10 @@
   {
     "name": "createdAt \"2027-04-30T10:00:00+01:00-05\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -604,10 +604,10 @@
   {
     "name": "createdAt \"yesterday\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -621,10 +621,10 @@
   {
     "name": "createdAt \"\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -638,10 +638,10 @@
   {
     "name": "time.at date only",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#time",
+          "$type": "app.eventside.block.defs#time",
           "at": "2027-04-30"
         }
       ],
@@ -655,10 +655,10 @@
   {
     "name": "cid \"bafyreidfayvfuwqa7qlnopdjiqrxzs6blmoeu4rujcjtnci5beludirz2a\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -667,11 +667,11 @@
         {
           "name": "s",
           "ref": {
-            "$type": "app.gather.block.defs#recordSource",
+            "$type": "app.eventside.block.defs#recordSource",
             "record": {
               "space": "ats://x",
               "did": "did:plc:organizer",
-              "collection": "app.gather.demo.item",
+              "collection": "app.eventside.demo.item",
               "rkey": "r1",
               "cid": "bafyreidfayvfuwqa7qlnopdjiqrxzs6blmoeu4rujcjtnci5beludirz2a"
             }
@@ -686,10 +686,10 @@
   {
     "name": "cid \"bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -698,11 +698,11 @@
         {
           "name": "s",
           "ref": {
-            "$type": "app.gather.block.defs#recordSource",
+            "$type": "app.eventside.block.defs#recordSource",
             "record": {
               "space": "ats://x",
               "did": "did:plc:organizer",
-              "collection": "app.gather.demo.item",
+              "collection": "app.eventside.demo.item",
               "rkey": "r1",
               "cid": "bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku"
             }
@@ -717,10 +717,10 @@
   {
     "name": "cid \"QmPK1s3pNYLi9ERiq3BDxKa4XosgWwFRQUydHUtz4YgpqB\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -729,11 +729,11 @@
         {
           "name": "s",
           "ref": {
-            "$type": "app.gather.block.defs#recordSource",
+            "$type": "app.eventside.block.defs#recordSource",
             "record": {
               "space": "ats://x",
               "did": "did:plc:organizer",
-              "collection": "app.gather.demo.item",
+              "collection": "app.eventside.demo.item",
               "rkey": "r1",
               "cid": "QmPK1s3pNYLi9ERiq3BDxKa4XosgWwFRQUydHUtz4YgpqB"
             }
@@ -748,10 +748,10 @@
   {
     "name": "cid \"zdj7WhuEjrB52m1BisYCtmjH1hSKa7yZ3jEZ9JcXaFRD51wVz\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -760,11 +760,11 @@
         {
           "name": "s",
           "ref": {
-            "$type": "app.gather.block.defs#recordSource",
+            "$type": "app.eventside.block.defs#recordSource",
             "record": {
               "space": "ats://x",
               "did": "did:plc:organizer",
-              "collection": "app.gather.demo.item",
+              "collection": "app.eventside.demo.item",
               "rkey": "r1",
               "cid": "zdj7WhuEjrB52m1BisYCtmjH1hSKa7yZ3jEZ9JcXaFRD51wVz"
             }
@@ -779,10 +779,10 @@
   {
     "name": "cid \"babcdefghij\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -791,11 +791,11 @@
         {
           "name": "s",
           "ref": {
-            "$type": "app.gather.block.defs#recordSource",
+            "$type": "app.eventside.block.defs#recordSource",
             "record": {
               "space": "ats://x",
               "did": "did:plc:organizer",
-              "collection": "app.gather.demo.item",
+              "collection": "app.eventside.demo.item",
               "rkey": "r1",
               "cid": "babcdefghij"
             }
@@ -811,10 +811,10 @@
   {
     "name": "cid \"BAFYREIDFAYVFUWQA7QLNOPDJIQRXZS6BLMOEU4RUJCJTNCI5BELUDIRZ2A\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -823,11 +823,11 @@
         {
           "name": "s",
           "ref": {
-            "$type": "app.gather.block.defs#recordSource",
+            "$type": "app.eventside.block.defs#recordSource",
             "record": {
               "space": "ats://x",
               "did": "did:plc:organizer",
-              "collection": "app.gather.demo.item",
+              "collection": "app.eventside.demo.item",
               "rkey": "r1",
               "cid": "BAFYREIDFAYVFUWQA7QLNOPDJIQRXZS6BLMOEU4RUJCJTNCI5BELUDIRZ2A"
             }
@@ -843,10 +843,10 @@
   {
     "name": "cid \"f01711220a8b1f0bd2e5a1b1cd4e56a4e2c1ea1d5c7b0e6b4a1e4b8f9c7c9d0e1f2a3b4c5\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -855,11 +855,11 @@
         {
           "name": "s",
           "ref": {
-            "$type": "app.gather.block.defs#recordSource",
+            "$type": "app.eventside.block.defs#recordSource",
             "record": {
               "space": "ats://x",
               "did": "did:plc:organizer",
-              "collection": "app.gather.demo.item",
+              "collection": "app.eventside.demo.item",
               "rkey": "r1",
               "cid": "f01711220a8b1f0bd2e5a1b1cd4e56a4e2c1ea1d5c7b0e6b4a1e4b8f9c7c9d0e1f2a3b4c5"
             }
@@ -875,10 +875,10 @@
   {
     "name": "cid \"Qm\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -887,11 +887,11 @@
         {
           "name": "s",
           "ref": {
-            "$type": "app.gather.block.defs#recordSource",
+            "$type": "app.eventside.block.defs#recordSource",
             "record": {
               "space": "ats://x",
               "did": "did:plc:organizer",
-              "collection": "app.gather.demo.item",
+              "collection": "app.eventside.demo.item",
               "rkey": "r1",
               "cid": "Qm"
             }
@@ -907,10 +907,10 @@
   {
     "name": "cid \"\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -919,11 +919,11 @@
         {
           "name": "s",
           "ref": {
-            "$type": "app.gather.block.defs#recordSource",
+            "$type": "app.eventside.block.defs#recordSource",
             "record": {
               "space": "ats://x",
               "did": "did:plc:organizer",
-              "collection": "app.gather.demo.item",
+              "collection": "app.eventside.demo.item",
               "rkey": "r1",
               "cid": ""
             }
@@ -939,10 +939,10 @@
   {
     "name": "did \"did:plc:alice\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#person",
+          "$type": "app.eventside.block.defs#person",
           "did": "did:plc:alice"
         }
       ],
@@ -955,10 +955,10 @@
   {
     "name": "did \"did:web:example.com\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#person",
+          "$type": "app.eventside.block.defs#person",
           "did": "did:web:example.com"
         }
       ],
@@ -971,10 +971,10 @@
   {
     "name": "did \"did:PLC:alice\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#person",
+          "$type": "app.eventside.block.defs#person",
           "did": "did:PLC:alice"
         }
       ],
@@ -988,10 +988,10 @@
   {
     "name": "did \"did:plc:\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#person",
+          "$type": "app.eventside.block.defs#person",
           "did": "did:plc:"
         }
       ],
@@ -1005,10 +1005,10 @@
   {
     "name": "did \"did:plc:alice%\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#person",
+          "$type": "app.eventside.block.defs#person",
           "did": "did:plc:alice%"
         }
       ],
@@ -1022,10 +1022,10 @@
   {
     "name": "did \"alice\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#person",
+          "$type": "app.eventside.block.defs#person",
           "did": "alice"
         }
       ],
@@ -1039,10 +1039,10 @@
   {
     "name": "uri \"https://atmosphereconf.org/2027\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#image",
+          "$type": "app.eventside.block.defs#image",
           "url": "https://atmosphereconf.org/2027",
           "alt": "x"
         }
@@ -1056,10 +1056,10 @@
   {
     "name": "uri \"at://did:plc:x/app.bsky.feed.post/1\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#image",
+          "$type": "app.eventside.block.defs#image",
           "url": "at://did:plc:x/app.bsky.feed.post/1",
           "alt": "x"
         }
@@ -1073,10 +1073,10 @@
   {
     "name": "uri \"mailto:hi@example.com\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#image",
+          "$type": "app.eventside.block.defs#image",
           "url": "mailto:hi@example.com",
           "alt": "x"
         }
@@ -1090,10 +1090,10 @@
   {
     "name": "uri \"https:/x\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#image",
+          "$type": "app.eventside.block.defs#image",
           "url": "https:/x",
           "alt": "x"
         }
@@ -1108,10 +1108,10 @@
   {
     "name": "uri \"https://\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#image",
+          "$type": "app.eventside.block.defs#image",
           "url": "https://",
           "alt": "x"
         }
@@ -1126,10 +1126,10 @@
   {
     "name": "uri \"no scheme\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#image",
+          "$type": "app.eventside.block.defs#image",
           "url": "no scheme",
           "alt": "x"
         }
@@ -1144,10 +1144,10 @@
   {
     "name": "uri \"https://example.com/a b\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#image",
+          "$type": "app.eventside.block.defs#image",
           "url": "https://example.com/a b",
           "alt": "x"
         }
@@ -1162,10 +1162,10 @@
   {
     "name": "uri \"é:x\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#image",
+          "$type": "app.eventside.block.defs#image",
           "url": "é:x",
           "alt": "x"
         }
@@ -1180,10 +1180,10 @@
   {
     "name": "uri \"https://example.com/ \"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#image",
+          "$type": "app.eventside.block.defs#image",
           "url": "https://example.com/ ",
           "alt": "x"
         }
@@ -1198,10 +1198,10 @@
   {
     "name": "uri \"https://example.com/\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#image",
+          "$type": "app.eventside.block.defs#image",
           "url": "https://example.com/",
           "alt": "x"
         }
@@ -1213,12 +1213,12 @@
     }
   },
   {
-    "name": "nsid \"app.gather.demo.question\"",
+    "name": "nsid \"app.eventside.demo.question\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -1227,8 +1227,8 @@
         {
           "name": "c",
           "ref": {
-            "$type": "app.gather.block.defs#collectionSource",
-            "collection": "app.gather.demo.question"
+            "$type": "app.eventside.block.defs#collectionSource",
+            "collection": "app.eventside.demo.question"
           }
         }
       ]
@@ -1238,12 +1238,12 @@
     }
   },
   {
-    "name": "nsid \"app.gather\"",
+    "name": "nsid \"app.eventside\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -1252,8 +1252,8 @@
         {
           "name": "c",
           "ref": {
-            "$type": "app.gather.block.defs#collectionSource",
-            "collection": "app.gather"
+            "$type": "app.eventside.block.defs#collectionSource",
+            "collection": "app.eventside"
           }
         }
       ]
@@ -1264,12 +1264,12 @@
     }
   },
   {
-    "name": "nsid \"app.gather.demo.1question\"",
+    "name": "nsid \"app.eventside.demo.1question\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -1278,8 +1278,8 @@
         {
           "name": "c",
           "ref": {
-            "$type": "app.gather.block.defs#collectionSource",
-            "collection": "app.gather.demo.1question"
+            "$type": "app.eventside.block.defs#collectionSource",
+            "collection": "app.eventside.demo.1question"
           }
         }
       ]
@@ -1292,10 +1292,10 @@
   {
     "name": "nsid \"a.b.c\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -1304,7 +1304,7 @@
         {
           "name": "c",
           "ref": {
-            "$type": "app.gather.block.defs#collectionSource",
+            "$type": "app.eventside.block.defs#collectionSource",
             "collection": "a.b.c"
           }
         }
@@ -1317,10 +1317,10 @@
   {
     "name": "nsid \"app..demo\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -1329,7 +1329,7 @@
         {
           "name": "c",
           "ref": {
-            "$type": "app.gather.block.defs#collectionSource",
+            "$type": "app.eventside.block.defs#collectionSource",
             "collection": "app..demo"
           }
         }
@@ -1343,10 +1343,10 @@
   {
     "name": "nsid \"com.example.fooBar\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -1355,7 +1355,7 @@
         {
           "name": "c",
           "ref": {
-            "$type": "app.gather.block.defs#collectionSource",
+            "$type": "app.eventside.block.defs#collectionSource",
             "collection": "com.example.fooBar"
           }
         }
@@ -1368,10 +1368,10 @@
   {
     "name": "rkey \"self\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -1380,11 +1380,11 @@
         {
           "name": "s",
           "ref": {
-            "$type": "app.gather.block.defs#recordSource",
+            "$type": "app.eventside.block.defs#recordSource",
             "record": {
               "space": "ats://x",
               "did": "did:plc:organizer",
-              "collection": "app.gather.demo.item",
+              "collection": "app.eventside.demo.item",
               "rkey": "self"
             }
           }
@@ -1398,10 +1398,10 @@
   {
     "name": "rkey \"3lwelkom2027\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -1410,11 +1410,11 @@
         {
           "name": "s",
           "ref": {
-            "$type": "app.gather.block.defs#recordSource",
+            "$type": "app.eventside.block.defs#recordSource",
             "record": {
               "space": "ats://x",
               "did": "did:plc:organizer",
-              "collection": "app.gather.demo.item",
+              "collection": "app.eventside.demo.item",
               "rkey": "3lwelkom2027"
             }
           }
@@ -1428,10 +1428,10 @@
   {
     "name": "rkey \".\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -1440,11 +1440,11 @@
         {
           "name": "s",
           "ref": {
-            "$type": "app.gather.block.defs#recordSource",
+            "$type": "app.eventside.block.defs#recordSource",
             "record": {
               "space": "ats://x",
               "did": "did:plc:organizer",
-              "collection": "app.gather.demo.item",
+              "collection": "app.eventside.demo.item",
               "rkey": "."
             }
           }
@@ -1459,10 +1459,10 @@
   {
     "name": "rkey \"..\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -1471,11 +1471,11 @@
         {
           "name": "s",
           "ref": {
-            "$type": "app.gather.block.defs#recordSource",
+            "$type": "app.eventside.block.defs#recordSource",
             "record": {
               "space": "ats://x",
               "did": "did:plc:organizer",
-              "collection": "app.gather.demo.item",
+              "collection": "app.eventside.demo.item",
               "rkey": ".."
             }
           }
@@ -1490,10 +1490,10 @@
   {
     "name": "rkey \"a/b\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -1502,11 +1502,11 @@
         {
           "name": "s",
           "ref": {
-            "$type": "app.gather.block.defs#recordSource",
+            "$type": "app.eventside.block.defs#recordSource",
             "record": {
               "space": "ats://x",
               "did": "did:plc:organizer",
-              "collection": "app.gather.demo.item",
+              "collection": "app.eventside.demo.item",
               "rkey": "a/b"
             }
           }
@@ -1521,10 +1521,10 @@
   {
     "name": "rkey \"a b\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -1533,11 +1533,11 @@
         {
           "name": "s",
           "ref": {
-            "$type": "app.gather.block.defs#recordSource",
+            "$type": "app.eventside.block.defs#recordSource",
             "record": {
               "space": "ats://x",
               "did": "did:plc:organizer",
-              "collection": "app.gather.demo.item",
+              "collection": "app.eventside.demo.item",
               "rkey": "a b"
             }
           }
@@ -1552,10 +1552,10 @@
   {
     "name": "rkey \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -1564,11 +1564,11 @@
         {
           "name": "s",
           "ref": {
-            "$type": "app.gather.block.defs#recordSource",
+            "$type": "app.eventside.block.defs#recordSource",
             "record": {
               "space": "ats://x",
               "did": "did:plc:organizer",
-              "collection": "app.gather.demo.item",
+              "collection": "app.eventside.demo.item",
               "rkey": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
             }
           }
@@ -1583,10 +1583,10 @@
   {
     "name": "string 300 ascii bytes",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         }
       ],
@@ -1599,10 +1599,10 @@
   {
     "name": "string 301 ascii bytes",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         }
       ],
@@ -1616,10 +1616,10 @@
   {
     "name": "string 100 euro signs (300 bytes)",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€"
         }
       ],
@@ -1632,10 +1632,10 @@
   {
     "name": "string 101 euro signs (303 bytes)",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€"
         }
       ],
@@ -1649,10 +1649,10 @@
   {
     "name": "string 75 emoji (300 bytes)",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇"
         }
       ],
@@ -1665,10 +1665,10 @@
   {
     "name": "string 76 emoji (304 bytes)",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇"
         }
       ],
@@ -1682,10 +1682,10 @@
   {
     "name": "source name empty",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -1694,7 +1694,7 @@
         {
           "name": "",
           "ref": {
-            "$type": "app.gather.block.defs#profileSource",
+            "$type": "app.eventside.block.defs#profileSource",
             "did": "did:plc:a"
           }
         }
@@ -1708,10 +1708,10 @@
   {
     "name": "text is a number",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": 42
         }
       ],
@@ -1725,10 +1725,10 @@
   {
     "name": "text is null",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": null
         }
       ],
@@ -1742,10 +1742,10 @@
   {
     "name": "progress value 62",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#progress",
+          "$type": "app.eventside.block.defs#progress",
           "value": 62
         }
       ],
@@ -1758,10 +1758,10 @@
   {
     "name": "progress value 62.5",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#progress",
+          "$type": "app.eventside.block.defs#progress",
           "value": 62.5
         }
       ],
@@ -1775,10 +1775,10 @@
   {
     "name": "progress value -1",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#progress",
+          "$type": "app.eventside.block.defs#progress",
           "value": -1
         }
       ],
@@ -1792,10 +1792,10 @@
   {
     "name": "progress value \"62\"",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#progress",
+          "$type": "app.eventside.block.defs#progress",
           "value": "62"
         }
       ],
@@ -1809,10 +1809,10 @@
   {
     "name": "progress max 0",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#progress",
+          "$type": "app.eventside.block.defs#progress",
           "value": 1,
           "max": 0
         }
@@ -1827,10 +1827,10 @@
   {
     "name": "required is a string",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#textInput",
+          "$type": "app.eventside.block.defs#textInput",
           "id": "t",
           "label": "x",
           "required": "yes"
@@ -1846,7 +1846,7 @@
   {
     "name": "blocks is an object",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": {},
       "createdAt": "2027-04-30T07:00:00.000Z"
     },
@@ -1858,160 +1858,160 @@
   {
     "name": "blocks has 51 items",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         },
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         }
       ],
       "createdAt": "2027-04-30T07:00:00.000Z"
@@ -2024,7 +2024,7 @@
   {
     "name": "block without $type",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
           "text": "no type"
@@ -2040,7 +2040,7 @@
   {
     "name": "block is a string",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": ["header"],
       "createdAt": "2027-04-30T07:00:00.000Z"
     },
@@ -2052,10 +2052,10 @@
   {
     "name": "unknown block type",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.future#hologram",
+          "$type": "app.eventside.future#hologram",
           "size": 3
         }
       ],
@@ -2068,10 +2068,10 @@
   {
     "name": "unknown block type without #",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.future",
+          "$type": "app.eventside.future",
           "size": 3
         }
       ],
@@ -2084,13 +2084,13 @@
   {
     "name": "nested error",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#section",
+          "$type": "app.eventside.block.defs#section",
           "blocks": [
             {
-              "$type": "app.gather.block.defs#button",
+              "$type": "app.eventside.block.defs#button",
               "label": "x"
             }
           ]
@@ -2106,10 +2106,10 @@
   {
     "name": "list without template",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#list",
+          "$type": "app.eventside.block.defs#list",
           "items": {
             "source": "q"
           }
@@ -2125,10 +2125,10 @@
   {
     "name": "columns empty",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#columns",
+          "$type": "app.eventside.block.defs#columns",
           "columns": []
         }
       ],
@@ -2142,10 +2142,10 @@
   {
     "name": "facet feature without $type",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#richText",
+          "$type": "app.eventside.block.defs#richText",
           "text": "hi",
           "facets": [
             {
@@ -2168,10 +2168,10 @@
   {
     "name": "collection filter is a string",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -2180,7 +2180,7 @@
         {
           "name": "c",
           "ref": {
-            "$type": "app.gather.block.defs#collectionSource",
+            "$type": "app.eventside.block.defs#collectionSource",
             "collection": "a.b.c",
             "filter": "x"
           }
@@ -2195,10 +2195,10 @@
   {
     "name": "collection filter is an array",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -2207,7 +2207,7 @@
         {
           "name": "c",
           "ref": {
-            "$type": "app.gather.block.defs#collectionSource",
+            "$type": "app.eventside.block.defs#collectionSource",
             "collection": "a.b.c",
             "filter": []
           }
@@ -2221,10 +2221,10 @@
   {
     "name": "missing createdAt",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#divider"
+          "$type": "app.eventside.block.defs#divider"
         }
       ]
     },
@@ -2236,10 +2236,10 @@
   {
     "name": "wrong $type",
     "card": {
-      "$type": "app.gather.block.other",
+      "$type": "app.eventside.block.other",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -2261,10 +2261,10 @@
   {
     "name": "bind value is a string",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#stat",
+          "$type": "app.eventside.block.defs#stat",
           "bind": {
             "value": "stats"
           }
@@ -2280,10 +2280,10 @@
   {
     "name": "extra unknown property",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -2297,10 +2297,10 @@
   {
     "name": "aspectRatio is an empty array",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#image",
+          "$type": "app.eventside.block.defs#image",
           "alt": "x",
           "aspectRatio": []
         }
@@ -2315,10 +2315,10 @@
   {
     "name": "aspectRatio is an array",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#image",
+          "$type": "app.eventside.block.defs#image",
           "alt": "x",
           "aspectRatio": [16, 9]
         }
@@ -2333,10 +2333,10 @@
   {
     "name": "opens is an empty array",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#button",
+          "$type": "app.eventside.block.defs#button",
           "id": "b",
           "label": "x",
           "opens": []
@@ -2352,10 +2352,10 @@
   {
     "name": "header bind is an empty array",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "bind": []
         }
       ],
@@ -2369,10 +2369,10 @@
   {
     "name": "time bind is an array of bindings",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#time",
+          "$type": "app.eventside.block.defs#time",
           "bind": [
             {
               "source": "s"
@@ -2390,10 +2390,10 @@
   {
     "name": "source is an array",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -2408,10 +2408,10 @@
   {
     "name": "facet index is an array",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#richText",
+          "$type": "app.eventside.block.defs#richText",
           "text": "hi",
           "facets": [
             {
@@ -2431,10 +2431,10 @@
   {
     "name": "record ref is an array",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -2443,7 +2443,7 @@
         {
           "name": "s",
           "ref": {
-            "$type": "app.gather.block.defs#recordSource",
+            "$type": "app.eventside.block.defs#recordSource",
             "record": []
           }
         }
@@ -2457,10 +2457,10 @@
   {
     "name": "column is an array",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#columns",
+          "$type": "app.eventside.block.defs#columns",
           "columns": [[]]
         }
       ],
@@ -2474,10 +2474,10 @@
   {
     "name": "list items binding is an array",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#list",
+          "$type": "app.eventside.block.defs#list",
           "items": ["q"],
           "template": []
         }
@@ -2492,15 +2492,15 @@
   {
     "name": "duplicate input ids",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#textInput",
+          "$type": "app.eventside.block.defs#textInput",
           "id": "q",
           "label": "q"
         },
         {
-          "$type": "app.gather.block.defs#textInput",
+          "$type": "app.eventside.block.defs#textInput",
           "id": "q",
           "label": "q"
         }
@@ -2515,18 +2515,18 @@
   {
     "name": "duplicate id nested in a section",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#textInput",
+          "$type": "app.eventside.block.defs#textInput",
           "id": "q",
           "label": "q"
         },
         {
-          "$type": "app.gather.block.defs#section",
+          "$type": "app.eventside.block.defs#section",
           "blocks": [
             {
-              "$type": "app.gather.block.defs#textInput",
+              "$type": "app.eventside.block.defs#textInput",
               "id": "q",
               "label": "q"
             }
@@ -2543,15 +2543,15 @@
   {
     "name": "duplicate id across columns",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#columns",
+          "$type": "app.eventside.block.defs#columns",
           "columns": [
             {
               "blocks": [
                 {
-                  "$type": "app.gather.block.defs#textInput",
+                  "$type": "app.eventside.block.defs#textInput",
                   "id": "a",
                   "label": "a"
                 }
@@ -2560,7 +2560,7 @@
             {
               "blocks": [
                 {
-                  "$type": "app.gather.block.defs#textInput",
+                  "$type": "app.eventside.block.defs#textInput",
                   "id": "a",
                   "label": "a"
                 }
@@ -2579,21 +2579,21 @@
   {
     "name": "same id in the card and its sheet",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#textInput",
+          "$type": "app.eventside.block.defs#textInput",
           "id": "q",
           "label": "q"
         },
         {
-          "$type": "app.gather.block.defs#button",
+          "$type": "app.eventside.block.defs#button",
           "id": "b",
           "label": "x",
           "opens": {
             "blocks": [
               {
-                "$type": "app.gather.block.defs#textInput",
+                "$type": "app.eventside.block.defs#textInput",
                 "id": "q",
                 "label": "q"
               }
@@ -2611,21 +2611,21 @@
   {
     "name": "duplicate id inside a sheet",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#button",
+          "$type": "app.eventside.block.defs#button",
           "id": "b",
           "label": "x",
           "opens": {
             "blocks": [
               {
-                "$type": "app.gather.block.defs#textInput",
+                "$type": "app.eventside.block.defs#textInput",
                 "id": "q",
                 "label": "q"
               },
               {
-                "$type": "app.gather.block.defs#textInput",
+                "$type": "app.eventside.block.defs#textInput",
                 "id": "q",
                 "label": "q"
               }
@@ -2643,21 +2643,21 @@
   {
     "name": "same id in the card and a list template",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#textInput",
+          "$type": "app.eventside.block.defs#textInput",
           "id": "q",
           "label": "q"
         },
         {
-          "$type": "app.gather.block.defs#list",
+          "$type": "app.eventside.block.defs#list",
           "items": {
             "source": "s"
           },
           "template": [
             {
-              "$type": "app.gather.block.defs#textInput",
+              "$type": "app.eventside.block.defs#textInput",
               "id": "q",
               "label": "q"
             }
@@ -2669,7 +2669,7 @@
         {
           "name": "s",
           "ref": {
-            "$type": "app.gather.block.defs#profileSource",
+            "$type": "app.eventside.block.defs#profileSource",
             "did": "did:plc:a"
           }
         }
@@ -2683,29 +2683,29 @@
   {
     "name": "same id in two list templates",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#list",
+          "$type": "app.eventside.block.defs#list",
           "items": {
             "source": "s"
           },
           "template": [
             {
-              "$type": "app.gather.block.defs#textInput",
+              "$type": "app.eventside.block.defs#textInput",
               "id": "q",
               "label": "q"
             }
           ]
         },
         {
-          "$type": "app.gather.block.defs#list",
+          "$type": "app.eventside.block.defs#list",
           "items": {
             "source": "s"
           },
           "template": [
             {
-              "$type": "app.gather.block.defs#textInput",
+              "$type": "app.eventside.block.defs#textInput",
               "id": "q",
               "label": "q"
             }
@@ -2717,7 +2717,7 @@
         {
           "name": "s",
           "ref": {
-            "$type": "app.gather.block.defs#profileSource",
+            "$type": "app.eventside.block.defs#profileSource",
             "did": "did:plc:a"
           }
         }
@@ -2731,21 +2731,21 @@
   {
     "name": "duplicate id inside a list template",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#list",
+          "$type": "app.eventside.block.defs#list",
           "items": {
             "source": "s"
           },
           "template": [
             {
-              "$type": "app.gather.block.defs#textInput",
+              "$type": "app.eventside.block.defs#textInput",
               "id": "q",
               "label": "q"
             },
             {
-              "$type": "app.gather.block.defs#textInput",
+              "$type": "app.eventside.block.defs#textInput",
               "id": "q",
               "label": "q"
             }
@@ -2757,7 +2757,7 @@
         {
           "name": "s",
           "ref": {
-            "$type": "app.gather.block.defs#profileSource",
+            "$type": "app.eventside.block.defs#profileSource",
             "did": "did:plc:a"
           }
         }
@@ -2771,15 +2771,15 @@
   {
     "name": "duplicate id on an unknown block type",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#textInput",
+          "$type": "app.eventside.block.defs#textInput",
           "id": "q",
           "label": "q"
         },
         {
-          "$type": "app.gather.future#hologram",
+          "$type": "app.eventside.future#hologram",
           "id": "q"
         }
       ],
@@ -2792,10 +2792,10 @@
   {
     "name": "duplicate select option values",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#select",
+          "$type": "app.eventside.block.defs#select",
           "id": "s",
           "label": "x",
           "options": [
@@ -2824,10 +2824,10 @@
   {
     "name": "duplicate source names",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -2836,21 +2836,21 @@
         {
           "name": "tally",
           "ref": {
-            "$type": "app.gather.block.defs#profileSource",
+            "$type": "app.eventside.block.defs#profileSource",
             "did": "did:plc:a"
           }
         },
         {
           "name": "other",
           "ref": {
-            "$type": "app.gather.block.defs#profileSource",
+            "$type": "app.eventside.block.defs#profileSource",
             "did": "did:plc:a"
           }
         },
         {
           "name": "tally",
           "ref": {
-            "$type": "app.gather.block.defs#profileSource",
+            "$type": "app.eventside.block.defs#profileSource",
             "did": "did:plc:a"
           }
         }
@@ -2864,10 +2864,10 @@
   {
     "name": "source named $item",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -2876,7 +2876,7 @@
         {
           "name": "$item",
           "ref": {
-            "$type": "app.gather.block.defs#profileSource",
+            "$type": "app.eventside.block.defs#profileSource",
             "did": "did:plc:a"
           }
         }
@@ -2890,10 +2890,10 @@
   {
     "name": "source named item",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -2902,7 +2902,7 @@
         {
           "name": "item",
           "ref": {
-            "$type": "app.gather.block.defs#profileSource",
+            "$type": "app.eventside.block.defs#profileSource",
             "did": "did:plc:a"
           }
         }
@@ -2915,15 +2915,15 @@
   {
     "name": "duplicate source and duplicate id",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#textInput",
+          "$type": "app.eventside.block.defs#textInput",
           "id": "q",
           "label": "q"
         },
         {
-          "$type": "app.gather.block.defs#textInput",
+          "$type": "app.eventside.block.defs#textInput",
           "id": "q",
           "label": "q"
         }
@@ -2933,14 +2933,14 @@
         {
           "name": "a",
           "ref": {
-            "$type": "app.gather.block.defs#profileSource",
+            "$type": "app.eventside.block.defs#profileSource",
             "did": "did:plc:a"
           }
         },
         {
           "name": "a",
           "ref": {
-            "$type": "app.gather.block.defs#profileSource",
+            "$type": "app.eventside.block.defs#profileSource",
             "did": "did:plc:a"
           }
         }
@@ -2954,10 +2954,10 @@
   {
     "name": "binding to an undeclared source",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#stat",
+          "$type": "app.eventside.block.defs#stat",
           "bind": {
             "value": {
               "source": "tallly",
@@ -2971,7 +2971,7 @@
         {
           "name": "tally",
           "ref": {
-            "$type": "app.gather.block.defs#profileSource",
+            "$type": "app.eventside.block.defs#profileSource",
             "did": "did:plc:a"
           }
         }
@@ -2985,10 +2985,10 @@
   {
     "name": "binding to a declared source",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#stat",
+          "$type": "app.eventside.block.defs#stat",
           "bind": {
             "value": {
               "source": "tally",
@@ -3002,7 +3002,7 @@
         {
           "name": "tally",
           "ref": {
-            "$type": "app.gather.block.defs#profileSource",
+            "$type": "app.eventside.block.defs#profileSource",
             "did": "did:plc:a"
           }
         }
@@ -3015,10 +3015,10 @@
   {
     "name": "$item outside a list",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#stat",
+          "$type": "app.eventside.block.defs#stat",
           "bind": {
             "value": {
               "source": "$item",
@@ -3037,16 +3037,16 @@
   {
     "name": "$item inside a list template",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#list",
+          "$type": "app.eventside.block.defs#list",
           "items": {
             "source": "qs"
           },
           "template": [
             {
-              "$type": "app.gather.block.defs#stat",
+              "$type": "app.eventside.block.defs#stat",
               "bind": {
                 "value": {
                   "source": "$item",
@@ -3062,7 +3062,7 @@
         {
           "name": "qs",
           "ref": {
-            "$type": "app.gather.block.defs#profileSource",
+            "$type": "app.eventside.block.defs#profileSource",
             "did": "did:plc:a"
           }
         }
@@ -3075,22 +3075,22 @@
   {
     "name": "$item in a sheet opened from a list item",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#list",
+          "$type": "app.eventside.block.defs#list",
           "items": {
             "source": "qs"
           },
           "template": [
             {
-              "$type": "app.gather.block.defs#button",
+              "$type": "app.eventside.block.defs#button",
               "id": "b",
               "label": "x",
               "opens": {
                 "blocks": [
                   {
-                    "$type": "app.gather.block.defs#stat",
+                    "$type": "app.eventside.block.defs#stat",
                     "bind": {
                       "value": {
                         "source": "$item",
@@ -3109,7 +3109,7 @@
         {
           "name": "qs",
           "ref": {
-            "$type": "app.gather.block.defs#profileSource",
+            "$type": "app.eventside.block.defs#profileSource",
             "did": "did:plc:a"
           }
         }
@@ -3122,10 +3122,10 @@
   {
     "name": "list items from an undeclared source",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#list",
+          "$type": "app.eventside.block.defs#list",
           "items": {
             "source": "nope"
           },
@@ -3142,15 +3142,15 @@
   {
     "name": "undeclared source nested in a column",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#columns",
+          "$type": "app.eventside.block.defs#columns",
           "columns": [
             {
               "blocks": [
                 {
-                  "$type": "app.gather.block.defs#stat",
+                  "$type": "app.eventside.block.defs#stat",
                   "bind": {
                     "value": {
                       "source": "nope",
@@ -3173,10 +3173,10 @@
   {
     "name": "second binding undeclared",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#progress",
+          "$type": "app.eventside.block.defs#progress",
           "bind": {
             "value": {
               "source": "a"
@@ -3192,7 +3192,7 @@
         {
           "name": "a",
           "ref": {
-            "$type": "app.gather.block.defs#profileSource",
+            "$type": "app.eventside.block.defs#profileSource",
             "did": "did:plc:a"
           }
         }
@@ -3206,10 +3206,10 @@
   {
     "name": "bind array on a section",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#section",
+          "$type": "app.eventside.block.defs#section",
           "blocks": [],
           "bind": [
             {
@@ -3228,10 +3228,10 @@
   {
     "name": "bind array on a text input",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#textInput",
+          "$type": "app.eventside.block.defs#textInput",
           "id": "t",
           "label": "x",
           "bind": [
@@ -3251,10 +3251,10 @@
   {
     "name": "bind string on a stack",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#stack",
+          "$type": "app.eventside.block.defs#stack",
           "blocks": [],
           "bind": "nope"
         }
@@ -3268,10 +3268,10 @@
   {
     "name": "bind object on a submit",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#submit",
+          "$type": "app.eventside.block.defs#submit",
           "id": "s",
           "label": "x",
           "action": "a",
@@ -3292,10 +3292,10 @@
   {
     "name": "bind with an integer-like key after a named one",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#button",
+          "$type": "app.eventside.block.defs#button",
           "id": "b",
           "action": "go",
           "bind": {
@@ -3324,10 +3324,10 @@
   {
     "name": "button with an empty id",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#button",
+          "$type": "app.eventside.block.defs#button",
           "id": "",
           "label": "Go",
           "action": "go"
@@ -3343,10 +3343,10 @@
   {
     "name": "submit with an empty action",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#submit",
+          "$type": "app.eventside.block.defs#submit",
           "id": "s",
           "label": "Go",
           "action": ""
@@ -3362,10 +3362,10 @@
   {
     "name": "header with an empty id",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "id": "",
           "text": "x"
         }
@@ -3380,10 +3380,10 @@
   {
     "name": "binding path without a leading slash",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#stat",
+          "$type": "app.eventside.block.defs#stat",
           "bind": {
             "value": {
               "source": "tally",
@@ -3397,7 +3397,7 @@
         {
           "name": "tally",
           "ref": {
-            "$type": "app.gather.block.defs#profileSource",
+            "$type": "app.eventside.block.defs#profileSource",
             "did": "did:plc:a"
           }
         }
@@ -3411,10 +3411,10 @@
   {
     "name": "binding path empty",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#stat",
+          "$type": "app.eventside.block.defs#stat",
           "bind": {
             "value": {
               "source": "tally",
@@ -3428,7 +3428,7 @@
         {
           "name": "tally",
           "ref": {
-            "$type": "app.gather.block.defs#profileSource",
+            "$type": "app.eventside.block.defs#profileSource",
             "did": "did:plc:a"
           }
         }
@@ -3441,10 +3441,10 @@
   {
     "name": "list key without a leading slash",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#list",
+          "$type": "app.eventside.block.defs#list",
           "items": {
             "source": "qs"
           },
@@ -3457,7 +3457,7 @@
         {
           "name": "qs",
           "ref": {
-            "$type": "app.gather.block.defs#profileSource",
+            "$type": "app.eventside.block.defs#profileSource",
             "did": "did:plc:a"
           }
         }
@@ -3471,10 +3471,10 @@
   {
     "name": "list items path without a leading slash",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#list",
+          "$type": "app.eventside.block.defs#list",
           "items": {
             "source": "qs",
             "path": "items"
@@ -3488,7 +3488,7 @@
         {
           "name": "qs",
           "ref": {
-            "$type": "app.gather.block.defs#profileSource",
+            "$type": "app.eventside.block.defs#profileSource",
             "did": "did:plc:a"
           }
         }
@@ -3502,10 +3502,10 @@
   {
     "name": "bind key needing pointer escapes",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#button",
+          "$type": "app.eventside.block.defs#button",
           "id": "b",
           "action": "go",
           "bind": {
@@ -3525,10 +3525,10 @@
   {
     "name": "duplicate button group values",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#buttonGroup",
+          "$type": "app.eventside.block.defs#buttonGroup",
           "id": "g",
           "action": "vote",
           "buttons": [
@@ -3553,37 +3553,37 @@
   {
     "name": "nesting exactly at the limit",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#stack",
+          "$type": "app.eventside.block.defs#stack",
           "blocks": [
             {
-              "$type": "app.gather.block.defs#stack",
+              "$type": "app.eventside.block.defs#stack",
               "blocks": [
                 {
-                  "$type": "app.gather.block.defs#stack",
+                  "$type": "app.eventside.block.defs#stack",
                   "blocks": [
                     {
-                      "$type": "app.gather.block.defs#stack",
+                      "$type": "app.eventside.block.defs#stack",
                       "blocks": [
                         {
-                          "$type": "app.gather.block.defs#stack",
+                          "$type": "app.eventside.block.defs#stack",
                           "blocks": [
                             {
-                              "$type": "app.gather.block.defs#stack",
+                              "$type": "app.eventside.block.defs#stack",
                               "blocks": [
                                 {
-                                  "$type": "app.gather.block.defs#stack",
+                                  "$type": "app.eventside.block.defs#stack",
                                   "blocks": [
                                     {
-                                      "$type": "app.gather.block.defs#stack",
+                                      "$type": "app.eventside.block.defs#stack",
                                       "blocks": [
                                         {
-                                          "$type": "app.gather.block.defs#stack",
+                                          "$type": "app.eventside.block.defs#stack",
                                           "blocks": [
                                             {
-                                              "$type": "app.gather.block.defs#header",
+                                              "$type": "app.eventside.block.defs#header",
                                               "text": "deep"
                                             }
                                           ]
@@ -3614,40 +3614,40 @@
   {
     "name": "nesting one past the limit",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#stack",
+          "$type": "app.eventside.block.defs#stack",
           "blocks": [
             {
-              "$type": "app.gather.block.defs#stack",
+              "$type": "app.eventside.block.defs#stack",
               "blocks": [
                 {
-                  "$type": "app.gather.block.defs#stack",
+                  "$type": "app.eventside.block.defs#stack",
                   "blocks": [
                     {
-                      "$type": "app.gather.block.defs#stack",
+                      "$type": "app.eventside.block.defs#stack",
                       "blocks": [
                         {
-                          "$type": "app.gather.block.defs#stack",
+                          "$type": "app.eventside.block.defs#stack",
                           "blocks": [
                             {
-                              "$type": "app.gather.block.defs#stack",
+                              "$type": "app.eventside.block.defs#stack",
                               "blocks": [
                                 {
-                                  "$type": "app.gather.block.defs#stack",
+                                  "$type": "app.eventside.block.defs#stack",
                                   "blocks": [
                                     {
-                                      "$type": "app.gather.block.defs#stack",
+                                      "$type": "app.eventside.block.defs#stack",
                                       "blocks": [
                                         {
-                                          "$type": "app.gather.block.defs#stack",
+                                          "$type": "app.eventside.block.defs#stack",
                                           "blocks": [
                                             {
-                                              "$type": "app.gather.block.defs#stack",
+                                              "$type": "app.eventside.block.defs#stack",
                                               "blocks": [
                                                 {
-                                                  "$type": "app.gather.block.defs#header",
+                                                  "$type": "app.eventside.block.defs#header",
                                                   "text": "deep"
                                                 }
                                               ]
@@ -3681,130 +3681,130 @@
   {
     "name": "deep nesting with an error inside",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#stack",
+          "$type": "app.eventside.block.defs#stack",
           "blocks": [
             {
-              "$type": "app.gather.block.defs#stack",
+              "$type": "app.eventside.block.defs#stack",
               "blocks": [
                 {
-                  "$type": "app.gather.block.defs#stack",
+                  "$type": "app.eventside.block.defs#stack",
                   "blocks": [
                     {
-                      "$type": "app.gather.block.defs#stack",
+                      "$type": "app.eventside.block.defs#stack",
                       "blocks": [
                         {
-                          "$type": "app.gather.block.defs#stack",
+                          "$type": "app.eventside.block.defs#stack",
                           "blocks": [
                             {
-                              "$type": "app.gather.block.defs#stack",
+                              "$type": "app.eventside.block.defs#stack",
                               "blocks": [
                                 {
-                                  "$type": "app.gather.block.defs#stack",
+                                  "$type": "app.eventside.block.defs#stack",
                                   "blocks": [
                                     {
-                                      "$type": "app.gather.block.defs#stack",
+                                      "$type": "app.eventside.block.defs#stack",
                                       "blocks": [
                                         {
-                                          "$type": "app.gather.block.defs#stack",
+                                          "$type": "app.eventside.block.defs#stack",
                                           "blocks": [
                                             {
-                                              "$type": "app.gather.block.defs#stack",
+                                              "$type": "app.eventside.block.defs#stack",
                                               "blocks": [
                                                 {
-                                                  "$type": "app.gather.block.defs#stack",
+                                                  "$type": "app.eventside.block.defs#stack",
                                                   "blocks": [
                                                     {
-                                                      "$type": "app.gather.block.defs#stack",
+                                                      "$type": "app.eventside.block.defs#stack",
                                                       "blocks": [
                                                         {
-                                                          "$type": "app.gather.block.defs#stack",
+                                                          "$type": "app.eventside.block.defs#stack",
                                                           "blocks": [
                                                             {
-                                                              "$type": "app.gather.block.defs#stack",
+                                                              "$type": "app.eventside.block.defs#stack",
                                                               "blocks": [
                                                                 {
-                                                                  "$type": "app.gather.block.defs#stack",
+                                                                  "$type": "app.eventside.block.defs#stack",
                                                                   "blocks": [
                                                                     {
-                                                                      "$type": "app.gather.block.defs#stack",
+                                                                      "$type": "app.eventside.block.defs#stack",
                                                                       "blocks": [
                                                                         {
-                                                                          "$type": "app.gather.block.defs#stack",
+                                                                          "$type": "app.eventside.block.defs#stack",
                                                                           "blocks": [
                                                                             {
-                                                                              "$type": "app.gather.block.defs#stack",
+                                                                              "$type": "app.eventside.block.defs#stack",
                                                                               "blocks": [
                                                                                 {
-                                                                                  "$type": "app.gather.block.defs#stack",
+                                                                                  "$type": "app.eventside.block.defs#stack",
                                                                                   "blocks": [
                                                                                     {
-                                                                                      "$type": "app.gather.block.defs#stack",
+                                                                                      "$type": "app.eventside.block.defs#stack",
                                                                                       "blocks": [
                                                                                         {
-                                                                                          "$type": "app.gather.block.defs#stack",
+                                                                                          "$type": "app.eventside.block.defs#stack",
                                                                                           "blocks": [
                                                                                             {
-                                                                                              "$type": "app.gather.block.defs#stack",
+                                                                                              "$type": "app.eventside.block.defs#stack",
                                                                                               "blocks": [
                                                                                                 {
-                                                                                                  "$type": "app.gather.block.defs#stack",
+                                                                                                  "$type": "app.eventside.block.defs#stack",
                                                                                                   "blocks": [
                                                                                                     {
-                                                                                                      "$type": "app.gather.block.defs#stack",
+                                                                                                      "$type": "app.eventside.block.defs#stack",
                                                                                                       "blocks": [
                                                                                                         {
-                                                                                                          "$type": "app.gather.block.defs#stack",
+                                                                                                          "$type": "app.eventside.block.defs#stack",
                                                                                                           "blocks": [
                                                                                                             {
-                                                                                                              "$type": "app.gather.block.defs#stack",
+                                                                                                              "$type": "app.eventside.block.defs#stack",
                                                                                                               "blocks": [
                                                                                                                 {
-                                                                                                                  "$type": "app.gather.block.defs#stack",
+                                                                                                                  "$type": "app.eventside.block.defs#stack",
                                                                                                                   "blocks": [
                                                                                                                     {
-                                                                                                                      "$type": "app.gather.block.defs#stack",
+                                                                                                                      "$type": "app.eventside.block.defs#stack",
                                                                                                                       "blocks": [
                                                                                                                         {
-                                                                                                                          "$type": "app.gather.block.defs#stack",
+                                                                                                                          "$type": "app.eventside.block.defs#stack",
                                                                                                                           "blocks": [
                                                                                                                             {
-                                                                                                                              "$type": "app.gather.block.defs#stack",
+                                                                                                                              "$type": "app.eventside.block.defs#stack",
                                                                                                                               "blocks": [
                                                                                                                                 {
-                                                                                                                                  "$type": "app.gather.block.defs#stack",
+                                                                                                                                  "$type": "app.eventside.block.defs#stack",
                                                                                                                                   "blocks": [
                                                                                                                                     {
-                                                                                                                                      "$type": "app.gather.block.defs#stack",
+                                                                                                                                      "$type": "app.eventside.block.defs#stack",
                                                                                                                                       "blocks": [
                                                                                                                                         {
-                                                                                                                                          "$type": "app.gather.block.defs#stack",
+                                                                                                                                          "$type": "app.eventside.block.defs#stack",
                                                                                                                                           "blocks": [
                                                                                                                                             {
-                                                                                                                                              "$type": "app.gather.block.defs#stack",
+                                                                                                                                              "$type": "app.eventside.block.defs#stack",
                                                                                                                                               "blocks": [
                                                                                                                                                 {
-                                                                                                                                                  "$type": "app.gather.block.defs#stack",
+                                                                                                                                                  "$type": "app.eventside.block.defs#stack",
                                                                                                                                                   "blocks": [
                                                                                                                                                     {
-                                                                                                                                                      "$type": "app.gather.block.defs#stack",
+                                                                                                                                                      "$type": "app.eventside.block.defs#stack",
                                                                                                                                                       "blocks": [
                                                                                                                                                         {
-                                                                                                                                                          "$type": "app.gather.block.defs#stack",
+                                                                                                                                                          "$type": "app.eventside.block.defs#stack",
                                                                                                                                                           "blocks": [
                                                                                                                                                             {
-                                                                                                                                                              "$type": "app.gather.block.defs#stack",
+                                                                                                                                                              "$type": "app.eventside.block.defs#stack",
                                                                                                                                                               "blocks": [
                                                                                                                                                                 {
-                                                                                                                                                                  "$type": "app.gather.block.defs#stack",
+                                                                                                                                                                  "$type": "app.eventside.block.defs#stack",
                                                                                                                                                                   "blocks": [
                                                                                                                                                                     {
-                                                                                                                                                                      "$type": "app.gather.block.defs#stack",
+                                                                                                                                                                      "$type": "app.eventside.block.defs#stack",
                                                                                                                                                                       "blocks": [
                                                                                                                                                                         {
-                                                                                                                                                                          "$type": "app.gather.block.defs#header",
+                                                                                                                                                                          "$type": "app.eventside.block.defs#header",
                                                                                                                                                                           "text": 42
                                                                                                                                                                         }
                                                                                                                                                                       ]
@@ -3898,45 +3898,45 @@
   {
     "name": "deep nesting through columns, templates and sheets",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#columns",
+          "$type": "app.eventside.block.defs#columns",
           "columns": [
             {
               "blocks": [
                 {
-                  "$type": "app.gather.block.defs#button",
+                  "$type": "app.eventside.block.defs#button",
                   "id": "b",
                   "label": "x",
                   "opens": {
                     "blocks": [
                       {
-                        "$type": "app.gather.block.defs#stack",
+                        "$type": "app.eventside.block.defs#stack",
                         "blocks": [
                           {
-                            "$type": "app.gather.block.defs#stack",
+                            "$type": "app.eventside.block.defs#stack",
                             "blocks": [
                               {
-                                "$type": "app.gather.block.defs#stack",
+                                "$type": "app.eventside.block.defs#stack",
                                 "blocks": [
                                   {
-                                    "$type": "app.gather.block.defs#stack",
+                                    "$type": "app.eventside.block.defs#stack",
                                     "blocks": [
                                       {
-                                        "$type": "app.gather.block.defs#stack",
+                                        "$type": "app.eventside.block.defs#stack",
                                         "blocks": [
                                           {
-                                            "$type": "app.gather.block.defs#stack",
+                                            "$type": "app.eventside.block.defs#stack",
                                             "blocks": [
                                               {
-                                                "$type": "app.gather.block.defs#stack",
+                                                "$type": "app.eventside.block.defs#stack",
                                                 "blocks": [
                                                   {
-                                                    "$type": "app.gather.block.defs#stack",
+                                                    "$type": "app.eventside.block.defs#stack",
                                                     "blocks": [
                                                       {
-                                                        "$type": "app.gather.block.defs#header",
+                                                        "$type": "app.eventside.block.defs#header",
                                                         "text": "deep"
                                                       }
                                                     ]
@@ -3973,10 +3973,10 @@
   {
     "name": "pointer with a bad tilde escape",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#stat",
+          "$type": "app.eventside.block.defs#stat",
           "bind": {
             "value": {
               "source": "tally",
@@ -3990,7 +3990,7 @@
         {
           "name": "tally",
           "ref": {
-            "$type": "app.gather.block.defs#profileSource",
+            "$type": "app.eventside.block.defs#profileSource",
             "did": "did:plc:a"
           }
         }
@@ -4004,10 +4004,10 @@
   {
     "name": "pointer with good tilde escapes",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#stat",
+          "$type": "app.eventside.block.defs#stat",
           "bind": {
             "value": {
               "source": "tally",
@@ -4021,7 +4021,7 @@
         {
           "name": "tally",
           "ref": {
-            "$type": "app.gather.block.defs#profileSource",
+            "$type": "app.eventside.block.defs#profileSource",
             "did": "did:plc:a"
           }
         }
@@ -4034,10 +4034,10 @@
   {
     "name": "facet with eight features",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#richText",
+          "$type": "app.eventside.block.defs#richText",
           "text": "hello",
           "facets": [
             {
@@ -4047,28 +4047,28 @@
               },
               "features": [
                 {
-                  "$type": "app.gather.block.defs#bold"
+                  "$type": "app.eventside.block.defs#bold"
                 },
                 {
-                  "$type": "app.gather.block.defs#bold"
+                  "$type": "app.eventside.block.defs#bold"
                 },
                 {
-                  "$type": "app.gather.block.defs#bold"
+                  "$type": "app.eventside.block.defs#bold"
                 },
                 {
-                  "$type": "app.gather.block.defs#bold"
+                  "$type": "app.eventside.block.defs#bold"
                 },
                 {
-                  "$type": "app.gather.block.defs#bold"
+                  "$type": "app.eventside.block.defs#bold"
                 },
                 {
-                  "$type": "app.gather.block.defs#bold"
+                  "$type": "app.eventside.block.defs#bold"
                 },
                 {
-                  "$type": "app.gather.block.defs#bold"
+                  "$type": "app.eventside.block.defs#bold"
                 },
                 {
-                  "$type": "app.gather.block.defs#bold"
+                  "$type": "app.eventside.block.defs#bold"
                 }
               ]
             }
@@ -4084,10 +4084,10 @@
   {
     "name": "facet with nine features",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#richText",
+          "$type": "app.eventside.block.defs#richText",
           "text": "hello",
           "facets": [
             {
@@ -4097,31 +4097,31 @@
               },
               "features": [
                 {
-                  "$type": "app.gather.block.defs#bold"
+                  "$type": "app.eventside.block.defs#bold"
                 },
                 {
-                  "$type": "app.gather.block.defs#bold"
+                  "$type": "app.eventside.block.defs#bold"
                 },
                 {
-                  "$type": "app.gather.block.defs#bold"
+                  "$type": "app.eventside.block.defs#bold"
                 },
                 {
-                  "$type": "app.gather.block.defs#bold"
+                  "$type": "app.eventside.block.defs#bold"
                 },
                 {
-                  "$type": "app.gather.block.defs#bold"
+                  "$type": "app.eventside.block.defs#bold"
                 },
                 {
-                  "$type": "app.gather.block.defs#bold"
+                  "$type": "app.eventside.block.defs#bold"
                 },
                 {
-                  "$type": "app.gather.block.defs#bold"
+                  "$type": "app.eventside.block.defs#bold"
                 },
                 {
-                  "$type": "app.gather.block.defs#bold"
+                  "$type": "app.eventside.block.defs#bold"
                 },
                 {
-                  "$type": "app.gather.block.defs#bold"
+                  "$type": "app.eventside.block.defs#bold"
                 }
               ]
             }
@@ -4138,10 +4138,10 @@
   {
     "name": "base58 cid with a character above U+00FF",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -4150,11 +4150,11 @@
         {
           "name": "s",
           "ref": {
-            "$type": "app.gather.block.defs#recordSource",
+            "$type": "app.eventside.block.defs#recordSource",
             "record": {
               "space": "ats://x",
               "did": "did:plc:organizer",
-              "collection": "app.gather.demo.item",
+              "collection": "app.eventside.demo.item",
               "rkey": "r1",
               "cid": "QmYwAPJzv5CZsnA625s3中f2nemtYgPpHdWEz79ojWnPbdG"
             }
@@ -4170,10 +4170,10 @@
   {
     "name": "cid field with an emoji in an unknown block",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.future#hologram",
+          "$type": "app.eventside.future#hologram",
           "cid": "bafy😀"
         }
       ],
@@ -4186,10 +4186,10 @@
   {
     "name": "non-ascii cid after a lexicon error",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": 42
         }
       ],
@@ -4198,7 +4198,7 @@
         {
           "name": "s",
           "ref": {
-            "$type": "app.gather.block.defs#recordSource",
+            "$type": "app.eventside.block.defs#recordSource",
             "record": {
               "space": "x",
               "did": "did:plc:a",
@@ -4218,10 +4218,10 @@
   {
     "name": "non-ascii cid key in free-form view params",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -4230,7 +4230,7 @@
         {
           "name": "v",
           "ref": {
-            "$type": "app.gather.block.defs#viewSource",
+            "$type": "app.eventside.block.defs#viewSource",
             "view": "a.b.c",
             "params": {
               "cid": "Zaal B—één"
@@ -4246,10 +4246,10 @@
   {
     "name": "non-ascii cid in a custom block module",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#custom",
+          "$type": "app.eventside.block.defs#custom",
           "module": {
             "wasm": {
               "cid": "bafé",
@@ -4268,10 +4268,10 @@
   {
     "name": "non-ascii cid in a middleware script",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#header",
+          "$type": "app.eventside.block.defs#header",
           "text": "Welkom"
         }
       ],
@@ -4297,10 +4297,10 @@
   {
     "name": "button with neither action nor sheet",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#button",
+          "$type": "app.eventside.block.defs#button",
           "id": "go",
           "label": "Go"
         }
@@ -4315,10 +4315,10 @@
   {
     "name": "button with both action and sheet",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#button",
+          "$type": "app.eventside.block.defs#button",
           "id": "go",
           "label": "Go",
           "action": "go",
@@ -4337,10 +4337,10 @@
   {
     "name": "button with an empty action",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#button",
+          "$type": "app.eventside.block.defs#button",
           "id": "go",
           "label": "Go",
           "action": ""
@@ -4356,16 +4356,16 @@
   {
     "name": "button and input sharing an id",
     "card": {
-      "$type": "app.gather.block.card",
+      "$type": "app.eventside.block.card",
       "blocks": [
         {
-          "$type": "app.gather.block.defs#button",
+          "$type": "app.eventside.block.defs#button",
           "id": "q",
           "label": "x",
           "action": "x"
         },
         {
-          "$type": "app.gather.block.defs#textInput",
+          "$type": "app.eventside.block.defs#textInput",
           "id": "q",
           "label": "q"
         }

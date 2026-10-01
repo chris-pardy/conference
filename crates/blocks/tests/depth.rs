@@ -9,16 +9,16 @@ fn tc_2_a_card_nested_thousands_deep_is_rejected_without_overflowing() {
     // Built by moving each level into the next: json! would copy `inner`
     // through to_value, which itself recurses 2000 deep.
     let wrap = |inner: Value| {
-        let mut stack = json!({ "$type": "app.gather.block.defs#stack" });
+        let mut stack = json!({ "$type": "app.eventside.block.defs#stack" });
         stack["blocks"] = Value::Array(vec![inner]);
         stack
     };
-    let mut inner = json!({ "$type": "app.gather.block.defs#header", "text": "deep" });
+    let mut inner = json!({ "$type": "app.eventside.block.defs#header", "text": "deep" });
     for _ in 0..2000 {
         inner = wrap(inner);
     }
     let mut card =
-        json!({ "$type": "app.gather.block.card", "createdAt": "2027-04-30T07:00:00.000Z" });
+        json!({ "$type": "app.eventside.block.card", "createdAt": "2027-04-30T07:00:00.000Z" });
     card["blocks"] = Value::Array(vec![inner]);
     let err = validate_card(&card).expect_err("too deep");
     assert_eq!(err.reason, "max-depth");

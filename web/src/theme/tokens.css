@@ -19,7 +19,7 @@
  * fallbacks. Hosting font files (and precaching them for offline use) comes
  * with per-organizer theming, which chooses the fonts.
  */
-@layer gather-theme-defaults {
+@layer eventside-theme-defaults {
   :root {
     --g-color-bg: #eef1f7;
     --g-color-surface: #ffffff;

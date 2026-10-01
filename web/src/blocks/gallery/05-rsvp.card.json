@@ -1,30 +1,30 @@
 {
   "title": "Buttons, a button group, a person and a countdown",
   "card": {
-    "$type": "app.gather.block.card",
+    "$type": "app.eventside.block.card",
     "blocks": [
       {
-        "$type": "app.gather.block.defs#header",
+        "$type": "app.eventside.block.defs#header",
         "text": "Borrel op vrijdag"
       },
       {
-        "$type": "app.gather.block.defs#person",
+        "$type": "app.eventside.block.defs#person",
         "did": "did:plc:organizer"
       },
       {
-        "$type": "app.gather.block.defs#time",
+        "$type": "app.eventside.block.defs#time",
         "mode": "countdown",
         "label": "Bitterballen after the talks",
         "at": "2027-04-30T19:00:00+02:00",
         "end": "2027-04-30T21:00:00+02:00"
       },
       {
-        "$type": "app.gather.block.defs#room",
+        "$type": "app.eventside.block.defs#room",
         "name": "Café de Rozengracht",
         "detail": "Rozengracht 42, a short walk along the canal"
       },
       {
-        "$type": "app.gather.block.defs#button",
+        "$type": "app.eventside.block.defs#button",
         "id": "rsvp",
         "label": "Ik kom!",
         "action": "going",
@@ -32,7 +32,7 @@
         "variant": "primary"
       },
       {
-        "$type": "app.gather.block.defs#button",
+        "$type": "app.eventside.block.defs#button",
         "id": "cancel",
         "label": "Afmelden",
         "action": "not-going",
@@ -40,7 +40,7 @@
         "variant": "danger"
       },
       {
-        "$type": "app.gather.block.defs#buttonGroup",
+        "$type": "app.eventside.block.defs#buttonGroup",
         "id": "snack",
         "label": "Favourite snack",
         "action": "vote",

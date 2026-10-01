@@ -10,7 +10,7 @@ export interface CardError {
 
 export type CardValidation = { ok: true } | { ok: false; error: CardError }
 
-export const CARD_NSID = 'app.gather.block.card'
+export const CARD_NSID = 'app.eventside.block.card'
 
 // @atproto/lexicon reports one error as a message: "Record/blocks/0 must have
 // the property "id"". These turn the rest of the message into a reason code;
@@ -50,7 +50,7 @@ function toCardError(message: string): CardError {
   return { path: pointer(segments), reason, message: human }
 }
 
-const DEFS_PREFIX = 'app.gather.block.defs#'
+const DEFS_PREFIX = 'app.eventside.block.defs#'
 
 type Node = Record<string, unknown>
 const asArray = (v: unknown): unknown[] => (Array.isArray(v) ? v : [])
@@ -267,7 +267,7 @@ function checkCids(card: Node): CardError | null {
   return visit(card.blocks, '/blocks')
 }
 
-/** Validates an `app.gather.block.card` record against the lexicons. */
+/** Validates an `app.eventside.block.card` record against the lexicons. */
 export function validateCard(record: unknown): CardValidation {
   if (typeof record !== 'object' || record === null || Array.isArray(record)) {
     return { ok: false, error: { path: '', reason: 'type', message: 'a card must be an object' } }

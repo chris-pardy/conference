@@ -1,14 +1,14 @@
 {
   "title": "Lists: repeated over a collection, and empty",
   "card": {
-    "$type": "app.gather.block.card",
+    "$type": "app.eventside.block.card",
     "blocks": [
       {
-        "$type": "app.gather.block.defs#header",
+        "$type": "app.eventside.block.defs#header",
         "text": "Vragen voor de keynote"
       },
       {
-        "$type": "app.gather.block.defs#list",
+        "$type": "app.eventside.block.defs#list",
         "items": {
           "source": "questions",
           "path": ""
@@ -16,10 +16,10 @@
         "key": "/id",
         "template": [
           {
-            "$type": "app.gather.block.defs#section",
+            "$type": "app.eventside.block.defs#section",
             "blocks": [
               {
-                "$type": "app.gather.block.defs#richText",
+                "$type": "app.eventside.block.defs#richText",
                 "bind": {
                   "text": {
                     "source": "$item",
@@ -28,7 +28,7 @@
                 }
               },
               {
-                "$type": "app.gather.block.defs#person",
+                "$type": "app.eventside.block.defs#person",
                 "bind": {
                   "did": {
                     "source": "$item",
@@ -37,7 +37,7 @@
                 }
               },
               {
-                "$type": "app.gather.block.defs#stat",
+                "$type": "app.eventside.block.defs#stat",
                 "label": "votes",
                 "bind": {
                   "value": {
@@ -51,11 +51,11 @@
         ]
       },
       {
-        "$type": "app.gather.block.defs#header",
+        "$type": "app.eventside.block.defs#header",
         "text": "Vragen voor Zaal C"
       },
       {
-        "$type": "app.gather.block.defs#list",
+        "$type": "app.eventside.block.defs#list",
         "items": {
           "source": "roomC",
           "path": ""
@@ -71,15 +71,15 @@
       {
         "name": "questions",
         "ref": {
-          "$type": "app.gather.block.defs#collectionSource",
-          "collection": "app.gather.demo.question"
+          "$type": "app.eventside.block.defs#collectionSource",
+          "collection": "app.eventside.demo.question"
         }
       },
       {
         "name": "roomC",
         "ref": {
-          "$type": "app.gather.block.defs#collectionSource",
-          "collection": "app.gather.demo.question"
+          "$type": "app.eventside.block.defs#collectionSource",
+          "collection": "app.eventside.demo.question"
         }
       }
     ]

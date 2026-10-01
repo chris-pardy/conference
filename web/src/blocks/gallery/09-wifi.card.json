@@ -1,62 +1,62 @@
 {
   "title": "Conference-aware: copyable, QR, session and room, and a sheet",
   "card": {
-    "$type": "app.gather.block.card",
+    "$type": "app.eventside.block.card",
     "blocks": [
       {
-        "$type": "app.gather.block.defs#header",
+        "$type": "app.eventside.block.defs#header",
         "text": "Wifi & check-in"
       },
       {
-        "$type": "app.gather.block.defs#copyable",
+        "$type": "app.eventside.block.defs#copyable",
         "label": "Atmosphere-Gast password",
         "value": "stroopwafel-2027"
       },
       {
-        "$type": "app.gather.block.defs#qr",
+        "$type": "app.eventside.block.defs#qr",
         "label": "Scan at the door to check in",
         "value": "https://atmosphereconf.org/2027/check-in"
       },
       {
-        "$type": "app.gather.block.defs#sessionRef",
+        "$type": "app.eventside.block.defs#sessionRef",
         "title": "Lexicons in Practice",
         "start": "2027-04-30T14:30:00+02:00",
         "end": "2027-04-30T15:15:00+02:00",
         "room": "Grote Zaal"
       },
       {
-        "$type": "app.gather.block.defs#room",
+        "$type": "app.eventside.block.defs#room",
         "name": "Zaal B",
         "detail": "1st floor (Trap)"
       },
       {
-        "$type": "app.gather.block.defs#button",
+        "$type": "app.eventside.block.defs#button",
         "id": "details",
         "label": "Wifi details",
         "opens": {
           "title": "Wifi details",
           "blocks": [
             {
-              "$type": "app.gather.block.defs#section",
+              "$type": "app.eventside.block.defs#section",
               "blocks": [
                 {
-                  "$type": "app.gather.block.defs#richText",
+                  "$type": "app.eventside.block.defs#richText",
                   "text": "Network: Atmosphere-Gast, on every floor. Type F sockets by the windows."
                 },
                 {
-                  "$type": "app.gather.block.defs#richText",
+                  "$type": "app.eventside.block.defs#richText",
                   "text": "Trouble connecting? Open https://atmosphereconf.org/2027/wifi/troubleshooting-atmosphere-gast-captive-portal-login on your phone."
                 }
               ]
             },
             {
-              "$type": "app.gather.block.defs#textInput",
+              "$type": "app.eventside.block.defs#textInput",
               "id": "problem",
               "label": "Report a problem",
               "placeholder": "No signal in Zaal B"
             },
             {
-              "$type": "app.gather.block.defs#submit",
+              "$type": "app.eventside.block.defs#submit",
               "id": "report",
               "label": "Send",
               "action": "report"
