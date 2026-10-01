@@ -11,6 +11,8 @@ export interface ActionIntent {
   blockId: string
   actionId: string
   value: unknown
+  /** Sent from inside a list item: that item's key. Absent outside lists. */
+  item?: unknown
 }
 
 export interface ActionHost {

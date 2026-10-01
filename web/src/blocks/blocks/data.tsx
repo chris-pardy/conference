@@ -32,18 +32,20 @@ export function List({ block }: Props) {
         let key = read.found ? `k:${JSON.stringify(read.value)}` : `i:${i}`
         if (seen.has(key)) key = `${key}#${i}`
         seen.add(key)
-        return <ListItem key={key} item={item} template={block.template} />
+        // Intents from inside the item name it by its key, else its position.
+        const itemKey = read.found ? (read as { value: unknown }).value : i
+        return <ListItem key={key} item={item} itemKey={itemKey} template={block.template} />
       })}
     </ul>
   )
 }
 
 /** One element of a list: the template, seeing the element as `$item`, as its own form. */
-function ListItem({ item, template }: { item: unknown; template: unknown }) {
+function ListItem({ item, itemKey, template }: { item: unknown; itemKey: unknown; template: unknown }) {
   const [form] = useState(() => new FormStore())
   return (
     <li className="g-list__item">
-      <ItemContext value={{ item }}>
+      <ItemContext value={{ item, key: itemKey }}>
         <FormContext value={form}>
           <Blocks blocks={template} />
         </FormContext>

@@ -1,7 +1,7 @@
 import { useContext, useId, useRef, useState } from 'react'
 import { ActionContext } from '../ActionContext'
 import { type BlockData, settle, text, useBound } from '../bindings'
-import { FormContext, useCard } from '../context'
+import { FormContext, ItemContext, useCard } from '../context'
 import { useField } from '../forms'
 import { blockAttrs, Placeholder } from '../frame'
 import { Sheet } from '../Sheet'
@@ -22,8 +22,10 @@ const str = (v: unknown) => (typeof v === 'string' ? v : undefined)
 function useSend() {
   const { cardRef } = useCard()
   const host = useContext(ActionContext)
+  const item = useContext(ItemContext)
   return (blockId: string, actionId: string, value: unknown) => {
-    host?.onAction({ card: cardRef, blockId, actionId, value })
+    // Inside a list item, the intent says which item it came from.
+    host?.onAction({ card: cardRef, blockId, actionId, value, ...(item ? { item: item.key } : {}) })
   }
 }
 
@@ -136,7 +138,7 @@ export function TextInput({ block }: Props) {
         setValue('')
         setError(null)
       },
-      focus: () => document.getElementById(inputId)?.focus(),
+      target: () => document.getElementById(inputId),
     },
     surface !== 'compact',
   )
@@ -189,19 +191,16 @@ export function Select({ block }: Props) {
   ).filter((o) => typeof o.value === 'string') as { label?: unknown; value: string }[]
   const limit = multiple && typeof block.maxSelections === 'number' ? block.maxSelections : undefined
   const required = block.required === true
+  // Only choices that are still options count: an edit to the card may have removed some.
+  const current = options.map((o) => o.value).filter((v) => chosen.includes(v))
 
   useField(
     {
       id,
       // Selections are sent in the options' order.
-      value: () =>
-        multiple
-          ? options.map((o) => o.value).filter((v) => chosen.includes(v))
-          : chosen.length
-            ? chosen[0]
-            : undefined,
+      value: () => (multiple ? current : current[0]),
       validate: () => {
-        const problem = required && chosen.length === 0 ? 'Choose an option.' : null
+        const problem = required && current.length === 0 ? 'Choose an option.' : null
         setError(problem)
         return problem === null
       },
@@ -209,25 +208,25 @@ export function Select({ block }: Props) {
         setChosen([])
         setError(null)
       },
-      focus: () => {
+      target: () => {
         const choices = [...document.getElementsByName(name)] as HTMLInputElement[]
-        ;(choices.find((c) => c.checked && !c.disabled) ?? choices.find((c) => !c.disabled))?.focus()
+        return choices.find((c) => c.checked && !c.disabled) ?? choices.find((c) => !c.disabled) ?? null
       },
     },
     surface !== 'compact',
   )
   if (surface === 'compact') return null
 
-  const full = limit !== undefined && chosen.length >= limit
+  const full = limit !== undefined && current.length >= limit
   const toggle = (value: string) => {
     setError(null)
     if (!multiple) return setChosen([value])
-    setChosen((now) => (now.includes(value) ? now.filter((v) => v !== value) : full ? now : [...now, value]))
+    setChosen(current.includes(value) ? current.filter((v) => v !== value) : full ? current : [...current, value])
   }
   const described = [limit !== undefined ? `${labelId}-hint` : null, error ? errorId : null].filter(Boolean).join(' ')
 
   const choices = options.map((option) => {
-    const checked = chosen.includes(option.value)
+    const checked = current.includes(option.value)
     return (
       <label key={option.value} className="g-choice">
         <input

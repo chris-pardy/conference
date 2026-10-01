@@ -973,7 +973,10 @@ The lexicons are in `lexicons/app/gather/block/{defs,card}.json`.
   - `SourceResolverContext`, and `FixtureResolver(sources, {profiles})`
     with `loading()`, `forbidden()`, `failing()` and `set(name, value)`.
     A name it doesn't know is missing.
-  - `ActionContext` holding `{onAction}`
+  - `ActionContext` holding `{onAction}`. An intent is `{card, blockId,
+    actionId, value}`, plus `item` (the list item's key, else its index)
+    when sent from inside a list item (added in review round 7, by the
+    user's decision)
   - `validateCard(record)`, which returns `{ok: true}` or
     `{ok: false, error: {path, reason, message}}`, and
     `conference_blocks::validate_card`, which returns a `CardError` with
@@ -1544,3 +1547,37 @@ cases.
    through its description.
 6. **[nit] Years 0–99 were read as 1900–1999.** **Fixed:** dates are built
    with `setUTCFullYear`, including the time zone offset lookup.
+
+### Round 7
+
+Reviewed `45c88ab`. All gates passed. Not clean: 0 blocking, 2 major, 2
+minor, 3 nits. Everything above nit was fixed, each with a regression test
+or parity cases.
+
+1. **[major] A select kept choices that an edit had removed**, and sent
+   them and counted them against `required` and the limit. **Fixed:** only
+   choices that are still options count, for the value, validation, the
+   limit and what's checked.
+2. **[major] A submit inside a list item didn't say which item it came
+   from.** It touched the intent contract, so it went to the user, who
+   chose to add `item`. **Fixed:** intents sent from inside a list item
+   (buttons and submits alike) carry `item`, the item's key (the list's
+   `key` value, else its index). Intents from outside a list leave it out.
+   The gallery log shows it, and the test contract above records it.
+3. **[minor] The validators disagreed on a `bind` array on block types
+   without `bind`.** **Fixed:** Rust reads it as JavaScript's
+   `Object.entries` does. Four cases were added to the parity fixtures
+   (now 149), and all match.
+4. **[minor] After an edit added an input above another, a failed submit
+   focused the wrong one.** **Fixed:** focus goes to the invalid input
+   that's first on screen (sorted by document position), not the first to
+   register.
+5. **[nit] Session and room links left the PWA.** **Fixed:** they open in a
+   new tab, like rich-text links.
+6. **[nit] Compact cards built a QR path they never show.** **Fixed.**
+7. **[nit] A button with no label passes validation and shows as
+   unavailable.** Not fixed: it's harmless (it fails visibly, not
+   silently), as with round 5 #7.
+
+The reviewer's probe setup left a stray `node_modules/node_modules`
+symlink (ignored by git), which was removed.

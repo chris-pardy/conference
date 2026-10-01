@@ -106,7 +106,16 @@ export function SessionRef({ block }: Props) {
           <span className="g-session__day"> · {day(start, timeZone)}</span>
         </span>
       )}
-      <span className="g-session__title"> {href ? <a href={href}>{title}</a> : title} </span>
+      <span className="g-session__title">
+        {' '}
+        {href ? (
+          <a href={href} target="_blank" rel="noopener noreferrer">
+            {title}
+          </a>
+        ) : (
+          title
+        )}{' '}
+      </span>
       {room && <span className="g-session__room">{room}</span>}
     </div>
   )
@@ -121,7 +130,15 @@ export function Room({ block }: Props) {
   const href = safeHref(block.uri)
   return (
     <div {...blockAttrs('room', block)} className="g-block g-room">
-      <span className="g-room__name">{href ? <a href={href}>{name}</a> : name} </span>
+      <span className="g-room__name">
+        {href ? (
+          <a href={href} target="_blank" rel="noopener noreferrer">
+            {name}
+          </a>
+        ) : (
+          name
+        )}{' '}
+      </span>
       {detail && <span className="g-room__detail">{detail}</span>}
     </div>
   )
@@ -324,7 +341,8 @@ export function Qr({ block }: Props) {
   const bound = useBound(block, ['label', 'value'])
   const state = settle(bound)
   const value = text(bound.value)
-  const qr = useQrPath(value ?? '')
+  // Compact cards don't show QR codes, so don't build one for them.
+  const qr = useQrPath(surface === 'compact' ? '' : (value ?? ''))
   if (surface === 'compact') return null
   if (state !== 'ready' || !value || !qr) {
     return <Placeholder type="qr" block={block} state={state === 'loading' ? 'loading' : 'unavailable'} />

@@ -529,7 +529,16 @@ fn visit(
                 });
             }
         }
-        for (prop, binding) in block["bind"].as_object().into_iter().flatten() {
+        // As JavaScript's Object.entries reads it: an object's keys, or an
+        // array's indices (a def without `bind` leaves it unchecked by the lexicon).
+        let bind: Vec<(String, &Value)> = match &block["bind"] {
+            Value::Object(map) => map.iter().map(|(k, v)| (k.clone(), v)).collect(),
+            Value::Array(items) => {
+                items.iter().enumerate().map(|(i, v)| (i.to_string(), v)).collect()
+            }
+            _ => Vec::new(),
+        };
+        for (prop, binding) in bind {
             check_binding(binding, &format!("{at}/bind/{prop}"), declared, in_list)?;
         }
         if kind == "list" {

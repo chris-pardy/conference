@@ -218,6 +218,7 @@ test('TC-19: a button in a list sends its own bound value', async () => {
     blockId: 'up',
     actionId: 'upvote',
     value: 'at://did:plc:bob/q/2',
+    item: 'at://did:plc:bob/q/2',
   })
 })
 
@@ -717,4 +718,109 @@ test('TC-22: a failed submit moves focus to the first invalid input', async () =
 test('TC-27: years before 100 are not read as the 1900s', () => {
   expect(parseDatetime('0099-06-15T19:00:00Z')?.toISOString()).toBe('0099-06-15T19:00:00.000Z')
   expect(parseDatetime('0050-01-01T12:00:00', 'Europe/Amsterdam')?.getUTCFullYear()).toBe(50)
+})
+
+test('TC-23: an edit that removes a chosen option drops the choice', async () => {
+  const user = userEvent.setup()
+  const snacks = (values: string[]) =>
+    block('select', {
+      id: 'snack',
+      label: 'Snack',
+      required: true,
+      options: values.map((v) => ({ label: v, value: v })),
+    })
+  const send = block('submit', { id: 's', label: 'Send', action: 'vote' })
+  const host = { onAction: vi.fn() }
+  const view = (blocks: unknown[]) => (
+    <SourceResolverContext value={new FixtureResolver({})}>
+      <ActionContext value={host}>
+        <BlockCard cardRef={CARD_REF} card={card(blocks)} surface="feed" />
+      </ActionContext>
+    </SourceResolverContext>
+  )
+  const { rerender } = render(view([snacks(['Stroopwafel', 'Bitterballen', 'Kaas']), send]))
+  await user.click(screen.getByRole('radio', { name: 'Kaas' }))
+
+  rerender(view([snacks(['Stroopwafel', 'Bitterballen']), send]))
+  await user.click(screen.getByRole('button', { name: 'Send' }))
+  expect(host.onAction).not.toHaveBeenCalled()
+  expect(screen.getByRole('radiogroup', { name: 'Snack' }).getAttribute('aria-describedby')).toBeTruthy()
+})
+
+test('TC-24: a multi select edit that removes a choice frees its place under the limit', async () => {
+  const user = userEvent.setup()
+  const talks = (values: string[]) =>
+    block('select', {
+      id: 't',
+      label: 'Talks',
+      multiple: true,
+      maxSelections: 2,
+      options: values.map((v) => ({ label: v, value: v })),
+    })
+  const view = (blocks: unknown[]) => (
+    <SourceResolverContext value={new FixtureResolver({})}>
+      <ActionContext value={{ onAction() {} }}>
+        <BlockCard cardRef={CARD_REF} card={card(blocks)} surface="feed" />
+      </ActionContext>
+    </SourceResolverContext>
+  )
+  const { rerender } = render(view([talks(['A', 'B', 'C', 'D'])]))
+  await user.click(screen.getByRole('checkbox', { name: 'A' }))
+  await user.click(screen.getByRole('checkbox', { name: 'D' }))
+  rerender(view([talks(['A', 'B', 'C'])]))
+  expect((screen.getByRole('checkbox', { name: 'B' }) as HTMLInputElement).disabled).toBe(false)
+})
+
+test('TC-21: a submit inside a list item says which item it came from', async () => {
+  const user = userEvent.setup()
+  const resolver = new FixtureResolver({
+    qs: [
+      { id: 'q1', text: 'Recorded?' },
+      { id: 'q2', text: 'Bike rack?' },
+    ],
+  })
+  const { container, onAction } = renderCard(
+    card(
+      [
+        block('list', {
+          items: binding('qs'),
+          key: '/id',
+          template: [
+            block('richText', { bind: { text: binding('$item', '/text') } }),
+            block('textInput', { id: 'answer', label: 'Answer' }),
+            block('submit', { id: 'reply', label: 'Reply', action: 'answer' }),
+          ],
+        }),
+      ],
+      { sources: [recordSource('qs')] },
+    ),
+    { resolver },
+  )
+  const second = container.querySelectorAll<HTMLElement>('.g-list__item')[1]
+  await user.type(within(second).getByRole('textbox', { name: 'Answer' }), 'Ja')
+  await user.click(within(second).getByRole('button', { name: 'Reply' }))
+  expect(onAction).toHaveBeenCalledWith({
+    card: CARD_REF,
+    blockId: 'reply',
+    actionId: 'answer',
+    value: { answer: 'Ja' },
+    item: 'q2',
+  })
+})
+
+test('TC-22: after an edit adds an input above, a failed submit focuses the first one on screen', async () => {
+  const user = userEvent.setup()
+  const field = (id: string, label: string) => block('textInput', { id, label, required: true })
+  const send = block('submit', { id: 's', label: 'Send', action: 'send' })
+  const view = (blocks: unknown[]) => (
+    <SourceResolverContext value={new FixtureResolver({})}>
+      <ActionContext value={{ onAction() {} }}>
+        <BlockCard cardRef={CARD_REF} card={card(blocks)} surface="feed" />
+      </ActionContext>
+    </SourceResolverContext>
+  )
+  const { rerender } = render(view([field('second', 'Second'), send]))
+  rerender(view([field('first', 'First'), field('second', 'Second'), send]))
+  await user.click(screen.getByRole('button', { name: 'Send' }))
+  expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'First' }))
 })

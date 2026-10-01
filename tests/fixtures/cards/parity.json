@@ -3137,6 +3137,92 @@
     }
   },
   {
+    "name": "bind array on a section",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#section",
+          "blocks": [],
+          "bind": [
+            {
+              "source": "nope"
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/bind/0/source",
+      "reason": "unknown-source"
+    }
+  },
+  {
+    "name": "bind array on a text input",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#textInput",
+          "id": "t",
+          "label": "x",
+          "bind": [
+            {
+              "source": "nope"
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/bind/0/source",
+      "reason": "unknown-source"
+    }
+  },
+  {
+    "name": "bind string on a stack",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#stack",
+          "blocks": [],
+          "bind": "nope"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "bind object on a submit",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#submit",
+          "id": "s",
+          "label": "x",
+          "action": "a",
+          "bind": {
+            "label": {
+              "source": "nope"
+            }
+          }
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/bind/label/source",
+      "reason": "unknown-source"
+    }
+  },
+  {
     "name": "button with neither action nor sheet",
     "card": {
       "$type": "app.gather.block.card",

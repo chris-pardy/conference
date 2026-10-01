@@ -7,11 +7,11 @@ export interface Field {
   /** Checks the input, showing why when it's invalid. */
   validate(): boolean
   clear(): void
-  /** Moves focus to the input, so assistive tech reads it and its error. */
-  focus(): void
+  /** The element to focus when the input is invalid, so assistive tech reads it and its error. */
+  target(): HTMLElement | null
 }
 
-/** The inputs of one form, in the order they mounted (document order). */
+/** The inputs of one form. */
 export class FormStore {
   private readonly fields = new Set<Field>()
 
@@ -24,16 +24,16 @@ export class FormStore {
 
   /**
    * Validates every input, so each shows its own error, and says whether all
-   * passed. On a failure, focus goes to the first invalid input, whose error
-   * a screen reader then announces through its description.
+   * passed. On a failure, focus goes to the invalid input that comes first on
+   * screen (not first to register: an edit can add inputs above others),
+   * whose error a screen reader then announces through its description.
    */
   validate(): boolean {
-    let first: Field | undefined
-    for (const field of this.fields) {
-      if (!field.validate()) first ??= field
-    }
-    first?.focus()
-    return first === undefined
+    const invalid = [...this.fields].filter((field) => !field.validate())
+    const targets = invalid.map((field) => field.target()).filter((el): el is HTMLElement => el !== null)
+    targets.sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1))
+    targets[0]?.focus()
+    return invalid.length === 0
   }
 
   values(): Record<string, unknown> {
@@ -66,7 +66,7 @@ export function useField(field: Field, enabled = true): void {
       value: () => latest.current.value(),
       validate: () => latest.current.validate(),
       clear: () => latest.current.clear(),
-      focus: () => latest.current.focus(),
+      target: () => latest.current.target(),
     })
   }, [form, id, enabled])
 }

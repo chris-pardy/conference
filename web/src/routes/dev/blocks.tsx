@@ -111,6 +111,14 @@ export default function BlockGallery() {
                     <dd>
                       <code>{JSON.stringify(intent.value) ?? 'none'}</code>
                     </dd>
+                    {intent.item !== undefined && (
+                      <>
+                        <dt>item</dt>
+                        <dd>
+                          <code>{JSON.stringify(intent.item)}</code>
+                        </dd>
+                      </>
+                    )}
                   </dl>
                 </li>
               ))}
