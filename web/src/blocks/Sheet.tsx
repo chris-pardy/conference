@@ -4,6 +4,24 @@ import { CardContext, FormContext, useCard } from './context'
 import { FormStore } from './forms'
 import { Blocks } from './render'
 
+/**
+ * The page stays unscrollable while any sheet is open. Sheets can open from
+ * inside sheets and can all unmount at once, in any order, so the lock is
+ * counted: the first sheet saves the page's overflow, the last restores it.
+ */
+let openSheets = 0
+let savedOverflow = ''
+
+function lockScroll(): () => void {
+  if (openSheets++ === 0) {
+    savedOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+  }
+  return () => {
+    if (--openSheets === 0) document.body.style.overflow = savedOverflow
+  }
+}
+
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
 
@@ -57,13 +75,12 @@ export function Sheet({
 
   useEffect(() => {
     close.current?.focus()
-    const { overflow } = document.body.style
-    document.body.style.overflow = 'hidden'
+    const unlockScroll = lockScroll()
     // Everything behind the sheet is inert: not focusable, not read out.
     const behind = [...document.body.children].filter((el) => el !== layer.current && !el.hasAttribute('inert'))
     for (const el of behind) el.setAttribute('inert', '')
     return () => {
-      document.body.style.overflow = overflow
+      unlockScroll()
       for (const el of behind) el.removeAttribute('inert')
       // Only now: browsers won't focus an element that's still inert.
       returnTo.current?.focus()
@@ -77,6 +94,8 @@ export function Sheet({
       return
     }
     if (e.key !== 'Tab' || !dialog.current) return
+    // Events bubble through portals to an outer sheet; only the innermost traps.
+    e.stopPropagation()
     // Tab moves between the sheet's own stops and wraps, so focus never leaves it.
     const stops = tabStops(dialog.current)
     if (stops.length === 0) return

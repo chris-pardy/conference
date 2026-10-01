@@ -1694,3 +1694,25 @@ nit. Everything was fixed, each with a regression test.
    the one that kept the most of its ids, whatever their order.
 3. **[nit] With duplicate ids (an invalid card), keys swapped on each
    render.** **Fixed:** the first item holding an id keeps it.
+
+### Round 13
+
+Reviewed `274c8db`. All gates passed. Not clean: 0 blocking, 1 major, 1
+minor, 2 nits. Everything was fixed.
+
+1. **[major] Nested sheets unmounting together left the page unscrollable**
+   (each sheet restored the overflow it saw on opening, and the inner one
+   saw `hidden`). **Fixed:** the scroll lock is counted across all sheets.
+   The first sheet saves the page's overflow and the last one restores it.
+   Regression test added.
+2. **[minor] An empty `id` or `action` passed validation and made a dead
+   button.** **Fixed:** the lexicon gives every block `id` and every
+   `action` a `minLength` of 1, and the types are regenerated. Both
+   validators reject them (`min-length`). The parity fixtures now have 154
+   cases, and all match.
+3. **[nit] Tab in a nested sheet also ran the outer sheet's trap**, because
+   events bubble through portals. **Fixed:** the sheet handling Tab stops
+   it there. Regression test added.
+4. **[nit] `preserve_order` applies to `serde_json` across the whole
+   workspace.** **Fixed:** the manifest says so, and that code needing
+   sorted keys must sort them itself.

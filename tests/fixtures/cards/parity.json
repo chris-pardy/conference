@@ -3322,6 +3322,62 @@
     }
   },
   {
+    "name": "button with an empty id",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#button",
+          "id": "",
+          "label": "Go",
+          "action": "go"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/id",
+      "reason": "min-length"
+    }
+  },
+  {
+    "name": "submit with an empty action",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#submit",
+          "id": "s",
+          "label": "Go",
+          "action": ""
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/action",
+      "reason": "min-length"
+    }
+  },
+  {
+    "name": "header with an empty id",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "id": "",
+          "text": "x"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/id",
+      "reason": "min-length"
+    }
+  },
+  {
     "name": "button with neither action nor sheet",
     "card": {
       "$type": "app.gather.block.card",
@@ -3376,7 +3432,8 @@
       "createdAt": "2027-04-30T07:00:00.000Z"
     },
     "expect": {
-      "ok": true
+      "path": "/blocks/0/action",
+      "reason": "min-length"
     }
   },
   {

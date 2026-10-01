@@ -9,4 +9,7 @@ cid = "0.11"
 regex = "1"
 serde = { version = "1", features = ["derive"] }
 # Lexicon properties are checked in declaration order, as @atproto/lexicon does.
+# Cargo unifies features, so every crate in the workspace that uses serde_json
+# gets insertion-ordered maps too. Code that needs sorted keys (e.g. a JWK
+# thumbprint) must sort them itself rather than rely on Value's map order.
 serde_json = { version = "1", features = ["preserve_order"] }

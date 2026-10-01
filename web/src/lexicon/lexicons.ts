@@ -107,6 +107,7 @@ export const schemaDict = {
         properties: {
           id: {
             type: 'string',
+            minLength: 1,
             maxLength: 64,
             description:
               'Names the block in action intents. Required on interactive blocks.',
@@ -158,6 +159,7 @@ export const schemaDict = {
         properties: {
           id: {
             type: 'string',
+            minLength: 1,
             maxLength: 64,
             description:
               'Names the block in action intents. Required on interactive blocks.',
@@ -180,6 +182,7 @@ export const schemaDict = {
         properties: {
           id: {
             type: 'string',
+            minLength: 1,
             maxLength: 64,
             description:
               'Names the block in action intents. Required on interactive blocks.',
@@ -192,6 +195,7 @@ export const schemaDict = {
         properties: {
           id: {
             type: 'string',
+            minLength: 1,
             maxLength: 64,
             description:
               'Names the block in action intents. Required on interactive blocks.',
@@ -214,6 +218,7 @@ export const schemaDict = {
         properties: {
           id: {
             type: 'string',
+            minLength: 1,
             maxLength: 64,
             description:
               'Names the block in action intents. Required on interactive blocks.',
@@ -244,6 +249,7 @@ export const schemaDict = {
         properties: {
           id: {
             type: 'string',
+            minLength: 1,
             maxLength: 64,
             description:
               'Names the block in action intents. Required on interactive blocks.',
@@ -277,6 +283,7 @@ export const schemaDict = {
         properties: {
           id: {
             type: 'string',
+            minLength: 1,
             maxLength: 64,
             description:
               'Names the block in action intents. Required on interactive blocks.',
@@ -325,6 +332,7 @@ export const schemaDict = {
         properties: {
           id: {
             type: 'string',
+            minLength: 1,
             maxLength: 64,
             description:
               'Names the block in action intents. Required on interactive blocks.',
@@ -347,6 +355,7 @@ export const schemaDict = {
         properties: {
           id: {
             type: 'string',
+            minLength: 1,
             maxLength: 64,
             description:
               'Names the block in action intents. Required on interactive blocks.',
@@ -357,6 +366,7 @@ export const schemaDict = {
           },
           action: {
             type: 'string',
+            minLength: 1,
             maxLength: 64,
             description:
               'The action id in the intent. Omitted for a button that only opens a sheet.',
@@ -390,6 +400,7 @@ export const schemaDict = {
         properties: {
           id: {
             type: 'string',
+            minLength: 1,
             maxLength: 64,
             description:
               'Names the block in action intents. Required on interactive blocks.',
@@ -401,6 +412,7 @@ export const schemaDict = {
           },
           action: {
             type: 'string',
+            minLength: 1,
             maxLength: 64,
           },
           buttons: {
@@ -422,6 +434,7 @@ export const schemaDict = {
         properties: {
           id: {
             type: 'string',
+            minLength: 1,
             maxLength: 64,
             description:
               'Names the block in action intents. Required on interactive blocks.',
@@ -458,6 +471,7 @@ export const schemaDict = {
         properties: {
           id: {
             type: 'string',
+            minLength: 1,
             maxLength: 64,
             description:
               'Names the block in action intents. Required on interactive blocks.',
@@ -495,6 +509,7 @@ export const schemaDict = {
         properties: {
           id: {
             type: 'string',
+            minLength: 1,
             maxLength: 64,
             description:
               'Names the block in action intents. Required on interactive blocks.',
@@ -505,6 +520,7 @@ export const schemaDict = {
           },
           action: {
             type: 'string',
+            minLength: 1,
             maxLength: 64,
           },
           variant: {
@@ -521,6 +537,7 @@ export const schemaDict = {
         properties: {
           id: {
             type: 'string',
+            minLength: 1,
             maxLength: 64,
             description:
               'Names the block in action intents. Required on interactive blocks.',
@@ -583,6 +600,7 @@ export const schemaDict = {
         properties: {
           id: {
             type: 'string',
+            minLength: 1,
             maxLength: 64,
             description:
               'Names the block in action intents. Required on interactive blocks.',
@@ -614,6 +632,7 @@ export const schemaDict = {
         properties: {
           id: {
             type: 'string',
+            minLength: 1,
             maxLength: 64,
             description:
               'Names the block in action intents. Required on interactive blocks.',
@@ -640,6 +659,7 @@ export const schemaDict = {
         properties: {
           id: {
             type: 'string',
+            minLength: 1,
             maxLength: 64,
             description:
               'Names the block in action intents. Required on interactive blocks.',
@@ -666,6 +686,7 @@ export const schemaDict = {
         properties: {
           id: {
             type: 'string',
+            minLength: 1,
             maxLength: 64,
             description:
               'Names the block in action intents. Required on interactive blocks.',
@@ -688,6 +709,7 @@ export const schemaDict = {
         properties: {
           id: {
             type: 'string',
+            minLength: 1,
             maxLength: 64,
             description:
               'Names the block in action intents. Required on interactive blocks.',
@@ -727,6 +749,7 @@ export const schemaDict = {
         properties: {
           id: {
             type: 'string',
+            minLength: 1,
             maxLength: 64,
             description:
               'Names the block in action intents. Required on interactive blocks.',
@@ -758,6 +781,7 @@ export const schemaDict = {
         properties: {
           id: {
             type: 'string',
+            minLength: 1,
             maxLength: 64,
             description:
               'Names the block in action intents. Required on interactive blocks.',
@@ -792,6 +816,7 @@ export const schemaDict = {
         properties: {
           id: {
             type: 'string',
+            minLength: 1,
             maxLength: 64,
             description:
               'Names the block in action intents. Required on interactive blocks.',
@@ -818,6 +843,7 @@ export const schemaDict = {
         properties: {
           id: {
             type: 'string',
+            minLength: 1,
             maxLength: 64,
             description:
               'Names the block in action intents. Required on interactive blocks.',
@@ -846,6 +872,7 @@ export const schemaDict = {
         properties: {
           id: {
             type: 'string',
+            minLength: 1,
             maxLength: 64,
             description:
               'Names the block in action intents. Required on interactive blocks.',
@@ -872,6 +899,7 @@ export const schemaDict = {
         properties: {
           id: {
             type: 'string',
+            minLength: 1,
             maxLength: 64,
             description:
               'Names the block in action intents. Required on interactive blocks.',

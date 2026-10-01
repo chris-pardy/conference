@@ -1129,3 +1129,51 @@ test('TC-21: with duplicate ids (an invalid card), typed text stays put across r
     expect((screen.getByRole('textbox', { name: 'Second' }) as HTMLInputElement).value).toBe('')
   }
 })
+
+const nestedSheets = () =>
+  card([
+    block('button', {
+      id: 'details',
+      label: 'Details',
+      opens: {
+        title: 'Details',
+        blocks: [
+          block('button', {
+            id: 'more',
+            label: 'More',
+            opens: {
+              title: 'More',
+              blocks: [
+                block('textInput', { id: 'q', label: 'Q' }),
+                block('submit', { id: 's', label: 'Send', action: 'send' }),
+              ],
+            },
+          }),
+        ],
+      },
+    }),
+  ])
+
+test('TC-32: unmounting a card with nested sheets open lets the page scroll again', async () => {
+  const user = userEvent.setup()
+  document.body.style.overflow = ''
+  const { unmount } = renderCard(nestedSheets())
+  await user.click(screen.getByRole('button', { name: 'Details' }))
+  await user.click(screen.getByRole('button', { name: 'More' }))
+  expect(document.body.style.overflow).toBe('hidden')
+  unmount()
+  expect(document.body.style.overflow).toBe('')
+  expect(document.querySelectorAll('[inert]')).toHaveLength(0)
+})
+
+test('TC-32: Tab in a nested sheet stays in the inner sheet', async () => {
+  const user = userEvent.setup()
+  renderCard(nestedSheets())
+  await user.click(screen.getByRole('button', { name: 'Details' }))
+  await user.click(screen.getByRole('button', { name: 'More' }))
+  const inner = screen.getByRole('dialog', { name: 'More' })
+  for (let i = 0; i < 4; i++) {
+    await user.tab()
+    expect(inner.contains(document.activeElement), `tab ${i + 1}`).toBe(true)
+  }
+})
