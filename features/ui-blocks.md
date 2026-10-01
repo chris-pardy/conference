@@ -1716,3 +1716,30 @@ minor, 2 nits. Everything was fixed.
 4. **[nit] `preserve_order` applies to `serde_json` across the whole
    workspace.** **Fixed:** the manifest says so, and that code needing
    sorted keys must sort them itself.
+
+### Round 14
+
+Reviewed `41e1917`. All gates passed. Not clean, but no majors: 0
+blocking, 0 major, 3 minor, 3 nits. All minors and two nits were fixed;
+one nit is recorded as a decision.
+
+1. **[minor] Escape did nothing once focus had left the sheet** (e.g. after
+   a click on its text). **Fixed:** Escape is handled on the document and
+   closes only the innermost open sheet. The dialog is focusable, so a
+   click inside it keeps focus there. A Playwright test covers it.
+2. **[minor] The default tokens overrode a host's theme**, because they
+   load with the lazy blocks CSS, after the host's stylesheet. **Fixed:**
+   the defaults sit in a cascade layer (`gather-theme-defaults`), so any
+   host rule wins whatever the load order. A Playwright test covers it, and
+   TC-33 still passes.
+3. **[minor] A list `key` or a binding `path` that isn't a JSON pointer
+   passed validation.** **Fixed:** both validators reject it (`format`).
+4. **[nit] Binding error paths didn't escape `bind` keys as JSON pointer
+   segments.** **Fixed** on both sides.
+5. **[nit] Button group values weren't required to be unique.** **Fixed:**
+   the same rule as a select's options, on both sides. Items 3–5 added
+   six parity cases (now 160), and all match.
+6. **[nit] The default fonts are named but never loaded.** Recorded as a
+   decision in `tokens.css`: hosting the font files (and precaching them
+   for offline use) comes with per-organizer theming, which chooses the
+   fonts. Until then, viewers without them get the system fallbacks.

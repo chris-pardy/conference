@@ -3378,6 +3378,179 @@
     }
   },
   {
+    "name": "binding path without a leading slash",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#stat",
+          "bind": {
+            "value": {
+              "source": "tally",
+              "path": "total"
+            }
+          }
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "tally",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/blocks/0/bind/value/path",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "binding path empty",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#stat",
+          "bind": {
+            "value": {
+              "source": "tally",
+              "path": ""
+            }
+          }
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "tally",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "list key without a leading slash",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#list",
+          "items": {
+            "source": "qs"
+          },
+          "key": "id",
+          "template": []
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "qs",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/blocks/0/key",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "list items path without a leading slash",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#list",
+          "items": {
+            "source": "qs",
+            "path": "items"
+          },
+          "key": "/id",
+          "template": []
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "qs",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/blocks/0/items/path",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "bind key needing pointer escapes",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#button",
+          "id": "b",
+          "action": "go",
+          "bind": {
+            "a/b~c": {
+              "source": "nope"
+            }
+          }
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/bind/a~1b~0c/source",
+      "reason": "unknown-source"
+    }
+  },
+  {
+    "name": "duplicate button group values",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#buttonGroup",
+          "id": "g",
+          "action": "vote",
+          "buttons": [
+            {
+              "label": "A",
+              "value": "same"
+            },
+            {
+              "label": "B",
+              "value": "same"
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/buttons/1/value",
+      "reason": "duplicate"
+    }
+  },
+  {
     "name": "button with neither action nor sheet",
     "card": {
       "$type": "app.gather.block.card",

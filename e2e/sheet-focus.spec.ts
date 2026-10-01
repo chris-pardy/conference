@@ -17,3 +17,15 @@ test('TC-32: closing a sheet gives focus back to the button that opened it', asy
     await expect(opener, `focus after closing with ${close}`).toBeFocused()
   }
 })
+
+test('TC-32: Escape closes a sheet after a click on its text', async ({ page }) => {
+  await page.goto('/dev/blocks')
+  const opener = page.getByRole('button', { name: 'Wifi details' })
+  await opener.scrollIntoViewIfNeeded()
+  await opener.click()
+  const sheet = page.getByRole('dialog')
+  await sheet.getByRole('heading').click()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(opener).toBeFocused()
+})

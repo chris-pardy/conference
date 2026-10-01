@@ -420,15 +420,17 @@ const DEFS_PREFIX: &str = "app.gather.block.defs#";
 /// in the same order, as `checkCard` in web/src/blocks/validate.ts):
 /// - block ids are unique across the whole card, sheets and list templates
 ///   included, so an intent's blockId (plus `item` in a list) names one block
-/// - a select's option values are unique
+/// - a select's option values are unique, and so are a button group's
 /// - source names are unique, and `$item` (a list's element) is reserved
 /// - a button has exactly one of `action` and `opens`
 /// - a binding names a declared source, or `$item` inside a list template
-///   (or a sheet opened from one)
+///   (or a sheet opened from one), and its `path` is a JSON pointer
+/// - a list's `key` is a JSON pointer
 ///
 /// Sources are checked first, then blocks, depth first in document order.
 /// Within a block: its id, its options, its button rule, its bindings (in
-/// `bind` order, then a list's `items`), then the blocks inside it.
+/// `bind` order, then a list's `items`), a list's `key`, then the blocks
+/// inside it. A binding's source is checked before its path.
 pub(crate) fn check_card(card: &Value) -> Result {
     let mut names: HashSet<&str> = HashSet::new();
     for (i, source) in card["sources"].as_array().into_iter().flatten().enumerate() {
@@ -469,13 +471,30 @@ fn js_entries(map: &Map<String, Value>) -> Vec<(String, &Value)> {
 }
 
 /// A binding must name a declared source, or `$item` inside a list template.
+/// A JSON pointer: empty, or starting with "/".
+fn check_pointer(value: &Value, at: &str) -> Result {
+    match value.as_str() {
+        Some(s) if !s.is_empty() && !s.starts_with('/') => Err(CardError {
+            path: at.to_owned(),
+            reason: "format".into(),
+            message: format!("{at} \"{s}\" must be a JSON pointer (empty, or starting with \"/\")"),
+        }),
+        _ => Ok(()),
+    }
+}
+
+/// A key as one JSON pointer segment.
+fn segment(key: &str) -> String {
+    key.replace('~', "~0").replace('/', "~1")
+}
+
 fn check_binding(binding: &Value, at: &str, declared: &HashSet<&str>, in_list: bool) -> Result {
     let Some(source) = binding.get("source").and_then(Value::as_str) else {
         return Ok(());
     };
     let known = if source == "$item" { in_list } else { declared.contains(&source) };
     if known {
-        return Ok(());
+        return check_pointer(&binding["path"], &format!("{at}/path"));
     }
     let why = if source == "$item" {
         "is only defined inside a list template"
@@ -512,14 +531,19 @@ fn visit(
             }
             ids.insert(id.to_owned());
         }
-        if kind == "select" {
+        let choices = match kind {
+            "select" => Some("options"),
+            "buttonGroup" => Some("buttons"),
+            _ => None,
+        };
+        if let Some(choices) = choices {
             let mut values: HashSet<&str> = HashSet::new();
-            for (j, option) in block["options"].as_array().into_iter().flatten().enumerate() {
+            for (j, option) in block[choices].as_array().into_iter().flatten().enumerate() {
                 let value = option["value"].as_str().unwrap_or_default();
                 if values.contains(&value) {
                     return Err(duplicate(
-                        format!("{at}/options/{j}/value"),
-                        format!("{at}/options/{j}/value \"{value}\" is already an option"),
+                        format!("{at}/{choices}/{j}/value"),
+                        format!("{at}/{choices}/{j}/value \"{value}\" is already a choice"),
                     ));
                 }
                 values.insert(value);
@@ -553,10 +577,11 @@ fn visit(
             _ => Vec::new(),
         };
         for (prop, binding) in bind {
-            check_binding(binding, &format!("{at}/bind/{prop}"), declared, in_list)?;
+            check_binding(binding, &format!("{at}/bind/{}", segment(&prop)), declared, in_list)?;
         }
         if kind == "list" {
             check_binding(&block["items"], &format!("{at}/items"), declared, in_list)?;
+            check_pointer(&block["key"], &format!("{at}/key"))?;
         }
         match kind {
             "section" | "stack" => {

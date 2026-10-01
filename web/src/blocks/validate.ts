@@ -59,23 +59,37 @@ const asArray = (v: unknown): unknown[] => (Array.isArray(v) ? v : [])
  * in the same order, as crates/blocks/src/lexicon.rs `check_card`):
  * - block ids are unique across the whole card, sheets and list templates
  *   included, so an intent's blockId (plus `item` in a list) names one block
- * - a select's option values are unique
+ * - a select's option values are unique, and so are a button group's
  * - source names are unique, and `$item` (a list's element) is reserved
  * - a button has exactly one of `action` and `opens`
  * - a binding names a declared source, or `$item` inside a list template
- *   (or a sheet opened from one)
+ *   (or a sheet opened from one), and its `path` is a JSON pointer
+ * - a list's `key` is a JSON pointer
  * Sources are checked first, then blocks, depth first in document order.
  * Within a block: its id, its options, its button rule, its bindings (in
- * `bind` order, then a list's `items`), then the blocks inside it.
+ * `bind` order, then a list's `items`), a list's `key`, then the blocks
+ * inside it. A binding's source is checked before its path.
  */
+/** A JSON pointer: empty, or starting with "/". */
+function checkPointer(value: unknown, at: string): CardError | null {
+  if (typeof value !== 'string' || value === '' || value.startsWith('/')) return null
+  return {
+    path: at,
+    reason: 'format',
+    message: `${at} "${value}" must be a JSON pointer (empty, or starting with "/")`,
+  }
+}
+
 function checkCard(card: Node): CardError | null {
   const declared = new Set(asArray(card.sources).map((s) => (s as Node).name))
   const checkBinding = (binding: unknown, at: string, inList: boolean): CardError | null => {
     const source = (binding as Node | null)?.source
     if (typeof source !== 'string') return null
-    if (source === '$item' ? inList : declared.has(source)) return null
-    const why = source === '$item' ? 'is only defined inside a list template' : 'is not a source of this card'
-    return { path: `${at}/source`, reason: 'unknown-source', message: `${at}/source "${source}" ${why}` }
+    if (!(source === '$item' ? inList : declared.has(source))) {
+      const why = source === '$item' ? 'is only defined inside a list template' : 'is not a source of this card'
+      return { path: `${at}/source`, reason: 'unknown-source', message: `${at}/source "${source}" ${why}` }
+    }
+    return checkPointer((binding as Node).path, `${at}/path`)
   }
   const visit = (blocks: unknown[], path: string, ids: Set<string>, inList: boolean): CardError | null => {
     for (const [i, raw] of blocks.entries()) {
@@ -93,15 +107,16 @@ function checkCard(card: Node): CardError | null {
         }
         ids.add(block.id)
       }
-      if (type === 'select') {
+      const choices = type === 'select' ? 'options' : type === 'buttonGroup' ? 'buttons' : null
+      if (choices) {
         const values = new Set<string>()
-        for (const [j, option] of asArray(block.options).entries()) {
+        for (const [j, option] of asArray(block[choices]).entries()) {
           const value = (option as Node).value as string
           if (values.has(value)) {
             return {
-              path: `${at}/options/${j}/value`,
+              path: `${at}/${choices}/${j}/value`,
               reason: 'duplicate',
-              message: `${at}/options/${j}/value "${value}" is already an option`,
+              message: `${at}/${choices}/${j}/value "${value}" is already a choice`,
             }
           }
           values.add(value)
@@ -118,11 +133,11 @@ function checkCard(card: Node): CardError | null {
         }
       }
       for (const [prop, binding] of Object.entries((block.bind as Node | undefined) ?? {})) {
-        const error = checkBinding(binding, `${at}/bind/${prop}`, inList)
+        const error = checkBinding(binding, `${at}/bind${pointer([prop])}`, inList)
         if (error) return error
       }
       if (type === 'list') {
-        const error = checkBinding(block.items, `${at}/items`, inList)
+        const error = checkBinding(block.items, `${at}/items`, inList) ?? checkPointer(block.key, `${at}/key`)
         if (error) return error
       }
       const nested =

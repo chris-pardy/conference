@@ -572,6 +572,11 @@ textarea.g-input {
   animation: g-sheet-up 0.22s ease-out;
 }
 
+/* The sheet takes focus only to keep it inside; its controls show focus. */
+.g-sheet:focus {
+  outline: none;
+}
+
 .g-sheet__head {
   display: flex;
   align-items: center;

@@ -22,6 +22,9 @@ function lockScroll(): () => void {
   }
 }
 
+/** Open sheets, innermost last: Escape closes only the innermost. */
+const openStack: symbol[] = []
+
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
 
@@ -72,6 +75,8 @@ export function Sheet({
   const layer = useRef<HTMLDivElement>(null)
   const dialog = useRef<HTMLDivElement>(null)
   const close = useRef<HTMLButtonElement>(null)
+  const latestClose = useRef(onClose)
+  latestClose.current = onClose
 
   useEffect(() => {
     close.current?.focus()
@@ -79,7 +84,19 @@ export function Sheet({
     // Everything behind the sheet is inert: not focusable, not read out.
     const behind = [...document.body.children].filter((el) => el !== layer.current && !el.hasAttribute('inert'))
     for (const el of behind) el.setAttribute('inert', '')
+    // Escape closes the innermost sheet wherever focus is, even if it has
+    // dropped to the page (a click on text, or a focused block removed).
+    const me = Symbol('sheet')
+    openStack.push(me)
+    const onEscape = (e: globalThis.KeyboardEvent) => {
+      if (e.key !== 'Escape' || openStack[openStack.length - 1] !== me) return
+      e.preventDefault()
+      latestClose.current()
+    }
+    document.addEventListener('keydown', onEscape)
     return () => {
+      document.removeEventListener('keydown', onEscape)
+      openStack.splice(openStack.indexOf(me), 1)
       unlockScroll()
       for (const el of behind) el.removeAttribute('inert')
       // Only now: browsers won't focus an element that's still inert.
@@ -88,11 +105,6 @@ export function Sheet({
   }, [])
 
   const onKeyDown = (e: KeyboardEvent) => {
-    if (e.key === 'Escape') {
-      e.stopPropagation()
-      onClose()
-      return
-    }
     if (e.key !== 'Tab' || !dialog.current) return
     // Events bubble through portals to an outer sheet; only the innermost traps.
     e.stopPropagation()
@@ -125,6 +137,8 @@ export function Sheet({
         aria-labelledby={titleId}
         data-surface="sheet"
         className="g-sheet"
+        // Focusable itself, so a click on its text keeps focus inside it.
+        tabIndex={-1}
         onKeyDown={onKeyDown}
       >
         <div className="g-sheet__head">
