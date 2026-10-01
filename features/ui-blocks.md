@@ -1581,3 +1581,28 @@ or parity cases.
 
 The reviewer's probe setup left a stray `node_modules/node_modules`
 symlink (ignored by git), which was removed.
+
+### Round 8
+
+Reviewed `de8b0b9`. All gates passed. Not clean: 0 blocking, 2 major, 1
+minor, 1 nit. Everything above nit was fixed, each with a regression test
+or parity cases.
+
+1. **[major] Ids only had to be unique per form**, so blocks in different
+   list templates or sheets could send identical intents. `block-actions`
+   finds the block by `blockId` (for tallies, and to validate input).
+   **Fixed:** ids are unique across the whole card, sheets and list
+   templates included, in both validators. This replaces round 3's
+   per-form rule. A template's ids still repeat once per item; `item` tells
+   items apart. The parity fixtures now have 150 cases, and all match. The
+   list cases now declare their source, which they'd failed on since
+   round 6.
+2. **[major] An edit that lowered `maxSelections` let more choices through
+   than the new limit.** **Fixed:** validation rejects it ("Choose at most
+   N (now M)") until the attendee unchecks some.
+3. **[minor] List items sharing a key sent the same `item`.** **Fixed:**
+   when several items share a key, each of them is named by its position
+   instead.
+4. **[nit] `19:00:7` is read as 19:00 and 0.7 seconds.** Not fixed: that
+   is how the validator's own grammar reads it (`.` then digits is a
+   fraction), and displayed times only show hours and minutes.

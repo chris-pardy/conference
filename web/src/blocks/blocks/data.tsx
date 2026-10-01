@@ -23,17 +23,20 @@ export function List({ block }: Props) {
     )
   }
   const keyPath = typeof block.key === 'string' ? block.key : undefined
-  const seen = new Set<string>()
+  const reads = items.value.map((item) => (keyPath !== undefined ? readPointer(item, keyPath) : { found: false }))
+  const keys = reads.map((read, i) => (read.found ? `k:${JSON.stringify(read.value)}` : `i:${i}`))
+  const counts = new Map<string, number>()
+  for (const key of keys) counts.set(key, (counts.get(key) ?? 0) + 1)
   return (
     <ul {...blockAttrs('list', block)} className="g-block g-list">
       {items.value.map((item, i) => {
         // Items keep their identity by key, so reordering moves them with their state.
-        const read = keyPath !== undefined ? readPointer(item, keyPath) : { found: false }
-        let key = read.found ? `k:${JSON.stringify(read.value)}` : `i:${i}`
-        if (seen.has(key)) key = `${key}#${i}`
-        seen.add(key)
+        // A key shared by several items can't name one, so those fall back to their position.
+        const unique = counts.get(keys[i]) === 1
+        const read = reads[i]
+        const key = unique ? keys[i] : `${keys[i]}#${i}`
         // Intents from inside the item name it by its key, else its position.
-        const itemKey = read.found ? (read as { value: unknown }).value : i
+        const itemKey = read.found && unique ? read.value : i
         return <ListItem key={key} item={item} itemKey={itemKey} template={block.template} />
       })}
     </ul>

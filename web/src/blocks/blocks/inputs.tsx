@@ -200,7 +200,12 @@ export function Select({ block }: Props) {
       // Selections are sent in the options' order.
       value: () => (multiple ? current : current[0]),
       validate: () => {
-        const problem = required && current.length === 0 ? 'Choose an option.' : null
+        const problem =
+          required && current.length === 0
+            ? 'Choose an option.'
+            : limit !== undefined && current.length > limit
+              ? `Choose at most ${limit} (now ${current.length}).`
+              : null
         setError(problem)
         return problem === null
       },

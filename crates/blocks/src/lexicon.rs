@@ -418,8 +418,8 @@ const DEFS_PREFIX: &str = "app.gather.block.defs#";
 
 /// Rules the lexicon can't express, checked after it passes (the same rules,
 /// in the same order, as `checkCard` in web/src/blocks/validate.ts):
-/// - block ids are unique within each form: the card, each sheet and each
-///   list template, since a submit sends `{id: value}` for its form
+/// - block ids are unique across the whole card, sheets and list templates
+///   included, so an intent's blockId (plus `item` in a list) names one block
 /// - a select's option values are unique
 /// - source names are unique, and `$item` (a list's element) is reserved
 /// - a button has exactly one of `action` and `opens`
@@ -493,7 +493,7 @@ fn visit(
             if ids.iter().any(|seen| seen == id) {
                 return Err(duplicate(
                     format!("{at}/id"),
-                    format!("{at}/id \"{id}\" is already used in this form"),
+                    format!("{at}/id \"{id}\" is already used on this card"),
                 ));
             }
             ids.push(id.to_owned());
@@ -559,17 +559,11 @@ fn visit(
                     )?;
                 }
             }
-            "list" => visit(
-                &block["template"],
-                &format!("{at}/template"),
-                &mut Vec::new(),
-                declared,
-                true,
-            )?,
+            "list" => visit(&block["template"], &format!("{at}/template"), ids, declared, true)?,
             "button" if !block["opens"].is_null() => visit(
                 &block["opens"]["blocks"],
                 &format!("{at}/opens/blocks"),
-                &mut Vec::new(),
+                ids,
                 declared,
                 in_list,
             )?,

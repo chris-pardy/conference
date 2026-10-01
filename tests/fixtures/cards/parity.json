@@ -2604,7 +2604,8 @@
       "createdAt": "2027-04-30T07:00:00.000Z"
     },
     "expect": {
-      "ok": true
+      "path": "/blocks/1/opens/blocks/0/id",
+      "reason": "duplicate"
     }
   },
   {
@@ -2663,11 +2664,68 @@
           ]
         }
       ],
-      "createdAt": "2027-04-30T07:00:00.000Z"
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        }
+      ]
     },
     "expect": {
-      "path": "/blocks/1/items/source",
-      "reason": "unknown-source"
+      "path": "/blocks/1/template/0/id",
+      "reason": "duplicate"
+    }
+  },
+  {
+    "name": "same id in two list templates",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#list",
+          "items": {
+            "source": "s"
+          },
+          "template": [
+            {
+              "$type": "app.gather.block.defs#textInput",
+              "id": "q",
+              "label": "q"
+            }
+          ]
+        },
+        {
+          "$type": "app.gather.block.defs#list",
+          "items": {
+            "source": "s"
+          },
+          "template": [
+            {
+              "$type": "app.gather.block.defs#textInput",
+              "id": "q",
+              "label": "q"
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/blocks/1/template/0/id",
+      "reason": "duplicate"
     }
   },
   {
@@ -2694,11 +2752,20 @@
           ]
         }
       ],
-      "createdAt": "2027-04-30T07:00:00.000Z"
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        }
+      ]
     },
     "expect": {
-      "path": "/blocks/0/items/source",
-      "reason": "unknown-source"
+      "path": "/blocks/0/template/1/id",
+      "reason": "duplicate"
     }
   },
   {

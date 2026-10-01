@@ -824,3 +824,66 @@ test('TC-22: after an edit adds an input above, a failed submit focuses the firs
   await user.click(screen.getByRole('button', { name: 'Send' }))
   expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'First' }))
 })
+
+test('TC-24: an edit that lowers the limit below what was chosen blocks the submit and says why', async () => {
+  const user = userEvent.setup()
+  const talks = (max: number) =>
+    block('select', {
+      id: 'talks',
+      label: 'Talks',
+      multiple: true,
+      maxSelections: max,
+      options: ['a', 'b', 'c'].map((v) => ({ label: v.toUpperCase(), value: v })),
+    })
+  const send = block('submit', { id: 's', label: 'Send', action: 'save' })
+  const host = { onAction: vi.fn() }
+  const view = (blocks: unknown[]) => (
+    <SourceResolverContext value={new FixtureResolver({})}>
+      <ActionContext value={host}>
+        <BlockCard cardRef={CARD_REF} card={card(blocks)} surface="feed" />
+      </ActionContext>
+    </SourceResolverContext>
+  )
+  const { rerender } = render(view([talks(3), send]))
+  for (const name of ['A', 'B', 'C']) await user.click(screen.getByRole('checkbox', { name }))
+  rerender(view([talks(1), send]))
+  await user.click(screen.getByRole('button', { name: 'Send' }))
+  expect(host.onAction).not.toHaveBeenCalled()
+  expect(screen.getByText(/at most 1/i)).toBeTruthy()
+
+  await user.click(screen.getByRole('checkbox', { name: 'B' }))
+  await user.click(screen.getByRole('checkbox', { name: 'C' }))
+  await user.click(screen.getByRole('button', { name: 'Send' }))
+  expect(host.onAction).toHaveBeenCalledWith({
+    card: CARD_REF,
+    blockId: 's',
+    actionId: 'save',
+    value: { talks: ['a'] },
+  })
+})
+
+test('TC-19: list items sharing a key are told apart by position', async () => {
+  const user = userEvent.setup()
+  const resolver = new FixtureResolver({
+    qs: [
+      { id: 'q1', text: 'First' },
+      { id: 'q1', text: 'Second' },
+      { id: 'q2', text: 'Third' },
+    ],
+  })
+  const { onAction } = renderCard(
+    card(
+      [
+        block('list', {
+          items: binding('qs'),
+          key: '/id',
+          template: [block('button', { id: 'up', action: 'upvote', bind: { label: binding('$item', '/text') } })],
+        }),
+      ],
+      { sources: [recordSource('qs')] },
+    ),
+    { resolver },
+  )
+  for (const name of ['First', 'Second', 'Third']) await user.click(screen.getByRole('button', { name }))
+  expect(onAction.mock.calls.map(([intent]) => intent.item)).toEqual([0, 1, 'q2'])
+})

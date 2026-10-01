@@ -57,8 +57,8 @@ const asArray = (v: unknown): unknown[] => (Array.isArray(v) ? v : [])
 /**
  * Rules the lexicon can't express, checked after it passes (the same rules,
  * in the same order, as crates/blocks/src/lexicon.rs `check_card`):
- * - block ids are unique within each form: the card, each sheet and each
- *   list template, since a submit sends `{id: value}` for its form
+ * - block ids are unique across the whole card, sheets and list templates
+ *   included, so an intent's blockId (plus `item` in a list) names one block
  * - a select's option values are unique
  * - source names are unique, and `$item` (a list's element) is reserved
  * - a button has exactly one of `action` and `opens`
@@ -88,7 +88,7 @@ function checkCard(card: Node): CardError | null {
           return {
             path: `${at}/id`,
             reason: 'duplicate',
-            message: `${at}/id "${block.id}" is already used in this form`,
+            message: `${at}/id "${block.id}" is already used on this card`,
           }
         }
         ids.add(block.id)
@@ -135,9 +135,9 @@ function checkCard(card: Node): CardError | null {
                 null,
               )
             : type === 'list'
-              ? visit(asArray(block.template), `${at}/template`, new Set(), true)
+              ? visit(asArray(block.template), `${at}/template`, ids, true)
               : type === 'button' && block.opens
-                ? visit(asArray((block.opens as Node).blocks), `${at}/opens/blocks`, new Set(), inList)
+                ? visit(asArray((block.opens as Node).blocks), `${at}/opens/blocks`, ids, inList)
                 : null
       if (nested) return nested
     }
