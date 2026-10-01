@@ -7,6 +7,8 @@ export interface Field {
   /** Checks the input, showing why when it's invalid. */
   validate(): boolean
   clear(): void
+  /** Moves focus to the input, so assistive tech reads it and its error. */
+  focus(): void
 }
 
 /** The inputs of one form, in the order they mounted (document order). */
@@ -20,11 +22,18 @@ export class FormStore {
     }
   }
 
-  /** Validates every input, so each shows its own error, and says whether all passed. */
+  /**
+   * Validates every input, so each shows its own error, and says whether all
+   * passed. On a failure, focus goes to the first invalid input, whose error
+   * a screen reader then announces through its description.
+   */
   validate(): boolean {
-    let ok = true
-    for (const field of this.fields) ok = field.validate() && ok
-    return ok
+    let first: Field | undefined
+    for (const field of this.fields) {
+      if (!field.validate()) first ??= field
+    }
+    first?.focus()
+    return first === undefined
   }
 
   values(): Record<string, unknown> {
@@ -57,6 +66,7 @@ export function useField(field: Field, enabled = true): void {
       value: () => latest.current.value(),
       validate: () => latest.current.validate(),
       clear: () => latest.current.clear(),
+      focus: () => latest.current.focus(),
     })
   }, [form, id, enabled])
 }

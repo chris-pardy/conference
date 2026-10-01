@@ -14,7 +14,7 @@ function zoneOffset(instant: number, timeZone: string): number {
       .formatToParts(instant)
       .map((p) => [p.type, Number(p.value)]),
   )
-  const asUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second)
+  const asUtc = utc(parts.year, parts.month, parts.day, parts.hour, parts.minute, parts.second, 0)
   return asUtc - (instant - (instant % 1000))
 }
 
@@ -61,8 +61,8 @@ export function parseDatetime(s: string, timeZone?: string): Date | undefined {
   const [hour, minute, second] = [Number(c[1]), Number(c[2]), Number(c[3] ?? 0)]
   const ms = Math.round(Number(`0.${c[4] ?? '0'}`) * 1000)
   if (month < 1 || month > 12 || day < 1 || day > 31) return fallback(s)
-  // Date.UTC rolls 24:00 and second 60 over, as JavaScript's Date does.
-  const wall = Date.UTC(year, month - 1, day, hour, minute, second, ms)
+
+  const wall = utc(year, month, day, hour, minute, second, ms)
 
   if (offsetMinutes !== undefined) return valid(wall - offsetMinutes * 60_000)
   if (timeZone) {
@@ -74,7 +74,21 @@ export function parseDatetime(s: string, timeZone?: string): Date | undefined {
       // An unknown zone: the viewer's.
     }
   }
-  return valid(new Date(year, month - 1, day, hour, minute, second, ms).getTime())
+  const local = new Date(0)
+  local.setFullYear(year, month - 1, day)
+  local.setHours(hour, minute, second, ms)
+  return valid(local.getTime())
+}
+
+/**
+ * Date.UTC, but for every year: Date.UTC reads years 0–99 as 1900–1999.
+ * Overflowing fields (24:00, second 60, 31 April) roll over the same way.
+ */
+function utc(year: number, month: number, day: number, hour: number, minute: number, second: number, ms: number) {
+  const date = new Date(0)
+  date.setUTCFullYear(year, month - 1, day)
+  date.setUTCHours(hour, minute, second, ms)
+  return date.getTime()
 }
 
 function valid(ms: number): Date | undefined {

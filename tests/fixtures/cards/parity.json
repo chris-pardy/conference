@@ -2666,7 +2666,8 @@
       "createdAt": "2027-04-30T07:00:00.000Z"
     },
     "expect": {
-      "ok": true
+      "path": "/blocks/1/items/source",
+      "reason": "unknown-source"
     }
   },
   {
@@ -2696,8 +2697,8 @@
       "createdAt": "2027-04-30T07:00:00.000Z"
     },
     "expect": {
-      "path": "/blocks/0/template/1/id",
-      "reason": "duplicate"
+      "path": "/blocks/0/items/source",
+      "reason": "unknown-source"
     }
   },
   {
@@ -2884,6 +2885,316 @@
     }
   },
   {
+    "name": "binding to an undeclared source",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#stat",
+          "bind": {
+            "value": {
+              "source": "tallly",
+              "path": "/total"
+            }
+          }
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "tally",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/blocks/0/bind/value/source",
+      "reason": "unknown-source"
+    }
+  },
+  {
+    "name": "binding to a declared source",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#stat",
+          "bind": {
+            "value": {
+              "source": "tally",
+              "path": "/total"
+            }
+          }
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "tally",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "$item outside a list",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#stat",
+          "bind": {
+            "value": {
+              "source": "$item",
+              "path": "/total"
+            }
+          }
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/bind/value/source",
+      "reason": "unknown-source"
+    }
+  },
+  {
+    "name": "$item inside a list template",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#list",
+          "items": {
+            "source": "qs"
+          },
+          "template": [
+            {
+              "$type": "app.gather.block.defs#stat",
+              "bind": {
+                "value": {
+                  "source": "$item",
+                  "path": "/total"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "qs",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "$item in a sheet opened from a list item",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#list",
+          "items": {
+            "source": "qs"
+          },
+          "template": [
+            {
+              "$type": "app.gather.block.defs#button",
+              "id": "b",
+              "label": "x",
+              "opens": {
+                "blocks": [
+                  {
+                    "$type": "app.gather.block.defs#stat",
+                    "bind": {
+                      "value": {
+                        "source": "$item",
+                        "path": "/total"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "qs",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "list items from an undeclared source",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#list",
+          "items": {
+            "source": "nope"
+          },
+          "template": []
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/items/source",
+      "reason": "unknown-source"
+    }
+  },
+  {
+    "name": "undeclared source nested in a column",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#columns",
+          "columns": [
+            {
+              "blocks": [
+                {
+                  "$type": "app.gather.block.defs#stat",
+                  "bind": {
+                    "value": {
+                      "source": "nope",
+                      "path": "/total"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/columns/0/blocks/0/bind/value/source",
+      "reason": "unknown-source"
+    }
+  },
+  {
+    "name": "second binding undeclared",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#progress",
+          "bind": {
+            "value": {
+              "source": "a"
+            },
+            "max": {
+              "source": "b"
+            }
+          }
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "a",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/blocks/0/bind/max/source",
+      "reason": "unknown-source"
+    }
+  },
+  {
+    "name": "button with neither action nor sheet",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#button",
+          "id": "go",
+          "label": "Go"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/action",
+      "reason": "required"
+    }
+  },
+  {
+    "name": "button with both action and sheet",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#button",
+          "id": "go",
+          "label": "Go",
+          "action": "go",
+          "opens": {
+            "blocks": []
+          }
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/opens",
+      "reason": "exclusive"
+    }
+  },
+  {
+    "name": "button with an empty action",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#button",
+          "id": "go",
+          "label": "Go",
+          "action": ""
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
     "name": "button and input sharing an id",
     "card": {
       "$type": "app.gather.block.card",
@@ -2891,7 +3202,8 @@
         {
           "$type": "app.gather.block.defs#button",
           "id": "q",
-          "label": "x"
+          "label": "x",
+          "action": "x"
         },
         {
           "$type": "app.gather.block.defs#textInput",

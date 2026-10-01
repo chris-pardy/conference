@@ -136,6 +136,7 @@ export function TextInput({ block }: Props) {
         setValue('')
         setError(null)
       },
+      focus: () => document.getElementById(inputId)?.focus(),
     },
     surface !== 'compact',
   )
@@ -207,6 +208,10 @@ export function Select({ block }: Props) {
       clear: () => {
         setChosen([])
         setError(null)
+      },
+      focus: () => {
+        const choices = [...document.getElementsByName(name)] as HTMLInputElement[]
+        ;(choices.find((c) => c.checked && !c.disabled) ?? choices.find((c) => !c.disabled))?.focus()
       },
     },
     surface !== 'compact',

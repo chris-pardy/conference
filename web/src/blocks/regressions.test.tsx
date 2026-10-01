@@ -602,3 +602,119 @@ test('TC-19: a button’s bound value is sent as text, and a non-text value make
   expect(onAction).toHaveBeenCalledWith({ card: CARD_REF, blockId: 'num', actionId: 'pick', value: '7' })
   expect(blocksOfType(container, 'button')[1].dataset.state).toBe('unavailable')
 })
+
+/** Renders a card from a list of blocks, and re-renders it with others, as a host does after an edit. */
+function editable(initial: unknown[], resolver: SourceResolver = new FixtureResolver({}), sources: unknown[] = []) {
+  const view = (blocks: unknown[]) => (
+    <SourceResolverContext value={resolver}>
+      <ActionContext value={{ onAction() {} }}>
+        <BlockCard cardRef={CARD_REF} card={card(blocks, { sources })} surface="feed" />
+      </ActionContext>
+    </SourceResolverContext>
+  )
+  const result = render(view(initial))
+  return { ...result, edit: (blocks: unknown[]) => result.rerender(view(blocks)) }
+}
+
+test('TC-21: a header added above a section of inputs keeps what was typed in them', async () => {
+  const user = userEvent.setup()
+  const form = block('section', {
+    blocks: [
+      block('textInput', { id: 'q', label: 'Your question' }),
+      block('submit', { id: 's', label: 'Ask', action: 'ask' }),
+    ],
+  })
+  const { edit } = editable([form])
+  await user.type(screen.getByRole('textbox', { name: 'Your question' }), 'Is there a bike rack?')
+  edit([block('header', { text: 'Vragen' }), form])
+  expect((screen.getByRole('textbox', { name: 'Your question' }) as HTMLInputElement).value).toBe(
+    'Is there a bike rack?',
+  )
+})
+
+test('TC-13: a header added above a list keeps what was typed in its items', async () => {
+  const user = userEvent.setup()
+  const resolver = new FixtureResolver({ qs: [{ id: 'q1', text: 'Recorded?' }] })
+  const list = block('list', {
+    items: binding('qs'),
+    key: '/id',
+    template: [block('textInput', { id: 'a', label: 'Answer' })],
+  })
+  const { edit } = editable([list], resolver, [recordSource('qs')])
+  await user.type(screen.getByRole('textbox', { name: 'Answer' }), 'Ja')
+  edit([block('header', { text: 'Vragen' }), list])
+  expect((screen.getByRole('textbox', { name: 'Answer' }) as HTMLInputElement).value).toBe('Ja')
+})
+
+/** A resolver that answers later, as a live one does, and counts its watches. */
+class SlowResolver implements SourceResolver {
+  watches = 0
+  constructor(private readonly values: Record<string, unknown>) {}
+  watch(_card: unknown, name: string): Observable<SourceState> {
+    this.watches++
+    return {
+      subscribe: (next) => {
+        next({ state: 'loading' })
+        const timer = setTimeout(() => next({ state: 'ready', value: this.values[name] }), 5)
+        return { unsubscribe: () => clearTimeout(timer) }
+      },
+    }
+  }
+}
+
+test('TC-15: an edit that adds a binding to an already-loaded source keeps the block and its open sheet', async () => {
+  const user = userEvent.setup()
+  const resolver = new SlowResolver({ session: { label: 'Report', value: 'wifi' } })
+  const sheet = { title: 'Report', blocks: [block('textInput', { id: 'p', label: 'Problem' })] }
+  const before = block('button', { id: 'r', bind: { label: binding('session', '/label') }, opens: sheet })
+  const { edit } = editable([before], resolver, [recordSource('session')])
+  await user.click(await screen.findByRole('button', { name: 'Report' }))
+  await user.type(screen.getByRole('textbox', { name: 'Problem' }), 'Geen signaal')
+  expect(resolver.watches).toBe(1)
+
+  edit([
+    block('button', {
+      id: 'r',
+      bind: { label: binding('session', '/label'), value: binding('session', '/value') },
+      opens: sheet,
+    }),
+  ])
+  await act(async () => {})
+
+  expect(resolver.watches).toBe(1)
+  expect((screen.getByRole('textbox', { name: 'Problem' }) as HTMLInputElement).value).toBe('Geen signaal')
+})
+
+test('TC-15: an edit that removes a binding keeps the source loaded', async () => {
+  const resolver = new SlowResolver({ stats: { total: 412, label: 'attendees' } })
+  const stat = (bind: Record<string, unknown>) => block('stat', { label: 'attendees', value: '?', bind })
+  const { container, edit } = editable(
+    [stat({ value: binding('stats', '/total'), label: binding('stats', '/label') })],
+    resolver,
+    [recordSource('stats')],
+  )
+  await screen.findByText('412')
+  edit([stat({ value: binding('stats', '/total') })])
+  await act(async () => {})
+  expect(blocksOfType(container, 'stat')[0].dataset.state).toBeUndefined()
+  expect(resolver.watches).toBe(1)
+})
+
+test('TC-22: a failed submit moves focus to the first invalid input', async () => {
+  const user = userEvent.setup()
+  renderCard(
+    card([
+      block('textInput', { id: 'name', label: 'Name' }),
+      block('textInput', { id: 'q', label: 'Question', required: true }),
+      block('select', { id: 't', label: 'Track', required: true, options: [{ label: 'A', value: 'a' }] }),
+      block('submit', { id: 's', label: 'Send', action: 'send' }),
+    ]),
+  )
+  await user.click(screen.getByRole('button', { name: 'Send' }))
+  expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Question' }))
+})
+
+test('TC-27: years before 100 are not read as the 1900s', () => {
+  expect(parseDatetime('0099-06-15T19:00:00Z')?.toISOString()).toBe('0099-06-15T19:00:00.000Z')
+  expect(parseDatetime('0050-01-01T12:00:00', 'Europe/Amsterdam')?.getUTCFullYear()).toBe(50)
+})

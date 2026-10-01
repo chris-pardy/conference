@@ -47,9 +47,12 @@ export function readPointer(value: unknown, pointer = ''): { found: boolean; val
 export function useSourceStates(sources: readonly (readonly [string, SourceRef])[]): SourceState[] {
   const { store } = useCard()
   const keys = sources.map(([key]) => key)
-  const joined = keys.join('\n')
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `joined` stands for `sources`
-  const subscribe = useCallback((listener: () => void) => store.subscribe(sources, listener), [store, joined])
+  // Watched once per source, however many properties bind to it; the set
+  // (not the order) decides when to re-subscribe.
+  const unique = [...new Map(sources.map((s) => [s[0], s])).values()].sort(([a], [b]) => a.localeCompare(b))
+  const joined = unique.map(([key]) => key).join('\n')
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `joined` stands for `unique`
+  const subscribe = useCallback((listener: () => void) => store.subscribe(unique, listener), [store, joined])
   useSyncExternalStore(subscribe, () => store.version(keys))
   return keys.map((key) => store.get(key))
 }

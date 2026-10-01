@@ -61,10 +61,23 @@ const asArray = (v: unknown): unknown[] => (Array.isArray(v) ? v : [])
  *   list template, since a submit sends `{id: value}` for its form
  * - a select's option values are unique
  * - source names are unique, and `$item` (a list's element) is reserved
+ * - a button has exactly one of `action` and `opens`
+ * - a binding names a declared source, or `$item` inside a list template
+ *   (or a sheet opened from one)
  * Sources are checked first, then blocks, depth first in document order.
+ * Within a block: its id, its options, its button rule, its bindings (in
+ * `bind` order, then a list's `items`), then the blocks inside it.
  */
 function checkCard(card: Node): CardError | null {
-  const visit = (blocks: unknown[], path: string, ids: Set<string>): CardError | null => {
+  const declared = new Set(asArray(card.sources).map((s) => (s as Node).name))
+  const checkBinding = (binding: unknown, at: string, inList: boolean): CardError | null => {
+    const source = (binding as Node | null)?.source
+    if (typeof source !== 'string') return null
+    if (source === '$item' ? inList : declared.has(source)) return null
+    const why = source === '$item' ? 'is only defined inside a list template' : 'is not a source of this card'
+    return { path: `${at}/source`, reason: 'unknown-source', message: `${at}/source "${source}" ${why}` }
+  }
+  const visit = (blocks: unknown[], path: string, ids: Set<string>, inList: boolean): CardError | null => {
     for (const [i, raw] of blocks.entries()) {
       const block = raw as Node
       const at = `${path}/${i}`
@@ -94,18 +107,37 @@ function checkCard(card: Node): CardError | null {
           values.add(value)
         }
       }
+      if (type === 'button') {
+        const hasAction = block.action !== undefined
+        const hasSheet = block.opens !== undefined
+        if (!hasAction && !hasSheet) {
+          return { path: `${at}/action`, reason: 'required', message: `${at} needs an action or a sheet to open` }
+        }
+        if (hasAction && hasSheet) {
+          return { path: `${at}/opens`, reason: 'exclusive', message: `${at} has both an action and a sheet` }
+        }
+      }
+      for (const [prop, binding] of Object.entries((block.bind as Node | undefined) ?? {})) {
+        const error = checkBinding(binding, `${at}/bind/${prop}`, inList)
+        if (error) return error
+      }
+      if (type === 'list') {
+        const error = checkBinding(block.items, `${at}/items`, inList)
+        if (error) return error
+      }
       const nested =
         type === 'section' || type === 'stack'
-          ? visit(asArray(block.blocks), `${at}/blocks`, ids)
+          ? visit(asArray(block.blocks), `${at}/blocks`, ids, inList)
           : type === 'columns'
             ? asArray(block.columns).reduce<CardError | null>(
-                (err, column, j) => err ?? visit(asArray((column as Node).blocks), `${at}/columns/${j}/blocks`, ids),
+                (err, column, j) =>
+                  err ?? visit(asArray((column as Node).blocks), `${at}/columns/${j}/blocks`, ids, inList),
                 null,
               )
             : type === 'list'
-              ? visit(asArray(block.template), `${at}/template`, new Set())
+              ? visit(asArray(block.template), `${at}/template`, new Set(), true)
               : type === 'button' && block.opens
-                ? visit(asArray((block.opens as Node).blocks), `${at}/opens/blocks`, new Set())
+                ? visit(asArray((block.opens as Node).blocks), `${at}/opens/blocks`, new Set(), inList)
                 : null
       if (nested) return nested
     }
@@ -121,7 +153,7 @@ function checkCard(card: Node): CardError | null {
     if (names.has(name)) return { path: at, reason: 'duplicate', message: `${at} "${name}" is already a source` }
     names.add(name)
   }
-  return visit(asArray(card.blocks), '/blocks', new Set())
+  return visit(asArray(card.blocks), '/blocks', new Set(), false)
 }
 
 /** Validates an `app.gather.block.card` record against the lexicons. */

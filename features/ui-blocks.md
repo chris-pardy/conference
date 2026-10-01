@@ -1514,3 +1514,33 @@ to unstable fixes.
 
 **Decision (user, 2026-10-01):** more review rounds, until a round comes
 back clean. Unblocked.
+
+### Round 6
+
+Reviewed `b1cb218`. All gates passed. Not clean: 0 blocking, 2 major, 3
+minor, 1 nit. Everything was fixed, each with a regression test or parity
+cases.
+
+1. **[major] Blocks without an id were keyed by absolute position**, so a
+   header added above a section or a list remounted it and wiped its
+   inputs. **Fixed:** they're keyed by type plus their place among
+   siblings of that type.
+2. **[major] An edit that changed a block's bindings re-subscribed it**,
+   and if it was the only watcher the source was dropped and loaded again.
+   That showed a skeleton, closed an open sheet and lost its text.
+   **Fixed:** the store lets go of a source a microtask later, so a block
+   that re-subscribes in the same commit finds it still watched, with its
+   value. Blocks watch each source once, by the set of sources.
+3. **[minor] A binding to an undeclared source (or `$item` outside a list)
+   passed validation.** **Fixed:** both validators reject it as
+   `unknown-source`. `$item` is allowed in a list template, and in a sheet
+   opened from one.
+4. **[minor] A button with neither `action` nor `opens` (or both) was
+   valid.** **Fixed:** both validators require exactly one. Neither is
+   `required` at `/action`; both is `exclusive` at `/opens`. Eleven cases
+   were added to the parity fixtures (now 145), and all match.
+5. **[minor] Errors on a failed submit weren't announced.** **Fixed:**
+   focus moves to the first invalid input, so its error is read out
+   through its description.
+6. **[nit] Years 0–99 were read as 1900–1999.** **Fixed:** dates are built
+   with `setUTCFullYear`, including the time zone offset lookup.

@@ -30,14 +30,18 @@ export function RenderBlock({ block }: { block: unknown }) {
 export function Blocks({ blocks }: { blocks: unknown }) {
   if (!Array.isArray(blocks)) return null
   // A block's identity is its type and id (ids are unique per form), else its
-  // type and position. A source update never changes it, so blocks re-render
-  // without re-mounting; and when an edited card gains a block, what someone
-  // typed stays with the input it was typed into.
+  // type and its place among siblings of that type, so a header added above
+  // a section doesn't change the section's. A source update never changes
+  // it, so blocks re-render without re-mounting; and when a card is edited,
+  // what someone typed stays with the input it was typed into.
   const seen = new Set<string>()
+  const ofType = new Map<unknown, number>()
   return blocks.map((block, i) => {
     const b = block as BlockData | null
     const id = typeof b?.id === 'string' && b.id !== '' ? b.id : null
-    let key = id !== null ? `${b?.$type}#${id}` : `${b?.$type}@${i}`
+    const nth = ofType.get(b?.$type) ?? 0
+    ofType.set(b?.$type, nth + 1)
+    let key = id !== null ? `${b?.$type}#${id}` : `${b?.$type}@${nth}`
     if (seen.has(key)) key = `${key}@${i}`
     seen.add(key)
     return <RenderBlock key={key} block={block} />

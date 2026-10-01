@@ -82,10 +82,15 @@ export class SourceStore {
         const entry = this.entries.get(key)
         if (!entry) continue
         entry.listeners.delete(listener)
-        if (entry.listeners.size === 0) {
+        if (entry.listeners.size > 0) continue
+        // Let go a moment later: a block whose bindings changed unsubscribes
+        // and subscribes again in the same commit, and must find the source
+        // still watched, with its value, instead of loading it again.
+        queueMicrotask(() => {
+          if (entry.listeners.size > 0 || this.entries.get(key) !== entry) return
           entry.unsubscribe?.()
           this.entries.delete(key)
-        }
+        })
       }
     }
   }

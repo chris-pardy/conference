@@ -422,8 +422,13 @@ const DEFS_PREFIX: &str = "app.gather.block.defs#";
 ///   list template, since a submit sends `{id: value}` for its form
 /// - a select's option values are unique
 /// - source names are unique, and `$item` (a list's element) is reserved
+/// - a button has exactly one of `action` and `opens`
+/// - a binding names a declared source, or `$item` inside a list template
+///   (or a sheet opened from one)
 ///
 /// Sources are checked first, then blocks, depth first in document order.
+/// Within a block: its id, its options, its button rule, its bindings (in
+/// `bind` order, then a list's `items`), then the blocks inside it.
 pub(crate) fn check_card(card: &Value) -> Result {
     let mut names: Vec<&str> = Vec::new();
     for (i, source) in card["sources"].as_array().into_iter().flatten().enumerate() {
@@ -445,10 +450,38 @@ pub(crate) fn check_card(card: &Value) -> Result {
         }
         names.push(name);
     }
-    visit(&card["blocks"], "/blocks", &mut Vec::new())
+    let declared: Vec<&str> = names;
+    visit(&card["blocks"], "/blocks", &mut Vec::new(), &declared, false)
 }
 
-fn visit(blocks: &Value, path: &str, ids: &mut Vec<String>) -> Result {
+/// A binding must name a declared source, or `$item` inside a list template.
+fn check_binding(binding: &Value, at: &str, declared: &[&str], in_list: bool) -> Result {
+    let Some(source) = binding.get("source").and_then(Value::as_str) else {
+        return Ok(());
+    };
+    let known = if source == "$item" { in_list } else { declared.contains(&source) };
+    if known {
+        return Ok(());
+    }
+    let why = if source == "$item" {
+        "is only defined inside a list template"
+    } else {
+        "is not a source of this card"
+    };
+    Err(CardError {
+        path: format!("{at}/source"),
+        reason: "unknown-source".into(),
+        message: format!("{at}/source \"{source}\" {why}"),
+    })
+}
+
+fn visit(
+    blocks: &Value,
+    path: &str,
+    ids: &mut Vec<String>,
+    declared: &[&str],
+    in_list: bool,
+) -> Result {
     let duplicate =
         |at: String, message: String| CardError { path: at, reason: "duplicate".into(), message };
     for (i, block) in blocks.as_array().into_iter().flatten().enumerate() {
@@ -478,17 +511,59 @@ fn visit(blocks: &Value, path: &str, ids: &mut Vec<String>) -> Result {
                 values.push(value);
             }
         }
+        if kind == "button" {
+            let (has_action, has_sheet) =
+                (block.get("action").is_some(), block.get("opens").is_some());
+            if !has_action && !has_sheet {
+                return Err(CardError {
+                    path: format!("{at}/action"),
+                    reason: "required".into(),
+                    message: format!("{at} needs an action or a sheet to open"),
+                });
+            }
+            if has_action && has_sheet {
+                return Err(CardError {
+                    path: format!("{at}/opens"),
+                    reason: "exclusive".into(),
+                    message: format!("{at} has both an action and a sheet"),
+                });
+            }
+        }
+        for (prop, binding) in block["bind"].as_object().into_iter().flatten() {
+            check_binding(binding, &format!("{at}/bind/{prop}"), declared, in_list)?;
+        }
+        if kind == "list" {
+            check_binding(&block["items"], &format!("{at}/items"), declared, in_list)?;
+        }
         match kind {
-            "section" | "stack" => visit(&block["blocks"], &format!("{at}/blocks"), ids)?,
+            "section" | "stack" => {
+                visit(&block["blocks"], &format!("{at}/blocks"), ids, declared, in_list)?
+            }
             "columns" => {
                 for (j, column) in block["columns"].as_array().into_iter().flatten().enumerate() {
-                    visit(&column["blocks"], &format!("{at}/columns/{j}/blocks"), ids)?;
+                    visit(
+                        &column["blocks"],
+                        &format!("{at}/columns/{j}/blocks"),
+                        ids,
+                        declared,
+                        in_list,
+                    )?;
                 }
             }
-            "list" => visit(&block["template"], &format!("{at}/template"), &mut Vec::new())?,
-            "button" if !block["opens"].is_null() => {
-                visit(&block["opens"]["blocks"], &format!("{at}/opens/blocks"), &mut Vec::new())?
-            }
+            "list" => visit(
+                &block["template"],
+                &format!("{at}/template"),
+                &mut Vec::new(),
+                declared,
+                true,
+            )?,
+            "button" if !block["opens"].is_null() => visit(
+                &block["opens"]["blocks"],
+                &format!("{at}/opens/blocks"),
+                &mut Vec::new(),
+                declared,
+                in_list,
+            )?,
             _ => {}
         }
     }
