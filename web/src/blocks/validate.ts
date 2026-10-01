@@ -60,7 +60,8 @@ const asArray = (v: unknown): unknown[] => (Array.isArray(v) ? v : [])
  * - block ids are unique within each form: the card, each sheet and each
  *   list template, since a submit sends `{id: value}` for its form
  * - a select's option values are unique
- * Blocks are visited depth first, in document order.
+ * - source names are unique, and `$item` (a list's element) is reserved
+ * Sources are checked first, then blocks, depth first in document order.
  */
 function checkCard(card: Node): CardError | null {
   const visit = (blocks: unknown[], path: string, ids: Set<string>): CardError | null => {
@@ -109,6 +110,16 @@ function checkCard(card: Node): CardError | null {
       if (nested) return nested
     }
     return null
+  }
+  const names = new Set<string>()
+  for (const [i, source] of asArray(card.sources).entries()) {
+    const name = (source as Node).name as string
+    const at = `/sources/${i}/name`
+    if (name === '$item') {
+      return { path: at, reason: 'reserved', message: `${at} "$item" is reserved for list elements` }
+    }
+    if (names.has(name)) return { path: at, reason: 'duplicate', message: `${at} "${name}" is already a source` }
+    names.add(name)
   }
   return visit(asArray(card.blocks), '/blocks', new Set())
 }

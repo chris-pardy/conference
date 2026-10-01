@@ -421,9 +421,30 @@ const DEFS_PREFIX: &str = "app.gather.block.defs#";
 /// - block ids are unique within each form: the card, each sheet and each
 ///   list template, since a submit sends `{id: value}` for its form
 /// - a select's option values are unique
+/// - source names are unique, and `$item` (a list's element) is reserved
 ///
-/// Blocks are visited depth first, in document order.
+/// Sources are checked first, then blocks, depth first in document order.
 pub(crate) fn check_card(card: &Value) -> Result {
+    let mut names: Vec<&str> = Vec::new();
+    for (i, source) in card["sources"].as_array().into_iter().flatten().enumerate() {
+        let name = source["name"].as_str().unwrap_or_default();
+        let at = format!("/sources/{i}/name");
+        if name == "$item" {
+            return Err(CardError {
+                message: format!("{at} \"$item\" is reserved for list elements"),
+                path: at,
+                reason: "reserved".into(),
+            });
+        }
+        if names.contains(&name) {
+            return Err(CardError {
+                message: format!("{at} \"{name}\" is already a source"),
+                path: at,
+                reason: "duplicate".into(),
+            });
+        }
+        names.push(name);
+    }
     visit(&card["blocks"], "/blocks", &mut Vec::new())
 }
 

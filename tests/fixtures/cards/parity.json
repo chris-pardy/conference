@@ -2754,6 +2754,136 @@
     }
   },
   {
+    "name": "duplicate source names",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "tally",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        },
+        {
+          "name": "other",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        },
+        {
+          "name": "tally",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/sources/2/name",
+      "reason": "duplicate"
+    }
+  },
+  {
+    "name": "source named $item",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "$item",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/sources/0/name",
+      "reason": "reserved"
+    }
+  },
+  {
+    "name": "source named item",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "item",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "duplicate source and duplicate id",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#textInput",
+          "id": "q",
+          "label": "q"
+        },
+        {
+          "$type": "app.gather.block.defs#textInput",
+          "id": "q",
+          "label": "q"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "a",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        },
+        {
+          "name": "a",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/sources/1/name",
+      "reason": "duplicate"
+    }
+  },
+  {
     "name": "button and input sharing an id",
     "card": {
       "$type": "app.gather.block.card",

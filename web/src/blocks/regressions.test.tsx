@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import jsQR from 'jsqr'
@@ -13,6 +15,7 @@ import {
   type SourceState,
 } from './SourceResolver'
 import { binding, block, blocksOfType, CARD_REF, card, recordSource, renderCard } from './test-support'
+import { parseDatetime } from './time'
 
 // Cases found in adversarial review, beyond the frozen tests.
 
@@ -366,4 +369,105 @@ test('TC-7: an image over plain http is not loaded', () => {
 test('TC-10: a progress bar past its maximum announces a value within range', () => {
   renderCard(card([block('progress', { label: 'Hangers', value: 150, max: 100 })]))
   expect(screen.getByRole('progressbar', { name: 'Hangers' }).getAttribute('aria-valuenow')).toBe('100')
+})
+
+test('TC-10: a progress bar bound to a max of zero or less is unavailable', () => {
+  const resolver = new FixtureResolver({ hangers: { left: 3, total: -5 } })
+  const { container } = renderCard(
+    card(
+      [
+        block('progress', {
+          label: 'Hangers',
+          bind: { value: binding('hangers', '/left'), max: binding('hangers', '/total') },
+        }),
+      ],
+      { sources: [recordSource('hangers')] },
+    ),
+    { resolver },
+  )
+  expect(blocksOfType(container, 'progress')[0].dataset.state).toBe('unavailable')
+})
+
+test('TC-13: an edited card (new cid) keeps what was typed in its list items and open sheet', async () => {
+  const user = userEvent.setup()
+  const resolver = new FixtureResolver({ qs: [{ id: 'q1', text: 'Recorded?' }], wifi: { label: 'Report' } })
+  const record = card(
+    [
+      block('list', {
+        items: binding('qs'),
+        key: '/id',
+        template: [block('textInput', { id: 'answer', label: 'Answer' })],
+      }),
+      block('button', {
+        id: 'report',
+        bind: { label: binding('wifi', '/label') },
+        opens: { title: 'Report', blocks: [block('textInput', { id: 'problem', label: 'Problem' })] },
+      }),
+    ],
+    { sources: [recordSource('qs'), recordSource('wifi')] },
+  )
+  const view = (cid: string) => (
+    <SourceResolverContext value={resolver}>
+      <ActionContext value={{ onAction() {} }}>
+        <BlockCard cardRef={{ ...CARD_REF, cid }} card={record} surface="feed" />
+      </ActionContext>
+    </SourceResolverContext>
+  )
+  const { rerender } = render(view('bafyreia'))
+  await user.type(screen.getByRole('textbox', { name: 'Answer' }), 'hallo')
+  await user.click(screen.getByRole('button', { name: 'Report' }))
+  await user.type(screen.getByRole('textbox', { name: 'Problem' }), 'in sheet')
+
+  rerender(view('bafyreib'))
+
+  expect((screen.getByRole('textbox', { name: 'Answer' }) as HTMLInputElement).value).toBe('hallo')
+  expect((screen.getByRole('textbox', { name: 'Problem' }) as HTMLInputElement).value).toBe('in sheet')
+})
+
+test('TC-27: every datetime validation accepts renders as a time', () => {
+  const cases: { name: string; card: { createdAt: string }; expect: { ok?: boolean } }[] = JSON.parse(
+    readFileSync(join(process.cwd(), 'tests/fixtures/cards/parity.json'), 'utf8'),
+  )
+  const valid = cases
+    .filter((c) => c.name.startsWith('createdAt ') && c.expect.ok)
+    .map((c) => c.card.createdAt)
+    // The lenient check's month class lets "0," through, which names no month.
+    .filter((dt) => !dt.includes('-0,-'))
+  expect(valid.length).toBeGreaterThan(20)
+  for (const dt of valid) {
+    const { container, unmount } = renderCard(
+      card([block('time', { label: 'At', at: dt })], { timeZone: 'Europe/Amsterdam' }),
+    )
+    expect(blocksOfType(container, 'time')[0].dataset.state, dt).toBeUndefined()
+    unmount()
+  }
+  expect(parseDatetime('20270430T190000Z')?.toISOString()).toBe('2027-04-30T19:00:00.000Z')
+  expect(parseDatetime('2027-04-30T19:00:00,5Z')?.toISOString()).toBe('2027-04-30T19:00:00.500Z')
+  expect(parseDatetime('2027-04-30T1900', 'Europe/Amsterdam')?.toISOString()).toBe('2027-04-30T17:00:00.000Z')
+  expect(parseDatetime('2027-04-30T19:00:00+0530')?.toISOString()).toBe('2027-04-30T13:30:00.000Z')
+})
+
+test('TC-5: a facet with both a mention and a link makes one link, not nested ones', () => {
+  const text = 'ask @alice.test'
+  const { container } = renderCard(
+    card([
+      block('richText', {
+        text,
+        facets: [
+          {
+            index: { byteStart: 4, byteEnd: 15 },
+            features: [
+              { $type: 'app.gather.block.defs#mention', did: 'did:plc:alice' },
+              { $type: 'app.gather.block.defs#link', uri: 'https://example.com/alice' },
+              { $type: 'app.gather.block.defs#bold' },
+            ],
+          },
+        ],
+      }),
+    ]),
+  )
+  expect(container.querySelectorAll('a')).toHaveLength(1)
+  expect(container.querySelector('a a')).toBeNull()
+  expect(container.querySelector('a')?.getAttribute('href')).toContain('did:plc:alice')
+  expect(container.querySelector('strong')?.textContent).toBe('@alice.test')
 })

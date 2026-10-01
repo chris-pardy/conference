@@ -1,4 +1,4 @@
-import { useContext, useMemo, useState } from 'react'
+import { useContext, useMemo, useRef, useState } from 'react'
 import type { Main as CardRecord } from '../lexicon/types/app/gather/block/card'
 import type { CardRef } from './ActionContext'
 import { variantOf } from './blocks/inputs'
@@ -88,7 +88,17 @@ export function BlockCard({ cardRef, card, surface, onDismiss }: BlockCardProps)
     return map
   }, [sourcesKey])
   const { uri, cid } = cardRef
-  const store = useMemo(() => new SourceStore(resolver, { uri, cid }, refs), [resolver, uri, cid, refs])
+  // The store outlives cid changes (an edited card is the same card): it
+  // reads the current ref when it watches. When it must be replaced (a new
+  // resolver or new sources), the new one starts from the old one's values.
+  const current = useRef({ uri, cid })
+  current.current = { uri, cid }
+  const previous = useRef<{ uri: string; store: SourceStore } | null>(null)
+  const store = useMemo(() => {
+    const before = previous.current?.uri === uri ? previous.current.store : undefined
+    return new SourceStore(resolver, () => current.current, refs, before)
+  }, [resolver, uri, refs])
+  previous.current = { uri, store }
 
   const all = Array.isArray(card.blocks) ? (card.blocks as unknown[]) : []
   const compact = useMemo(() => (surface === 'compact' ? compactLayout(all) : null), [surface, all])

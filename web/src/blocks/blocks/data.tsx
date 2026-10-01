@@ -61,7 +61,9 @@ export function Progress({ block }: Props) {
     return <Placeholder type="progress" block={block} state={state === 'loading' ? 'loading' : 'unavailable'} />
   }
   const max = numeric(bound.max) ?? 100
-  const percent = max > 0 ? Math.round(Math.min(Math.max(value / max, 0), 1) * 100) : 0
+  // The lexicon's minimum only holds for a literal max; a bound one can be anything.
+  if (max <= 0) return <Placeholder type="progress" block={block} state="unavailable" />
+  const percent = Math.round(Math.min(Math.max(value / max, 0), 1) * 100)
   const label = text(bound.label)
   return (
     <div {...blockAttrs('progress', block)} className="g-block g-progress">

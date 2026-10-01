@@ -18,12 +18,29 @@ interface Entry {
  */
 export class SourceStore {
   private readonly entries = new Map<string, Entry>()
+  /** Last ready values carried over from the store this one replaced. */
+  private readonly seeded = new Map<string, SourceState>()
 
+  /**
+   * `card` is read when a source is watched, so the card's current ref (say,
+   * a new cid after an edit) is used without replacing the store. A store
+   * that replaces another (a new resolver, or changed sources) starts from
+   * the other's ready values for sources that didn't change, so bound
+   * blocks keep showing data instead of dropping back to skeletons.
+   */
   constructor(
     private readonly resolver: SourceResolver | null,
-    private readonly card: CardRef,
+    private readonly card: () => CardRef,
     private readonly refs: Map<string, SourceRef>,
-  ) {}
+    previous?: SourceStore,
+  ) {
+    for (const [key, entry] of previous?.entries ?? []) {
+      if (entry.state.state !== 'ready') continue
+      const name = key.startsWith('source:') ? key.slice('source:'.length) : null
+      const same = name === null || JSON.stringify(previous?.refs.get(name)) === JSON.stringify(refs.get(name))
+      if (same) this.seeded.set(key, entry.state)
+    }
+  }
 
   /** The key and ref for a named card source, or null when the card doesn't declare it. */
   named(name: string): [string, SourceRef] | null {
@@ -37,7 +54,7 @@ export class SourceStore {
   }
 
   get(key: string): SourceState {
-    return this.entries.get(key)?.state ?? LOADING
+    return this.entries.get(key)?.state ?? this.seeded.get(key) ?? LOADING
   }
 
   /** A snapshot that changes whenever any of the keys changes. */
@@ -49,7 +66,7 @@ export class SourceStore {
     for (const [key, ref] of sources) {
       let entry = this.entries.get(key)
       if (!entry) {
-        entry = { state: LOADING, version: 0, listeners: new Set() }
+        entry = { state: this.seeded.get(key) ?? LOADING, version: 0, listeners: new Set() }
         this.entries.set(key, entry)
       }
       entry.listeners.add(listener)
@@ -85,7 +102,7 @@ export class SourceStore {
     }
     try {
       const name = key.startsWith('source:') ? key.slice('source:'.length) : key
-      const subscription = this.resolver.watch(this.card, name, ref).subscribe((state) => {
+      const subscription = this.resolver.watch(this.card(), name, ref).subscribe((state) => {
         // A resolver may answer after its block unmounted.
         if (this.entries.get(key) === entry) update(state)
       })

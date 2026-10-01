@@ -1417,3 +1417,31 @@ minor, 2 nits. Each fix below has a regression test.
    value goes in as UTF-8 bytes, with no global change.
 7. **[nit] `aria-valuenow` could fall outside its range.** **Fixed:** it's
    clamped to `0..max`, as the bar already was.
+
+### Round 4
+
+The first round 4 reviewer stalled without reporting. A fresh one reviewed
+`deb81fd`. All gates passed. Not clean: 0 blocking, 2 major, 1 minor, 2
+nits. Each fix below has a regression test.
+
+1. **[major] A new `cid` (an edited card) or a new resolver rebuilt the
+   source store**, and blocks dropped to skeletons for a commit, wiping
+   text typed in list items and open sheets. **Fixed:** the store is kept
+   across `cid` changes (it reads the current ref when it watches). When it
+   must be replaced (a new resolver or changed sources), the new store
+   starts from the old one's ready values for unchanged sources.
+2. **[major] Datetimes that pass validation didn't all render** (basic
+   format, `T1900`, comma fractions). **Fixed:** `parseDatetime` follows
+   the validator's lenient grammar. A test renders every valid datetime in
+   the parity fixtures. The one exception is a month written "0,", a quirk
+   the ISO library lets through, which names no month and shows
+   unavailable.
+3. **[minor] Duplicate source names and a source named `$item` passed
+   validation.** **Fixed:** both validators reject them (`duplicate`,
+   `reserved`). Four cases were added to the parity fixtures (now 134),
+   and all match.
+4. **[nit] A bound `max` of zero or less inverted the progress range.**
+   **Fixed:** the bar shows as unavailable.
+5. **[nit] A facet with both a mention and a link nested one link in
+   another.** **Fixed:** a range takes only its first mention or link,
+   and still layers bold, italic and tags.
