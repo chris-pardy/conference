@@ -16,6 +16,14 @@ interface Profile {
   avatar?: unknown
 }
 
+const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+
+/** The first character as people see it (a whole emoji, not half of one), upper-cased. */
+function initial(name: string): string {
+  const [first] = graphemes.segment(name)
+  return (first?.segment ?? '?').toUpperCase()
+}
+
 export function Person({ block }: Props) {
   const { store } = useCard()
   const bound = useBound(block, ['did'])
@@ -42,7 +50,7 @@ export function Person({ block }: Props) {
         <img className="g-person__avatar" src={avatar} alt="" onError={() => setFailedAvatar(avatar)} />
       ) : (
         <span className="g-person__avatar g-person__avatar--none" aria-hidden="true">
-          {(name ?? handle ?? '?').slice(0, 1).toUpperCase()}
+          {initial(name ?? handle ?? '?')}
         </span>
       )}
       <span className="g-person__names">

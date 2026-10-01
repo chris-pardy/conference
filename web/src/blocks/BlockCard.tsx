@@ -20,7 +20,11 @@ export interface BlockCardProps {
   cardRef: CardRef
   card: Card
   surface: Surface
-  /** Called when an ephemeral card is dismissed. */
+  /**
+   * Called when an ephemeral card is dismissed. The card (and the focused
+   * Dismiss button) unmounts, so a host should move focus somewhere sensible
+   * here, or keyboard users land at the top of the page.
+   */
   onDismiss?: () => void
 }
 

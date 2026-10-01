@@ -122,6 +122,10 @@ export function Sheet({
       // Only now: browsers won't focus an element that's still inert.
       // If an edit removed the opener, focus goes to the sheet this one was
       // opened from (the card behind it is still inert), else to the card.
+      // Leave focus alone if it's already somewhere live outside any sheet
+      // (an outer sheet closing in the same commit just gave it back).
+      const active = document.activeElement
+      if (active && active !== document.body && active.isConnected && !active.closest('.g-sheet')) return
       const target = returnTo.current?.isConnected
         ? returnTo.current
         : (enclosing.current?.current ?? cardRoot.current?.current)

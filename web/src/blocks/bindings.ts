@@ -106,7 +106,7 @@ export function settle(states: Record<string, SourceState>): 'loading' | 'unavai
   return 'ready'
 }
 
-/** A ready value as display text: strings and numbers show, anything else doesn't. */
+/** A ready value as display text: strings, numbers and booleans show; anything else doesn't. */
 export function text(state: SourceState | undefined): string | undefined {
   if (state?.state !== 'ready') return undefined
   const { value } = state

@@ -1841,3 +1841,27 @@ fixed, each with a regression test or parity cases.
    visible marker, hidden from assistive tech so names don't change.
 4. **[nit] A submit with no host to take its intent still cleared the
    form.** **Fixed:** the form clears only when a host took the intent.
+
+### Round 19: clean
+
+Reviewed `a82a402`. All gates passed. The reviewer fuzzed the narrowed CID
+check on both validators with 20,000 cards: 0 mismatches. **Clean: 0
+blocking, 0 major, 0 minor, 6 nits.** Five nits were fixed before shipping,
+and one was declined:
+
+1. **[nit] With a nested sheet open, removing the outer sheet sent focus to
+   the card, not the outer opener.** **Fixed:** a closing sheet leaves
+   focus alone if it's already somewhere live outside any sheet.
+   Regression test added.
+2. **[nit] An emoji-led name gave half an emoji as the avatar initial.**
+   **Fixed:** the initial is the first grapheme. Regression test added.
+3. **[nit] "in 1 min" shows for only the last second of the minute.**
+   Declined: the frozen TC-28 pins "1 min" at exactly 60 seconds left, so
+   minutes round up.
+4. **[nit] Dismissing an ephemeral card drops focus to `<body>`.** **Fixed**
+   by documentation: `onDismiss` says the host should move focus, since
+   the host decides what comes next.
+5. **[nit] Sheets leave a theme set on a wrapper around the card** (they
+   render in a portal). **Fixed** by documentation: `tokens.css` says to
+   set themes on `:root`.
+6. **[nit] Three comments no longer matched the code.** **Fixed.**

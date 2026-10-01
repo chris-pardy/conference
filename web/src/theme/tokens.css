@@ -12,6 +12,8 @@
  * lazily, after the host's. A host theme inside its own layer (as Tailwind v4
  * emits) still loses, since this layer is declared after it: per-organizer
  * theming must put themes outside layers, or declare its layer order first.
+ * Set themes on :root, not on a wrapper around a card: sheets render in a
+ * portal at the end of <body>, outside any wrapper, and would miss them.
  *
  * Fonts are named here, not loaded: a viewer without them gets the system
  * fallbacks. Hosting font files (and precaching them for offline use) comes

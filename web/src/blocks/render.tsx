@@ -28,10 +28,10 @@ export function RenderBlock({ block }: { block: unknown }) {
   )
 }
 
-/** A list of blocks, in order. */
 /** How deep the blocks being rendered are: the card's own are 1. */
 const DepthContext = createContext(0)
 
+/** A list of blocks, in order. */
 export function Blocks({ blocks }: { blocks: unknown }) {
   const depth = useContext(DepthContext) + 1
   const list = Array.isArray(blocks) ? blocks : []

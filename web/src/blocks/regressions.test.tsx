@@ -1418,3 +1418,25 @@ test('TC-21: a submit with no host to take it keeps what was typed', async () =>
   await user.click(screen.getByRole('button', { name: 'Ask' }))
   expect((screen.getByRole('textbox', { name: 'Question' }) as HTMLInputElement).value).toBe('Is there a bike rack?')
 })
+
+test('TC-32: an edit that removes an outer sheet with a nested one open returns focus to the outer opener', async () => {
+  const user = userEvent.setup()
+  const inner = block('button', { id: 'inner', label: 'Inner', opens: { title: 'Inner', blocks: [] } })
+  const { edit } = editable([
+    block('button', { id: 'outer', label: 'Outer', opens: { title: 'Outer', blocks: [inner] } }),
+  ])
+  await user.click(screen.getByRole('button', { name: 'Outer' }))
+  await user.click(screen.getByRole('button', { name: 'Inner' }))
+  edit([block('button', { id: 'outer', label: 'Outer', action: 'go' })])
+  expect(screen.queryByRole('dialog')).toBeNull()
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Outer' }))
+})
+
+test('TC-26: an emoji-led name gives a whole emoji as the initial', () => {
+  const resolver = new FixtureResolver(
+    {},
+    { profiles: { 'did:plc:anouk': { handle: 'anouk.test', displayName: '🌷 Anouk' } } },
+  )
+  const { container } = renderCard(card([block('person', { did: 'did:plc:anouk' })]), { resolver })
+  expect(container.querySelector('.g-person__avatar--none')?.textContent).toBe('🌷')
+})
