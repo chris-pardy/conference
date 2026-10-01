@@ -35,6 +35,7 @@ export function Button({ block }: Props) {
   const bound = useBound(block, ['label', 'value'])
   const [open, setOpen] = useState(false)
   const opener = useRef<HTMLButtonElement>(null)
+  const lastLabel = useRef<string | undefined>(undefined)
   const variant = variantOf(block)
   // A compact card keeps only its one primary button.
   if (surface === 'compact' && block !== compactPrimary) return null
@@ -43,7 +44,12 @@ export function Button({ block }: Props) {
   // The lexicon types a button's value as a string, so a bound value must be text too.
   const value = text(bound.value)
   const badValue = block.bind?.value !== undefined && value === undefined
-  if (state !== 'ready' || !label || badValue) {
+  const ready = state === 'ready' && !!label && !badValue
+  if (ready) lastLabel.current = label
+  // While its sheet is open, a button whose data drops out keeps its last
+  // label, so the sheet (and what was typed in it) stays.
+  const shown = ready ? label : open ? lastLabel.current : undefined
+  if (!shown) {
     return <Placeholder type="button" block={block} state={state === 'loading' ? 'loading' : 'unavailable'} />
   }
   const sheet = block.opens as { title?: unknown; blocks?: unknown } | undefined
@@ -62,11 +68,11 @@ export function Button({ block }: Props) {
           else if (id && action) send(id, action, value)
         }}
       >
-        {label}
+        {shown}
       </button>
       {sheet && open && (
         <Sheet
-          title={str(sheet.title) ?? label}
+          title={str(sheet.title) ?? shown}
           blocks={sheet.blocks}
           onClose={() => setOpen(false)}
           returnFocus={opener.current}

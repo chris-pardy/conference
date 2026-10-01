@@ -921,3 +921,59 @@ test('TC-27: year 0 without an offset is read in the card zone correctly', () =>
   expect(parseDatetime('0000-06-01T12:00', 'Europe/Amsterdam')?.getUTCFullYear()).toBe(0)
   expect(parseDatetime('1950-06-01T12:00:00', 'Europe/Amsterdam')?.toISOString()).toBe('1950-06-01T11:00:00.000Z')
 })
+
+test('TC-21: a column added before another keeps what was typed in it', async () => {
+  const user = userEvent.setup()
+  const column = (id: string, label: string) => ({ blocks: [block('textInput', { id, label })] })
+  const { edit } = editable([block('columns', { columns: [column('a', 'A')] })])
+  await user.type(screen.getByRole('textbox', { name: 'A' }), 'hallo')
+  edit([block('columns', { columns: [column('b', 'B'), column('a', 'A')] })])
+  expect((screen.getByRole('textbox', { name: 'A' }) as HTMLInputElement).value).toBe('hallo')
+})
+
+test('TC-32: a button whose data drops out while its sheet is open keeps the sheet and its text', async () => {
+  const user = userEvent.setup()
+  const resolver = new FixtureResolver({ s: { label: 'Details' } })
+  renderCard(
+    card(
+      [
+        block('button', {
+          id: 'd',
+          bind: { label: binding('s', '/label') },
+          opens: { title: 'Details', blocks: [block('textInput', { id: 'q', label: 'Q' })] },
+        }),
+      ],
+      { sources: [recordSource('s')] },
+    ),
+    { resolver },
+  )
+  await user.click(screen.getByRole('button', { name: 'Details' }))
+  await user.type(screen.getByRole('textbox', { name: 'Q' }), 'typed')
+
+  act(() => resolver.set('s', {}))
+  expect(screen.getByRole('dialog')).toBeTruthy()
+  expect((screen.getByRole('textbox', { name: 'Q' }) as HTMLInputElement).value).toBe('typed')
+
+  // Once closed, the button shows its data's real state.
+  await user.click(screen.getByRole('button', { name: 'Close' }))
+  expect(screen.queryByRole('dialog')).toBeNull()
+  act(() => resolver.set('s', { label: 'Details' }))
+  expect(screen.queryByRole('dialog')).toBeNull()
+})
+
+test('TC-28: a countdown days away re-renders when its day count changes, not every minute', () => {
+  vi.useFakeTimers()
+  // Three and a half days out: "in 3 d" until 2 d 23 h 59 min remain.
+  vi.setSystemTime(new Date('2027-04-27T07:00:00+02:00'))
+  const spy = vi.spyOn(globalThis, 'setTimeout')
+  const { container } = renderCard(card([block('time', { mode: 'countdown', at: '2027-04-30T19:00:00+02:00' })]))
+  const [time] = blocksOfType(container, 'time')
+  expect(time.textContent).toMatch(/in 3 d/)
+  act(() => vi.advanceTimersByTime(60 * 60_000))
+  expect(time.textContent).toMatch(/in 3 d/)
+  // One timer to the day boundary, not sixty for sixty minutes.
+  expect(spy.mock.calls.length).toBeLessThan(5)
+  act(() => vi.advanceTimersByTime(11 * 60 * 60_000 + 60_000))
+  expect(time.textContent).toMatch(/in 2 d/)
+  spy.mockRestore()
+})

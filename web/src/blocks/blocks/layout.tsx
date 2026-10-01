@@ -101,8 +101,31 @@ export function Stack({ block }: Props) {
   )
 }
 
+/** The first block id anywhere in some blocks (ids are unique across a card), or null. */
+function firstId(blocks: unknown): string | null {
+  for (const block of Array.isArray(blocks) ? (blocks as BlockData[]) : []) {
+    if (typeof block?.id === 'string' && block.id !== '') return block.id
+    const nested = firstId(block?.blocks) ?? firstId(block?.template)
+    if (nested) return nested
+    for (const column of Array.isArray(block?.columns) ? (block.columns as { blocks?: unknown }[]) : []) {
+      const inColumn = firstId(column?.blocks)
+      if (inColumn) return inColumn
+    }
+  }
+  return null
+}
+
 export function Columns({ block }: Props) {
   const columns = Array.isArray(block.columns) ? (block.columns as { blocks?: unknown }[]) : []
+  // A column's identity is the first block id in it, else its position, so a
+  // column added before another doesn't remount it and lose what was typed.
+  const seen = new Set<string>()
+  const keys = columns.map((column, i) => {
+    const id = firstId(column?.blocks)
+    const key = id !== null && !seen.has(`#${id}`) ? `#${id}` : `@${i}`
+    seen.add(key)
+    return key
+  })
   return (
     <div
       {...blockAttrs('columns', block)}
@@ -110,8 +133,7 @@ export function Columns({ block }: Props) {
       style={{ gridTemplateColumns: `repeat(${Math.max(columns.length, 1)}, minmax(0, 1fr))` }}
     >
       {columns.map((column, i) => (
-        // biome-ignore lint/suspicious/noArrayIndexKey: columns are positional
-        <div key={i} className="g-column">
+        <div key={keys[i]} className="g-column">
           <Blocks blocks={column?.blocks} />
         </div>
       ))}

@@ -454,6 +454,20 @@ pub(crate) fn check_card(card: &Value) -> Result {
     visit(&card["blocks"], "/blocks", &mut HashSet::new(), &declared, false)
 }
 
+/// An object's entries in the order JavaScript's `Object.entries` gives them:
+/// array-index keys (`0` to `2^32 - 2`, no leading zeros) first, ascending,
+/// then the other keys in the order they were written.
+fn js_entries(map: &Map<String, Value>) -> Vec<(String, &Value)> {
+    let index = |key: &str| {
+        key.parse::<u64>().ok().filter(|n| *n < u64::from(u32::MAX) && n.to_string() == key)
+    };
+    let mut indexed: Vec<(u64, String, &Value)> =
+        map.iter().filter_map(|(k, v)| index(k).map(|n| (n, k.clone(), v))).collect();
+    indexed.sort_by_key(|(n, _, _)| *n);
+    let named = map.iter().filter(|(k, _)| index(k).is_none()).map(|(k, v)| (k.clone(), v));
+    indexed.into_iter().map(|(_, k, v)| (k, v)).chain(named).collect()
+}
+
 /// A binding must name a declared source, or `$item` inside a list template.
 fn check_binding(binding: &Value, at: &str, declared: &HashSet<&str>, in_list: bool) -> Result {
     let Some(source) = binding.get("source").and_then(Value::as_str) else {
@@ -532,7 +546,7 @@ fn visit(
         // As JavaScript's Object.entries reads it: an object's keys, or an
         // array's indices (a def without `bind` leaves it unchecked by the lexicon).
         let bind: Vec<(String, &Value)> = match &block["bind"] {
-            Value::Object(map) => map.iter().map(|(k, v)| (k.clone(), v)).collect(),
+            Value::Object(map) => js_entries(map),
             Value::Array(items) => {
                 items.iter().enumerate().map(|(i, v)| (i.to_string(), v)).collect()
             }

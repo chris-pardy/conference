@@ -1629,3 +1629,25 @@ minor, 1 nit. Everything was fixed.
    counts it as 1 BC). **Fixed:** BC years are mapped back. Seconds also
    round down correctly before 1970, which was found while fixing this.
    Regression test added.
+
+### Round 10
+
+Reviewed `1710257`. All gates passed. Not clean: 0 blocking, 1 major, 2
+minor, 1 nit. Everything was fixed, each with a regression test or a
+parity case.
+
+1. **[major] Columns were keyed by position**, so a column added before
+   another remounted it and lost its inputs (the same defect as round 6
+   #1, in `columns`). **Fixed:** a column is keyed by the first block id in
+   it (ids are unique across the card), else its position.
+2. **[minor] A button whose bound data dropped out while its sheet was open
+   unmounted the sheet**, lost its text, and reopened it by itself on
+   recovery. **Fixed:** while its sheet is open, the button keeps its last
+   good label. Once the sheet is closed, the button shows its data's real
+   state.
+3. **[minor] Rust ordered `bind` keys by insertion, not as
+   `Object.entries` does** (array-index keys first, ascending), so two bad
+   bindings failed at different paths. **Fixed:** `js_entries` sorts them
+   the JavaScript way. A parity case was added (now 151), and all match.
+4. **[nit] A countdown days away re-rendered every minute.** **Fixed:** past
+   48 hours it waits until its day count changes (capped at a day).

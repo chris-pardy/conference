@@ -3290,6 +3290,38 @@
     }
   },
   {
+    "name": "bind with an integer-like key after a named one",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#button",
+          "id": "b",
+          "action": "go",
+          "bind": {
+            "2": {
+              "source": "third"
+            },
+            "10": {
+              "source": "other"
+            },
+            "label": {
+              "source": "nope"
+            },
+            "01": {
+              "source": "fourth"
+            }
+          }
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/bind/2/source",
+      "reason": "unknown-source"
+    }
+  },
+  {
     "name": "button with neither action nor sheet",
     "card": {
       "$type": "app.gather.block.card",

@@ -164,7 +164,12 @@ function remaining(ms: number): string {
 function nextChange(now: number, at: number | undefined, end: number | undefined): number | null {
   if (at === undefined) return null
   const left = at - now
-  if (left > 60_000) return left % 60_000 || 60_000
+  const toNextMinute = left % 60_000 || 60_000
+  // Days show from 48 h out ("in N d"): the text changes when the minute
+  // count (rounded up) drops below the next whole day, not every minute.
+  const minutes = Math.ceil(left / 60_000)
+  if (minutes >= 48 * 60) return Math.min(toNextMinute + (minutes % (24 * 60)) * 60_000, DAY)
+  if (left > 60_000) return toNextMinute
   if (left > 0) return left % 1000 || 1000
   // setTimeout fires at once for delays past 2^31 - 1 ms (about 24.8 days),
   // so a far-off end is checked again daily instead.
