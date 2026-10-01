@@ -1730,8 +1730,9 @@ one nit is recorded as a decision.
 2. **[minor] The default tokens overrode a host's theme**, because they
    load with the lazy blocks CSS, after the host's stylesheet. **Fixed:**
    the defaults sit in a cascade layer (`gather-theme-defaults`), so any
-   host rule wins whatever the load order. A Playwright test covers it, and
-   TC-33 still passes.
+   host rule outside a layer wins whatever the load order. (A host theme
+   inside its own layer still loses: see round 15 #3.) A Playwright test
+   covers it, and TC-33 still passes.
 3. **[minor] A list `key` or a binding `path` that isn't a JSON pointer
    passed validation.** **Fixed:** both validators reject it (`format`).
 4. **[nit] Binding error paths didn't escape `bind` keys as JSON pointer
@@ -1743,3 +1744,32 @@ one nit is recorded as a decision.
    decision in `tokens.css`: hosting the font files (and precaching them
    for offline use) comes with per-organizer theming, which chooses the
    fonts. Until then, viewers without them get the system fallbacks.
+
+### Round 15
+
+Reviewed `a2507be`. All gates passed. Not clean: 0 blocking, 1 major, 1
+minor, 3 nits. Everything was fixed.
+
+1. **[major] Nothing limited nesting depth.** A card 500 stacks deep passed
+   validation and crashed the whole React root. The TS validator threw at
+   1500 levels, and Rust could abort the process. **Fixed:** blocks may nest
+   at most 10 deep (`MAX_DEPTH`; the gallery's deepest is 3). Both
+   validators check this first, with an explicit stack, not recursion, and
+   reject deeper cards as `max-depth`. The renderer shows anything deeper
+   as unavailable, and its id walks stop at the same depth, so an
+   unvalidated card can't crash it either. Six parity cases (now 166), a
+   Rust test at 2000 levels, and TS tests at 3000 (validation) and 500
+   (rendering).
+2. **[minor] Round 14's Escape fix let Escape reach the host.** **Fixed:**
+   inside a sheet, the dialog handles Escape and stops it. When focus has
+   left every sheet, a document listener in the capture phase closes the
+   innermost sheet and stops the key there. A regression test checks that
+   the host sees neither.
+3. **[nit] Round 14's log entry overstated the cascade layer fix.**
+   **Fixed:** the entry and `tokens.css` now say that a host theme inside
+   its own layer still loses, and what per-organizer theming must do about
+   it.
+4. **[nit] Round 14 left doc comments on the wrong functions.** **Fixed**
+   on both sides.
+5. **[nit] The JSON pointer rule didn't check `~` escapes.** **Fixed:** `~`
+   must be `~0` or `~1`, on both sides, with parity cases.

@@ -1,4 +1,5 @@
 import { lexicons } from '../lexicon/lexicons'
+import { MAX_DEPTH } from './limits'
 
 /** Why a card failed: the JSON pointer of the offending value, and a reason code shared with the Rust validator. */
 export interface CardError {
@@ -54,6 +55,16 @@ const DEFS_PREFIX = 'app.gather.block.defs#'
 type Node = Record<string, unknown>
 const asArray = (v: unknown): unknown[] => (Array.isArray(v) ? v : [])
 
+/** A JSON pointer (RFC 6901): empty, or "/" segments where `~` only appears as `~0` or `~1`. */
+function checkPointer(value: unknown, at: string): CardError | null {
+  if (typeof value !== 'string' || value === '' || (value.startsWith('/') && !/~(?![01])/.test(value))) return null
+  return {
+    path: at,
+    reason: 'format',
+    message: `${at} "${value}" must be a JSON pointer (empty, or starting with "/", with ~ only as ~0 or ~1)`,
+  }
+}
+
 /**
  * Rules the lexicon can't express, checked after it passes (the same rules,
  * in the same order, as crates/blocks/src/lexicon.rs `check_card`):
@@ -70,15 +81,6 @@ const asArray = (v: unknown): unknown[] => (Array.isArray(v) ? v : [])
  * `bind` order, then a list's `items`), a list's `key`, then the blocks
  * inside it. A binding's source is checked before its path.
  */
-/** A JSON pointer: empty, or starting with "/". */
-function checkPointer(value: unknown, at: string): CardError | null {
-  if (typeof value !== 'string' || value === '' || value.startsWith('/')) return null
-  return {
-    path: at,
-    reason: 'format',
-    message: `${at} "${value}" must be a JSON pointer (empty, or starting with "/")`,
-  }
-}
 
 function checkCard(card: Node): CardError | null {
   const declared = new Set(asArray(card.sources).map((s) => (s as Node).name))
@@ -171,6 +173,38 @@ function checkCard(card: Node): CardError | null {
   return visit(asArray(card.blocks), '/blocks', new Set(), false)
 }
 
+/**
+ * The first block nested deeper than MAX_DEPTH, in document order. It walks
+ * with its own stack, not recursion, and runs before the lexicon check
+ * (which recurses), so no card can overflow the call stack. Children are a
+ * block's `blocks`, its columns' `blocks`, its `template`, then its sheet's
+ * `blocks`, as in crates/blocks/src/lexicon.rs `check_depth`.
+ */
+function checkDepth(card: Node): CardError | null {
+  const stack: [unknown, string, number][] = []
+  const push = (list: unknown, path: string, depth: number) => {
+    if (!Array.isArray(list)) return
+    for (let i = list.length - 1; i >= 0; i--) stack.push([list[i], `${path}/${i}`, depth])
+  }
+  push(card.blocks, '/blocks', 1)
+  while (stack.length > 0) {
+    const [raw, at, depth] = stack.pop() as [unknown, string, number]
+    if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) continue
+    if (depth > MAX_DEPTH) {
+      return { path: at, reason: 'max-depth', message: `${at} is nested more than ${MAX_DEPTH} blocks deep` }
+    }
+    const block = raw as Node
+    const children: [unknown, string][] = [[block.blocks, `${at}/blocks`]]
+    asArray(block.columns).forEach((column, j) => {
+      children.push([(column as Node | null)?.blocks, `${at}/columns/${j}/blocks`])
+    })
+    children.push([block.template, `${at}/template`])
+    children.push([(block.opens as Node | null | undefined)?.blocks, `${at}/opens/blocks`])
+    for (let k = children.length - 1; k >= 0; k--) push(children[k][0], children[k][1], depth + 1)
+  }
+  return null
+}
+
 /** Validates an `app.gather.block.card` record against the lexicons. */
 export function validateCard(record: unknown): CardValidation {
   if (typeof record !== 'object' || record === null || Array.isArray(record)) {
@@ -183,6 +217,8 @@ export function validateCard(record: unknown): CardValidation {
       error: { path: '/$type', reason: 'const', message: `/$type must be ${CARD_NSID}` },
     }
   }
+  const tooDeep = checkDepth(record as Node)
+  if (tooDeep) return { ok: false, error: tooDeep }
   const result = lexicons.validate(CARD_NSID, record)
   if (!result.success) return { ok: false, error: toCardError(result.error.message) }
   const error = checkCard(record as Node)

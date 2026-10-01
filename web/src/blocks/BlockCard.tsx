@@ -4,6 +4,7 @@ import type { CardRef } from './ActionContext'
 import { variantOf } from './blocks/inputs'
 import { CardContext, FormContext } from './context'
 import { FormStore } from './forms'
+import { MAX_DEPTH } from './limits'
 import { Blocks, blockType } from './render'
 import { type SourceRef, SourceResolverContext } from './SourceResolver'
 import { SourceStore } from './sources'
@@ -43,10 +44,12 @@ function children(block: unknown): unknown[] {
 }
 
 /** Every block in the tree, in document order. */
-function* walk(blocks: unknown[]): Generator<unknown> {
+function* walk(blocks: unknown[], depth = 1): Generator<unknown> {
+  // No deeper than blocks can render.
+  if (depth > MAX_DEPTH) return
   for (const block of blocks) {
     yield block
-    yield* walk(children(block))
+    yield* walk(children(block), depth + 1)
   }
 }
 

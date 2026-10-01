@@ -1,5 +1,6 @@
 import { useRef } from 'react'
 import type { BlockData } from './bindings'
+import { MAX_DEPTH } from './limits'
 
 /**
  * Every block id in some blocks and inside them (sections, stacks, columns,
@@ -7,18 +8,20 @@ import type { BlockData } from './bindings'
  */
 export function idsIn(blocks: unknown): string[] {
   const ids: string[] = []
-  const walk = (list: unknown) => {
+  // No deeper than blocks can render, so a hostile card can't exhaust the stack.
+  const walk = (list: unknown, depth: number) => {
+    if (depth > MAX_DEPTH) return
     for (const block of Array.isArray(list) ? (list as BlockData[]) : []) {
       if (typeof block?.id === 'string' && block.id !== '') ids.push(block.id)
-      walk(block?.blocks)
-      walk(block?.template)
-      walk((block?.opens as { blocks?: unknown } | undefined)?.blocks)
+      walk(block?.blocks, depth + 1)
+      walk(block?.template, depth + 1)
+      walk((block?.opens as { blocks?: unknown } | undefined)?.blocks, depth + 1)
       for (const column of Array.isArray(block?.columns) ? (block.columns as { blocks?: unknown }[]) : []) {
-        walk(column?.blocks)
+        walk(column?.blocks, depth + 1)
       }
     }
   }
-  walk(blocks)
+  walk(blocks, 1)
   return ids
 }
 

@@ -1,8 +1,9 @@
-import { Component, type ReactNode } from 'react'
+import { Component, createContext, type ReactNode, useContext } from 'react'
 import type { Binding, BlockData } from './bindings'
 import { CardContext, type CardScope } from './context'
 import { Placeholder } from './frame'
 import { idsIn, useStableKeys } from './keys'
+import { MAX_DEPTH } from './limits'
 import { registry } from './registry'
 
 export const DEFS = 'app.gather.block.defs'
@@ -28,7 +29,11 @@ export function RenderBlock({ block }: { block: unknown }) {
 }
 
 /** A list of blocks, in order. */
+/** How deep the blocks being rendered are: the card's own are 1. */
+const DepthContext = createContext(0)
+
 export function Blocks({ blocks }: { blocks: unknown }) {
+  const depth = useContext(DepthContext) + 1
   const list = Array.isArray(blocks) ? blocks : []
   // A block's identity follows the ids in it (its own and those inside it),
   // else its type and its place among siblings of that type. A source update
@@ -42,7 +47,21 @@ export function Blocks({ blocks }: { blocks: unknown }) {
     (block, i) => `${(block as BlockData | null)?.$type}@${nth[i]}`,
   )
   if (!Array.isArray(blocks)) return null
-  return list.map((block, i) => <RenderBlock key={keys[i]} block={block} />)
+  // Deeper than validation allows: show the blocks as unavailable rather than
+  // render on, so an unvalidated card can't exhaust the stack.
+  if (depth > MAX_DEPTH) {
+    return list.map((block, i) => {
+      const type = blockType(block)
+      return type ? <Placeholder key={keys[i]} type={type} block={block as BlockData} state="unavailable" /> : null
+    })
+  }
+  return (
+    <DepthContext value={depth}>
+      {list.map((block, i) => (
+        <RenderBlock key={keys[i]} block={block} />
+      ))}
+    </DepthContext>
+  )
 }
 
 /**

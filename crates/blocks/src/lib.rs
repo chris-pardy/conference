@@ -46,6 +46,7 @@ pub fn validate_card(record: &Value) -> Result<(), CardError> {
             message: format!("/$type must be {CARD_NSID}"),
         });
     }
+    lexicon::check_depth(record)?;
     lexicon::validate_record(&format!("{CARD_NSID}#main"), record)?;
     lexicon::check_card(record)
 }

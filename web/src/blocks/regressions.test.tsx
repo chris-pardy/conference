@@ -16,6 +16,7 @@ import {
 } from './SourceResolver'
 import { binding, block, blocksOfType, CARD_REF, card, recordSource, renderCard } from './test-support'
 import { parseDatetime } from './time'
+import { validateCard } from './validate'
 
 // Cases found in adversarial review, beyond the frozen tests.
 
@@ -1175,5 +1176,66 @@ test('TC-32: Tab in a nested sheet stays in the inner sheet', async () => {
   for (let i = 0; i < 4; i++) {
     await user.tab()
     expect(inner.contains(document.activeElement), `tab ${i + 1}`).toBe(true)
+  }
+})
+
+const nested = (levels: number, inner: unknown): unknown =>
+  levels === 0 ? inner : block('stack', { blocks: [nested(levels - 1, inner)] })
+
+test('TC-2: a card nested thousands deep is rejected, not a crash', () => {
+  const result = validateCard(card([nested(3000, block('header', { text: 'deep' }))]))
+  expect(result.ok).toBe(false)
+  if (!result.ok) expect(result.error.reason).toBe('max-depth')
+})
+
+test('TC-8: an unvalidated card nested past the limit still renders the rest of the card', () => {
+  const { container } = renderCard(
+    card([block('header', { text: 'top' }), nested(500, block('header', { text: 'deep' }))]),
+  )
+  expect(screen.getByRole('heading', { name: 'top' })).toBeTruthy()
+  expect(screen.queryByRole('heading', { name: 'deep' })).toBeNull()
+  expect(container.querySelector('[data-state="unavailable"]')).not.toBeNull()
+})
+
+test('TC-32: Escape in a sheet closes it without reaching the host', async () => {
+  const user = userEvent.setup()
+  const hostKeys: string[] = []
+  const onDocument = (e: KeyboardEvent) => hostKeys.push(`document ${e.key}`)
+  document.addEventListener('keydown', onDocument)
+  try {
+    render(
+      // biome-ignore lint/a11y/noStaticElementInteractions: a host listening for keys around the card
+      <div onKeyDown={(e) => hostKeys.push(`host ${e.key}`)}>
+        <SourceResolverContext value={new FixtureResolver({})}>
+          <ActionContext value={{ onAction() {} }}>
+            <BlockCard
+              cardRef={CARD_REF}
+              card={card([
+                block('button', {
+                  id: 'd',
+                  label: 'Details',
+                  opens: { title: 'Details', blocks: [block('textInput', { id: 'q', label: 'Q' })] },
+                }),
+              ])}
+              surface="ephemeral"
+            />
+          </ActionContext>
+        </SourceResolverContext>
+      </div>,
+    )
+    await user.click(screen.getByRole('button', { name: 'Details' }))
+    await user.click(screen.getByRole('textbox', { name: 'Q' }))
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog')).toBeNull()
+
+    // Focus dropped out of the sheet: Escape still closes it, and still stops there.
+    await user.click(screen.getByRole('button', { name: 'Details' }))
+    ;(document.activeElement as HTMLElement).blur()
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog')).toBeNull()
+
+    expect(hostKeys.filter((k) => k.endsWith('Escape'))).toEqual([])
+  } finally {
+    document.removeEventListener('keydown', onDocument)
   }
 })

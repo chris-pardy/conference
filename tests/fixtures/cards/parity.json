@@ -3551,6 +3551,487 @@
     }
   },
   {
+    "name": "nesting exactly at the limit",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#stack",
+          "blocks": [
+            {
+              "$type": "app.gather.block.defs#stack",
+              "blocks": [
+                {
+                  "$type": "app.gather.block.defs#stack",
+                  "blocks": [
+                    {
+                      "$type": "app.gather.block.defs#stack",
+                      "blocks": [
+                        {
+                          "$type": "app.gather.block.defs#stack",
+                          "blocks": [
+                            {
+                              "$type": "app.gather.block.defs#stack",
+                              "blocks": [
+                                {
+                                  "$type": "app.gather.block.defs#stack",
+                                  "blocks": [
+                                    {
+                                      "$type": "app.gather.block.defs#stack",
+                                      "blocks": [
+                                        {
+                                          "$type": "app.gather.block.defs#stack",
+                                          "blocks": [
+                                            {
+                                              "$type": "app.gather.block.defs#header",
+                                              "text": "deep"
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "nesting one past the limit",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#stack",
+          "blocks": [
+            {
+              "$type": "app.gather.block.defs#stack",
+              "blocks": [
+                {
+                  "$type": "app.gather.block.defs#stack",
+                  "blocks": [
+                    {
+                      "$type": "app.gather.block.defs#stack",
+                      "blocks": [
+                        {
+                          "$type": "app.gather.block.defs#stack",
+                          "blocks": [
+                            {
+                              "$type": "app.gather.block.defs#stack",
+                              "blocks": [
+                                {
+                                  "$type": "app.gather.block.defs#stack",
+                                  "blocks": [
+                                    {
+                                      "$type": "app.gather.block.defs#stack",
+                                      "blocks": [
+                                        {
+                                          "$type": "app.gather.block.defs#stack",
+                                          "blocks": [
+                                            {
+                                              "$type": "app.gather.block.defs#stack",
+                                              "blocks": [
+                                                {
+                                                  "$type": "app.gather.block.defs#header",
+                                                  "text": "deep"
+                                                }
+                                              ]
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/blocks/0/blocks/0/blocks/0/blocks/0/blocks/0/blocks/0/blocks/0/blocks/0/blocks/0/blocks/0",
+      "reason": "max-depth"
+    }
+  },
+  {
+    "name": "deep nesting with an error inside",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#stack",
+          "blocks": [
+            {
+              "$type": "app.gather.block.defs#stack",
+              "blocks": [
+                {
+                  "$type": "app.gather.block.defs#stack",
+                  "blocks": [
+                    {
+                      "$type": "app.gather.block.defs#stack",
+                      "blocks": [
+                        {
+                          "$type": "app.gather.block.defs#stack",
+                          "blocks": [
+                            {
+                              "$type": "app.gather.block.defs#stack",
+                              "blocks": [
+                                {
+                                  "$type": "app.gather.block.defs#stack",
+                                  "blocks": [
+                                    {
+                                      "$type": "app.gather.block.defs#stack",
+                                      "blocks": [
+                                        {
+                                          "$type": "app.gather.block.defs#stack",
+                                          "blocks": [
+                                            {
+                                              "$type": "app.gather.block.defs#stack",
+                                              "blocks": [
+                                                {
+                                                  "$type": "app.gather.block.defs#stack",
+                                                  "blocks": [
+                                                    {
+                                                      "$type": "app.gather.block.defs#stack",
+                                                      "blocks": [
+                                                        {
+                                                          "$type": "app.gather.block.defs#stack",
+                                                          "blocks": [
+                                                            {
+                                                              "$type": "app.gather.block.defs#stack",
+                                                              "blocks": [
+                                                                {
+                                                                  "$type": "app.gather.block.defs#stack",
+                                                                  "blocks": [
+                                                                    {
+                                                                      "$type": "app.gather.block.defs#stack",
+                                                                      "blocks": [
+                                                                        {
+                                                                          "$type": "app.gather.block.defs#stack",
+                                                                          "blocks": [
+                                                                            {
+                                                                              "$type": "app.gather.block.defs#stack",
+                                                                              "blocks": [
+                                                                                {
+                                                                                  "$type": "app.gather.block.defs#stack",
+                                                                                  "blocks": [
+                                                                                    {
+                                                                                      "$type": "app.gather.block.defs#stack",
+                                                                                      "blocks": [
+                                                                                        {
+                                                                                          "$type": "app.gather.block.defs#stack",
+                                                                                          "blocks": [
+                                                                                            {
+                                                                                              "$type": "app.gather.block.defs#stack",
+                                                                                              "blocks": [
+                                                                                                {
+                                                                                                  "$type": "app.gather.block.defs#stack",
+                                                                                                  "blocks": [
+                                                                                                    {
+                                                                                                      "$type": "app.gather.block.defs#stack",
+                                                                                                      "blocks": [
+                                                                                                        {
+                                                                                                          "$type": "app.gather.block.defs#stack",
+                                                                                                          "blocks": [
+                                                                                                            {
+                                                                                                              "$type": "app.gather.block.defs#stack",
+                                                                                                              "blocks": [
+                                                                                                                {
+                                                                                                                  "$type": "app.gather.block.defs#stack",
+                                                                                                                  "blocks": [
+                                                                                                                    {
+                                                                                                                      "$type": "app.gather.block.defs#stack",
+                                                                                                                      "blocks": [
+                                                                                                                        {
+                                                                                                                          "$type": "app.gather.block.defs#stack",
+                                                                                                                          "blocks": [
+                                                                                                                            {
+                                                                                                                              "$type": "app.gather.block.defs#stack",
+                                                                                                                              "blocks": [
+                                                                                                                                {
+                                                                                                                                  "$type": "app.gather.block.defs#stack",
+                                                                                                                                  "blocks": [
+                                                                                                                                    {
+                                                                                                                                      "$type": "app.gather.block.defs#stack",
+                                                                                                                                      "blocks": [
+                                                                                                                                        {
+                                                                                                                                          "$type": "app.gather.block.defs#stack",
+                                                                                                                                          "blocks": [
+                                                                                                                                            {
+                                                                                                                                              "$type": "app.gather.block.defs#stack",
+                                                                                                                                              "blocks": [
+                                                                                                                                                {
+                                                                                                                                                  "$type": "app.gather.block.defs#stack",
+                                                                                                                                                  "blocks": [
+                                                                                                                                                    {
+                                                                                                                                                      "$type": "app.gather.block.defs#stack",
+                                                                                                                                                      "blocks": [
+                                                                                                                                                        {
+                                                                                                                                                          "$type": "app.gather.block.defs#stack",
+                                                                                                                                                          "blocks": [
+                                                                                                                                                            {
+                                                                                                                                                              "$type": "app.gather.block.defs#stack",
+                                                                                                                                                              "blocks": [
+                                                                                                                                                                {
+                                                                                                                                                                  "$type": "app.gather.block.defs#stack",
+                                                                                                                                                                  "blocks": [
+                                                                                                                                                                    {
+                                                                                                                                                                      "$type": "app.gather.block.defs#stack",
+                                                                                                                                                                      "blocks": [
+                                                                                                                                                                        {
+                                                                                                                                                                          "$type": "app.gather.block.defs#header",
+                                                                                                                                                                          "text": 42
+                                                                                                                                                                        }
+                                                                                                                                                                      ]
+                                                                                                                                                                    }
+                                                                                                                                                                  ]
+                                                                                                                                                                }
+                                                                                                                                                              ]
+                                                                                                                                                            }
+                                                                                                                                                          ]
+                                                                                                                                                        }
+                                                                                                                                                      ]
+                                                                                                                                                    }
+                                                                                                                                                  ]
+                                                                                                                                                }
+                                                                                                                                              ]
+                                                                                                                                            }
+                                                                                                                                          ]
+                                                                                                                                        }
+                                                                                                                                      ]
+                                                                                                                                    }
+                                                                                                                                  ]
+                                                                                                                                }
+                                                                                                                              ]
+                                                                                                                            }
+                                                                                                                          ]
+                                                                                                                        }
+                                                                                                                      ]
+                                                                                                                    }
+                                                                                                                  ]
+                                                                                                                }
+                                                                                                              ]
+                                                                                                            }
+                                                                                                          ]
+                                                                                                        }
+                                                                                                      ]
+                                                                                                    }
+                                                                                                  ]
+                                                                                                }
+                                                                                              ]
+                                                                                            }
+                                                                                          ]
+                                                                                        }
+                                                                                      ]
+                                                                                    }
+                                                                                  ]
+                                                                                }
+                                                                              ]
+                                                                            }
+                                                                          ]
+                                                                        }
+                                                                      ]
+                                                                    }
+                                                                  ]
+                                                                }
+                                                              ]
+                                                            }
+                                                          ]
+                                                        }
+                                                      ]
+                                                    }
+                                                  ]
+                                                }
+                                              ]
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/blocks/0/blocks/0/blocks/0/blocks/0/blocks/0/blocks/0/blocks/0/blocks/0/blocks/0/blocks/0",
+      "reason": "max-depth"
+    }
+  },
+  {
+    "name": "deep nesting through columns, templates and sheets",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#columns",
+          "columns": [
+            {
+              "blocks": [
+                {
+                  "$type": "app.gather.block.defs#button",
+                  "id": "b",
+                  "label": "x",
+                  "opens": {
+                    "blocks": [
+                      {
+                        "$type": "app.gather.block.defs#stack",
+                        "blocks": [
+                          {
+                            "$type": "app.gather.block.defs#stack",
+                            "blocks": [
+                              {
+                                "$type": "app.gather.block.defs#stack",
+                                "blocks": [
+                                  {
+                                    "$type": "app.gather.block.defs#stack",
+                                    "blocks": [
+                                      {
+                                        "$type": "app.gather.block.defs#stack",
+                                        "blocks": [
+                                          {
+                                            "$type": "app.gather.block.defs#stack",
+                                            "blocks": [
+                                              {
+                                                "$type": "app.gather.block.defs#stack",
+                                                "blocks": [
+                                                  {
+                                                    "$type": "app.gather.block.defs#stack",
+                                                    "blocks": [
+                                                      {
+                                                        "$type": "app.gather.block.defs#header",
+                                                        "text": "deep"
+                                                      }
+                                                    ]
+                                                  }
+                                                ]
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/columns/0/blocks/0/opens/blocks/0/blocks/0/blocks/0/blocks/0/blocks/0/blocks/0/blocks/0/blocks/0/blocks/0",
+      "reason": "max-depth"
+    }
+  },
+  {
+    "name": "pointer with a bad tilde escape",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#stat",
+          "bind": {
+            "value": {
+              "source": "tally",
+              "path": "/a~2"
+            }
+          }
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "tally",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/blocks/0/bind/value/path",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "pointer with good tilde escapes",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#stat",
+          "bind": {
+            "value": {
+              "source": "tally",
+              "path": "/a~0b~1c"
+            }
+          }
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "tally",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
     "name": "button with neither action nor sheet",
     "card": {
       "$type": "app.gather.block.card",

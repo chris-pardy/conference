@@ -416,6 +416,53 @@ fn is_cid(s: &str) -> bool {
 
 const DEFS_PREFIX: &str = "app.gather.block.defs#";
 
+/// How deeply blocks may nest (mirrors `MAX_DEPTH` in web/src/blocks/limits.ts).
+pub(crate) const MAX_DEPTH: usize = 10;
+
+/// The first block nested deeper than `MAX_DEPTH`, in document order. It
+/// walks with its own stack, not recursion, and runs before the lexicon check
+/// (which recurses), so no card can overflow the call stack. Children are a
+/// block's `blocks`, its columns' `blocks`, its `template`, then its sheet's
+/// `blocks`, as in `checkDepth` in web/src/blocks/validate.ts.
+pub(crate) fn check_depth(card: &Value) -> Result {
+    let mut stack: Vec<(&Value, String, usize)> = Vec::new();
+    fn push<'a>(
+        stack: &mut Vec<(&'a Value, String, usize)>,
+        list: &'a Value,
+        path: &str,
+        depth: usize,
+    ) {
+        if let Some(items) = list.as_array() {
+            for (i, item) in items.iter().enumerate().rev() {
+                stack.push((item, format!("{path}/{i}"), depth));
+            }
+        }
+    }
+    push(&mut stack, &card["blocks"], "/blocks", 1);
+    while let Some((block, at, depth)) = stack.pop() {
+        if !block.is_object() {
+            continue;
+        }
+        if depth > MAX_DEPTH {
+            return Err(CardError {
+                message: format!("{at} is nested more than {MAX_DEPTH} blocks deep"),
+                path: at,
+                reason: "max-depth".into(),
+            });
+        }
+        let mut children: Vec<(&Value, String)> = vec![(&block["blocks"], format!("{at}/blocks"))];
+        for (j, column) in block["columns"].as_array().into_iter().flatten().enumerate() {
+            children.push((&column["blocks"], format!("{at}/columns/{j}/blocks")));
+        }
+        children.push((&block["template"], format!("{at}/template")));
+        children.push((&block["opens"]["blocks"], format!("{at}/opens/blocks")));
+        for (list, path) in children.into_iter().rev() {
+            push(&mut stack, list, &path, depth + 1);
+        }
+    }
+    Ok(())
+}
+
 /// Rules the lexicon can't express, checked after it passes (the same rules,
 /// in the same order, as `checkCard` in web/src/blocks/validate.ts):
 /// - block ids are unique across the whole card, sheets and list templates
@@ -470,17 +517,28 @@ fn js_entries(map: &Map<String, Value>) -> Vec<(String, &Value)> {
     indexed.into_iter().map(|(_, k, v)| (k, v)).chain(named).collect()
 }
 
-/// A binding must name a declared source, or `$item` inside a list template.
-/// A JSON pointer: empty, or starting with "/".
+/// A JSON pointer (RFC 6901): empty, or "/" segments where `~` only appears
+/// as `~0` or `~1`.
 fn check_pointer(value: &Value, at: &str) -> Result {
     match value.as_str() {
-        Some(s) if !s.is_empty() && !s.starts_with('/') => Err(CardError {
+        Some(s) if !(s.is_empty() || (s.starts_with('/') && tildes_escaped(s))) => Err(CardError {
             path: at.to_owned(),
             reason: "format".into(),
-            message: format!("{at} \"{s}\" must be a JSON pointer (empty, or starting with \"/\")"),
+            message: format!(
+                "{at} \"{s}\" must be a JSON pointer (empty, or starting with \"/\", with ~ only as ~0 or ~1)"
+            ),
         }),
         _ => Ok(()),
     }
+}
+
+/// Every `~` is followed by `0` or `1`.
+fn tildes_escaped(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    bytes
+        .iter()
+        .enumerate()
+        .all(|(i, b)| *b != b'~' || matches!(bytes.get(i + 1), Some(b'0' | b'1')))
 }
 
 /// A key as one JSON pointer segment.
@@ -488,6 +546,7 @@ fn segment(key: &str) -> String {
     key.replace('~', "~0").replace('/', "~1")
 }
 
+/// A binding must name a declared source, or `$item` inside a list template.
 fn check_binding(binding: &Value, at: &str, declared: &HashSet<&str>, in_list: bool) -> Result {
     let Some(source) = binding.get("source").and_then(Value::as_str) else {
         return Ok(());

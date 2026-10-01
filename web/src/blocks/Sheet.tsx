@@ -84,18 +84,22 @@ export function Sheet({
     // Everything behind the sheet is inert: not focusable, not read out.
     const behind = [...document.body.children].filter((el) => el !== layer.current && !el.hasAttribute('inert'))
     for (const el of behind) el.setAttribute('inert', '')
-    // Escape closes the innermost sheet wherever focus is, even if it has
-    // dropped to the page (a click on text, or a focused block removed).
+    // Escape inside a sheet is handled by the sheet itself (below). If focus
+    // has dropped out of every sheet (a click on text, a focused block
+    // removed), the innermost sheet still closes, and the host never sees the
+    // key: this listener runs first, in the capture phase, and stops it.
     const me = Symbol('sheet')
     openStack.push(me)
     const onEscape = (e: globalThis.KeyboardEvent) => {
       if (e.key !== 'Escape' || openStack[openStack.length - 1] !== me) return
+      if (e.target instanceof Element && e.target.closest('.g-sheet')) return
       e.preventDefault()
+      e.stopPropagation()
       latestClose.current()
     }
-    document.addEventListener('keydown', onEscape)
+    document.addEventListener('keydown', onEscape, true)
     return () => {
-      document.removeEventListener('keydown', onEscape)
+      document.removeEventListener('keydown', onEscape, true)
       openStack.splice(openStack.indexOf(me), 1)
       unlockScroll()
       for (const el of behind) el.removeAttribute('inert')
@@ -105,6 +109,13 @@ export function Sheet({
   }, [])
 
   const onKeyDown = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      // Closes this sheet only: not an outer sheet, nor the host around the card.
+      e.preventDefault()
+      e.stopPropagation()
+      onClose()
+      return
+    }
     if (e.key !== 'Tab' || !dialog.current) return
     // Events bubble through portals to an outer sheet; only the innermost traps.
     e.stopPropagation()
