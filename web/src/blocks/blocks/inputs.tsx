@@ -9,6 +9,7 @@ import { Sheet } from '../Sheet'
 type Props = { block: BlockData }
 
 const VARIANTS = new Set(['default', 'primary', 'danger'])
+const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
 
 /** A block's variant, or "default" for one the vocabulary doesn't have. */
 export function variantOf(block: BlockData): string {
@@ -37,7 +38,10 @@ export function Button({ block }: Props) {
   if (surface === 'compact' && block !== compactPrimary) return null
   const state = settle(bound)
   const label = text(bound.label)
-  if (state !== 'ready' || !label) {
+  // The lexicon types a button's value as a string, so a bound value must be text too.
+  const value = text(bound.value)
+  const badValue = block.bind?.value !== undefined && value === undefined
+  if (state !== 'ready' || !label || badValue) {
     return <Placeholder type="button" block={block} state={state === 'loading' ? 'loading' : 'unavailable'} />
   }
   const sheet = block.opens as { title?: unknown; blocks?: unknown } | undefined
@@ -53,7 +57,7 @@ export function Button({ block }: Props) {
         aria-expanded={sheet ? open : undefined}
         onClick={() => {
           if (sheet) setOpen(true)
-          else if (id && action) send(id, action, bound.value.state === 'ready' ? bound.value.value : undefined)
+          else if (id && action) send(id, action, value)
         }}
       >
         {label}
@@ -110,8 +114,8 @@ export function TextInput({ block }: Props) {
   const min = typeof block.minLength === 'number' ? block.minLength : undefined
   const max = typeof block.maxLength === 'number' ? block.maxLength : undefined
 
-  // Length counts characters as people see them, not UTF-16 code units.
-  const length = (s: string) => [...s].length
+  // Length counts characters as people see them (graphemes: an emoji family is one), as atproto's maxGraphemes does.
+  const length = (s: string) => [...graphemes.segment(s)].length
   const check = (v: string): string | null => {
     if (v.trim() === '') return required ? 'This field is required.' : null
     if (max !== undefined && length(v) > max) return `Use at most ${max} characters (now ${length(v)}).`

@@ -24,9 +24,10 @@ export class SourceStore {
   /**
    * `card` is read when a source is watched, so the card's current ref (say,
    * a new cid after an edit) is used without replacing the store. A store
-   * that replaces another (a new resolver, or changed sources) starts from
-   * the other's ready values for sources that didn't change, so bound
-   * blocks keep showing data instead of dropping back to skeletons.
+   * that replaces another because the card's sources changed starts from the
+   * other's ready values for sources that didn't change, so bound blocks keep
+   * showing data instead of dropping back to skeletons. A new resolver is a
+   * new authority (another viewer), so then nothing carries over.
    */
   constructor(
     private readonly resolver: SourceResolver | null,
@@ -34,7 +35,11 @@ export class SourceStore {
     private readonly refs: Map<string, SourceRef>,
     previous?: SourceStore,
   ) {
-    for (const [key, entry] of previous?.entries ?? []) {
+    // The resolver answers as one viewer, so a different resolver is a
+    // different authority: nothing carries over to it, or one person's data
+    // could show to another.
+    if (previous?.resolver !== resolver) return
+    for (const [key, entry] of previous.entries) {
       if (entry.state.state !== 'ready') continue
       const name = key.startsWith('source:') ? key.slice('source:'.length) : null
       const same = name === null || JSON.stringify(previous?.refs.get(name)) === JSON.stringify(refs.get(name))
@@ -91,6 +96,8 @@ export class SourceStore {
       // (stale while revalidating), so blocks don't unmount and lose what
       // someone typed into them. Only the first load shows a skeleton.
       if (state.state === 'loading' && entry.state.state === 'ready') return
+      // A real answer replaces a carried-over value for good.
+      this.seeded.delete(key)
       entry.state = state
       entry.version++
       for (const listener of [...entry.listeners]) listener()

@@ -74,7 +74,9 @@ export function Image({ block }: Props) {
   const state = settle(bound)
   const url = safeImageSrc(text(bound.url))
   const alt = text(bound.alt) ?? ''
-  if (state === 'loading') return <Placeholder type="image" block={block} state="loading" />
+  // Missing data is the same quiet placeholder as any block's; the alt text
+  // stands in only for an image that can't be shown.
+  if (state !== 'ready') return <Placeholder type="image" block={block} state={state} />
   const ratio = block.aspectRatio as { width?: number; height?: number } | undefined
   const aspectRatio = ratio?.width && ratio.height ? `${ratio.width} / ${ratio.height}` : undefined
   if (!url || failedUrl === url) {

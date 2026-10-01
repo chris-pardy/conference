@@ -29,9 +29,19 @@ export function RenderBlock({ block }: { block: unknown }) {
 /** A list of blocks, in order. */
 export function Blocks({ blocks }: { blocks: unknown }) {
   if (!Array.isArray(blocks)) return null
-  // Blocks keep their position as identity, so a source update re-renders but never re-mounts them.
-  // biome-ignore lint/suspicious/noArrayIndexKey: see above
-  return blocks.map((block, i) => <RenderBlock key={i} block={block} />)
+  // A block's identity is its type and id (ids are unique per form), else its
+  // type and position. A source update never changes it, so blocks re-render
+  // without re-mounting; and when an edited card gains a block, what someone
+  // typed stays with the input it was typed into.
+  const seen = new Set<string>()
+  return blocks.map((block, i) => {
+    const b = block as BlockData | null
+    const id = typeof b?.id === 'string' && b.id !== '' ? b.id : null
+    let key = id !== null ? `${b?.$type}#${id}` : `${b?.$type}@${i}`
+    if (seen.has(key)) key = `${key}@${i}`
+    seen.add(key)
+    return <RenderBlock key={key} block={block} />
+  })
 }
 
 /**

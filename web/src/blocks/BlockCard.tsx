@@ -89,8 +89,9 @@ export function BlockCard({ cardRef, card, surface, onDismiss }: BlockCardProps)
   }, [sourcesKey])
   const { uri, cid } = cardRef
   // The store outlives cid changes (an edited card is the same card): it
-  // reads the current ref when it watches. When it must be replaced (a new
-  // resolver or new sources), the new one starts from the old one's values.
+  // reads the current ref when it watches. When the sources change, the new
+  // store starts from the old one's values; a new resolver (a new viewer)
+  // starts from nothing.
   const current = useRef({ uri, cid })
   current.current = { uri, cid }
   const previous = useRef<{ uri: string; store: SourceStore } | null>(null)

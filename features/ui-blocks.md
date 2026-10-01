@@ -1,5 +1,5 @@
 ---
-status: implementing
+status: blocked
 impact: cross-cutting
 depends-on: [ci-pipeline]
 branch: feature/ui-blocks
@@ -1445,3 +1445,69 @@ nits. Each fix below has a regression test.
 5. **[nit] A facet with both a mention and a link nested one link in
    another.** **Fixed:** a range takes only its first mention or link,
    and still layers bold, italic and tags.
+
+### Round 5
+
+Reviewed `d21ed36`. All gates passed. Not clean: 0 blocking, 2 major, 4
+minor, 2 nits. Everything above nit was fixed before blocking, with a
+regression test each, so no known defect is left on the branch.
+
+1. **[major] Blocks were keyed by position**, so when an edited card gained
+   a block, typed text moved to the wrong input. **Fixed:** a block's key is
+   its type plus id (ids are unique per form), else its type plus
+   position.
+2. **[major] Round 4's carry-over showed one viewer's data under another's
+   resolver.** **Fixed:** values carry over only when the resolver (the
+   viewer's authority) is the same, and a carried value is dropped once its
+   source really answers.
+3. **[minor] The sheet's focus trap leaked past a trailing radio group.**
+   **Fixed:** the sheet handles every Tab itself, treating a radio group as
+   one stop as browsers do, and the page behind is `inert` while it's open.
+4. **[minor] An image bound to an unavailable source showed its alt text,
+   not the placeholder.** **Fixed:** it shows the same placeholder as any
+   block. Alt text is only for an image that fails to load.
+5. **[minor] Lengths counted code points, not what people see.**
+   **Fixed:** they count graphemes, as atproto's `maxGraphemes` does.
+6. **[minor] A button's bound value could be sent as an object or a
+   number.** **Fixed:** it's sent as text, and a non-text value makes the
+   button unavailable.
+7. **[nit] `minLength` greater than `maxLength` passes validation.** Not
+   fixed: it's another cross-field rule for both validators, and it's
+   harmless (the input just can't be submitted).
+8. **[nit] `at://` URIs on sessions and rooms don't link.** Not fixed: no
+   schedule feature exists to route them to yet. That feature should add a
+   link context like `ProfileLinkContext`.
+
+### Blocked after round 5
+
+Five rounds without a clean review, so the build stops here for a human
+decision (see `implement-feature`). Every finding above nit, in all five
+rounds, has been fixed. What's left: the two round 5 nits above, and
+round 3's deferred media proxy.
+
+**What keeps coming back.** Findings cluster in three areas, and each
+round's fix tends to expose the next case:
+
+- **State across updates** (rounds 1 #7, 3 #2, 4 #1, 5 #1 and #2): what a
+  card keeps when sources reload, the card is edited, or the resolver
+  changes. Each fix closed one path, and the next review found another. The
+  rules now are: block identity is type plus id; a store survives `cid`
+  changes; values carry over only under the same resolver; reloads keep the
+  last value.
+- **Validator and renderer parity** (rounds 1 #1, 2 #4, 3 #3, 4 #2 and #3):
+  `@atproto/lexicon`'s lenient grammar and JavaScript object semantics,
+  mirrored in Rust and then in the renderer. 134 shared parity cases now
+  pin it down.
+- **Sheet accessibility** (rounds 1 #8, 5 #3).
+
+The number of majors per round hasn't fallen (2, 3, 1, 2, 2). Reviewers
+keep finding new edge cases rather than repeats, which points to the size
+of the surface (24 block types, four surfaces, two validators) more than
+to unstable fixes.
+
+**Options for the human:**
+1. Ship as is: open the PR with the demo, then do the `app.eventside`
+   rename.
+2. Run more review rounds.
+3. Narrow what's reviewed, e.g. accept the state lifecycle and validation
+   parity as they stand and review only what changed in a round.

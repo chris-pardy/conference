@@ -471,3 +471,134 @@ test('TC-5: a facet with both a mention and a link makes one link, not nested on
   expect(container.querySelector('a')?.getAttribute('href')).toContain('did:plc:alice')
   expect(container.querySelector('strong')?.textContent).toBe('@alice.test')
 })
+
+test('TC-21: when an edited card gains an input, typed text stays with its own input', async () => {
+  const user = userEvent.setup()
+  const view = (blocks: unknown[]) => (
+    <SourceResolverContext value={new FixtureResolver({})}>
+      <ActionContext value={{ onAction() {} }}>
+        <BlockCard cardRef={CARD_REF} card={card(blocks)} surface="feed" />
+      </ActionContext>
+    </SourceResolverContext>
+  )
+  const question = block('textInput', { id: 'question', label: 'Your question' })
+  const ask = block('submit', { id: 'ask', label: 'Ask', action: 'ask' })
+  const { rerender } = render(view([question, ask]))
+  await user.type(screen.getByRole('textbox', { name: 'Your question' }), 'Is there a bike rack?')
+
+  rerender(view([block('textInput', { id: 'name', label: 'Your name' }), question, ask]))
+
+  expect((screen.getByRole('textbox', { name: 'Your question' }) as HTMLInputElement).value).toBe(
+    'Is there a bike rack?',
+  )
+  expect((screen.getByRole('textbox', { name: 'Your name' }) as HTMLInputElement).value).toBe('')
+})
+
+test('TC-17: a new resolver (another viewer) never shows the previous viewer’s data', () => {
+  const record = card([block('stat', { label: 'room', bind: { value: binding('mine', '/room') } })], {
+    sources: [recordSource('mine')],
+  })
+  const view = (resolver: FixtureResolver) => (
+    <SourceResolverContext value={resolver}>
+      <ActionContext value={{ onAction() {} }}>
+        <BlockCard cardRef={CARD_REF} card={record} surface="feed" />
+      </ActionContext>
+    </SourceResolverContext>
+  )
+  const { container, rerender } = render(view(new FixtureResolver({ mine: { room: 'Hotel V, kamer 412' } })))
+  expect(container.textContent).toContain('kamer 412')
+
+  rerender(view(new FixtureResolver({ mine: FixtureResolver.loading() })))
+  expect(container.textContent).not.toContain('kamer 412')
+  expect(blocksOfType(container, 'stat')[0].dataset.state).toBe('loading')
+})
+
+test('TC-32: a sheet ending in a single select keeps Tab inside, with the page behind inert', async () => {
+  const user = userEvent.setup()
+  const { container } = renderCard(
+    card([
+      block('button', {
+        id: 'pick',
+        label: 'Kies',
+        opens: {
+          title: 'Track',
+          blocks: [
+            block('select', {
+              id: 'track',
+              label: 'Track',
+              options: [
+                { label: 'A', value: 'a' },
+                { label: 'B', value: 'b' },
+                { label: 'C', value: 'c' },
+              ],
+            }),
+          ],
+        },
+      }),
+    ]),
+  )
+  await user.click(screen.getByRole('button', { name: 'Kies' }))
+  const sheet = screen.getByRole('dialog')
+  expect(container.hasAttribute('inert')).toBe(true)
+  for (let i = 0; i < 6; i++) {
+    await user.tab()
+    expect(sheet.contains(document.activeElement), `tab ${i + 1}`).toBe(true)
+  }
+  for (let i = 0; i < 4; i++) {
+    await user.tab({ shift: true })
+    expect(sheet.contains(document.activeElement), `shift-tab ${i + 1}`).toBe(true)
+  }
+  await user.keyboard('{Escape}')
+  expect(container.hasAttribute('inert')).toBe(false)
+})
+
+test('TC-17: an image bound to an unavailable source shows the same placeholder as other blocks', () => {
+  const resolver = new FixtureResolver({ plan: FixtureResolver.forbidden() })
+  const { container } = renderCard(
+    card([block('image', { alt: 'Floor plan', bind: { url: binding('plan', '/url') } })], {
+      sources: [recordSource('plan')],
+    }),
+    { resolver },
+  )
+  const [image] = blocksOfType(container, 'image')
+  expect(image.dataset.state).toBe('unavailable')
+  expect(image.textContent).toMatch(/unavailable/i)
+  expect(image.textContent).not.toContain('Floor plan')
+})
+
+test('TC-22: lengths count characters as people see them', async () => {
+  const user = userEvent.setup()
+  const { onAction } = renderCard(
+    card([
+      block('textInput', { id: 'mood', label: 'Mood', maxLength: 3 }),
+      block('submit', { id: 's', label: 'Send', action: 'mood' }),
+    ]),
+  )
+  await user.click(screen.getByRole('textbox', { name: 'Mood' }))
+  await user.paste('👨‍👩‍👧🇳🇱👍🏽')
+  await user.click(screen.getByRole('button', { name: 'Send' }))
+  expect(onAction).toHaveBeenCalledWith({
+    card: CARD_REF,
+    blockId: 's',
+    actionId: 'mood',
+    value: { mood: '👨‍👩‍👧🇳🇱👍🏽' },
+  })
+})
+
+test('TC-19: a button’s bound value is sent as text, and a non-text value makes it unavailable', async () => {
+  const user = userEvent.setup()
+  const resolver = new FixtureResolver({ v: { n: 7, o: { a: 1 } } })
+  const { container, onAction } = renderCard(
+    card(
+      [
+        block('button', { id: 'num', label: 'Seven', action: 'pick', bind: { value: binding('v', '/n') } }),
+        block('button', { id: 'obj', label: 'Object', action: 'pick', bind: { value: binding('v', '/o') } }),
+      ],
+      { sources: [recordSource('v')] },
+    ),
+    { resolver },
+  )
+  await user.click(screen.getByRole('button', { name: 'Seven' }))
+  expect(onAction).toHaveBeenCalledWith({ card: CARD_REF, blockId: 'num', actionId: 'pick', value: '7' })
+  expect(blocksOfType(container, 'button')[1].dataset.state).toBe('unavailable')
+})
