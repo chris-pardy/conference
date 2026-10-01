@@ -463,38 +463,63 @@ pub(crate) fn check_depth(card: &Value) -> Result {
     Ok(())
 }
 
-/// The first `cid` string, anywhere in the record, that isn't ASCII. CIDs are
-/// ASCII, but the base58 decoder inside @atproto/lexicon accepts characters
-/// above U+00FF, which `is_cid` rightly doesn't; checking this first, the
-/// same way on both sides, keeps the validators agreeing. It walks with its
-/// own stack (no recursion) in `Object.entries` order, as `checkCids` does in
-/// web/src/blocks/validate.ts.
-pub(crate) fn check_cids(record: &Value) -> Result {
-    let mut stack: Vec<(&Value, String, bool)> = vec![(record, String::new(), false)];
-    while let Some((value, at, is_cid)) = stack.pop() {
-        if let (true, Some(s)) = (is_cid, value.as_str())
-            && !s.is_ascii()
-        {
-            return Err(CardError {
+/// The first lexicon `cid` that isn't ASCII. CIDs are ASCII, but the base58
+/// decoder inside @atproto/lexicon accepts characters above U+00FF, which
+/// `is_cid` rightly doesn't; checking this first, the same way on both sides,
+/// keeps the validators agreeing. It looks only where the lexicon declares a
+/// CID (a record source's `record.cid`, a module's `wasm.cid` and
+/// `script.cid`), through blocks this version knows, in document order:
+/// sources, then middleware, then blocks. As `checkCids` in
+/// web/src/blocks/validate.ts. (Runs after the depth check, so recursion is
+/// bounded.)
+pub(crate) fn check_cids(card: &Value) -> Result {
+    fn bad(value: &Value, at: String) -> Result {
+        match value.as_str() {
+            Some(s) if !s.is_ascii() => Err(CardError {
                 message: format!("{at} must be a cid string (ASCII)"),
                 path: at,
                 reason: "format".into(),
-            });
-        }
-        let entries: Vec<(String, &Value, bool)> = match value {
-            Value::Object(map) => {
-                js_entries(map).into_iter().map(|(k, v)| (k.clone(), v, k == "cid")).collect()
-            }
-            Value::Array(items) => {
-                items.iter().enumerate().map(|(i, v)| (i.to_string(), v, false)).collect()
-            }
-            _ => continue,
-        };
-        for (key, child, under_cid) in entries.into_iter().rev() {
-            stack.push((child, format!("{at}/{}", segment(&key)), under_cid));
+            }),
+            _ => Ok(()),
         }
     }
-    Ok(())
+    fn module(r: &Value, at: &str) -> Result {
+        bad(&r["wasm"]["cid"], format!("{at}/wasm/cid"))?;
+        bad(&r["script"]["cid"], format!("{at}/script/cid"))
+    }
+    fn visit(blocks: &Value, path: &str) -> Result {
+        for (i, block) in blocks.as_array().into_iter().flatten().enumerate() {
+            let at = format!("{path}/{i}");
+            let Some(kind) = block["$type"].as_str().and_then(|t| t.strip_prefix(DEFS_PREFIX))
+            else {
+                continue;
+            };
+            match kind {
+                "custom" | "canvas" => module(&block["module"], &format!("{at}/module"))?,
+                "section" | "stack" => visit(&block["blocks"], &format!("{at}/blocks"))?,
+                "columns" => {
+                    for (j, column) in block["columns"].as_array().into_iter().flatten().enumerate()
+                    {
+                        visit(&column["blocks"], &format!("{at}/columns/{j}/blocks"))?;
+                    }
+                }
+                "list" => visit(&block["template"], &format!("{at}/template"))?,
+                "button" => visit(&block["opens"]["blocks"], &format!("{at}/opens/blocks"))?,
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+    for (i, source) in card["sources"].as_array().into_iter().flatten().enumerate() {
+        let r = &source["ref"];
+        if r["$type"].as_str() == Some("app.gather.block.defs#recordSource") {
+            bad(&r["record"]["cid"], format!("/sources/{i}/ref/record/cid"))?;
+        }
+    }
+    for (i, r) in card["middleware"].as_array().into_iter().flatten().enumerate() {
+        module(r, &format!("/middleware/{i}"))?;
+    }
+    visit(&card["blocks"], "/blocks")
 }
 
 /// Rules the lexicon can't express, checked after it passes (the same rules,

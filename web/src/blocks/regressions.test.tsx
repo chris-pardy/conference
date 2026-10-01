@@ -1380,3 +1380,41 @@ test('TC-5: an unsafe link does not hide a mention later in the same facet', () 
   expect(links).toHaveLength(1)
   expect(links[0].getAttribute('href')).toContain('did:plc:alice')
 })
+
+test('TC-25: required inputs are marked, and a required multi select says so', () => {
+  const { container } = renderCard(
+    card([
+      block('textInput', { id: 'q', label: 'Question', required: true }),
+      block('select', {
+        id: 'talks',
+        label: 'Talks',
+        multiple: true,
+        required: true,
+        options: [{ label: 'A', value: 'a' }],
+      }),
+    ]),
+  )
+  // The visible marker doesn't change the accessible names.
+  expect(screen.getByRole('textbox', { name: 'Question' })).toBeTruthy()
+  expect(screen.getByRole('group', { name: 'Talks', description: /required/i })).toBeTruthy()
+  expect(container.querySelectorAll('.g-required')).toHaveLength(2)
+})
+
+test('TC-21: a submit with no host to take it keeps what was typed', async () => {
+  const user = userEvent.setup()
+  render(
+    <SourceResolverContext value={new FixtureResolver({})}>
+      <BlockCard
+        cardRef={CARD_REF}
+        card={card([
+          block('textInput', { id: 'q', label: 'Question' }),
+          block('submit', { id: 's', label: 'Ask', action: 'ask' }),
+        ])}
+        surface="feed"
+      />
+    </SourceResolverContext>,
+  )
+  await user.type(screen.getByRole('textbox', { name: 'Question' }), 'Is there a bike rack?')
+  await user.click(screen.getByRole('button', { name: 'Ask' }))
+  expect((screen.getByRole('textbox', { name: 'Question' }) as HTMLInputElement).value).toBe('Is there a bike rack?')
+})

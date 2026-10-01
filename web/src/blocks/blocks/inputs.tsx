@@ -18,15 +18,26 @@ export function variantOf(block: BlockData): string {
 
 const str = (v: unknown) => (typeof v === 'string' ? v : undefined)
 
-/** Hands an intent to the card's host. */
+/** A visible "required" marker. Hidden from assistive tech, which hears it through aria-required or a description. */
+function RequiredMark({ required }: { required: boolean }) {
+  return required ? (
+    <span className="g-required" aria-hidden="true">
+      {' *'}
+    </span>
+  ) : null
+}
+
+/** Hands an intent to the card's host, saying whether there was one to take it. */
 function useSend() {
   const { cardRef } = useCard()
   const host = useContext(ActionContext)
   const item = useContext(ItemContext)
-  return (blockId: string, actionId: string, value: unknown) => {
+  return (blockId: string, actionId: string, value: unknown): boolean => {
+    if (!host) return false
     // Inside a list item, the intent says which item it came from: the path of
     // keys from the outermost list in.
-    host?.onAction({ card: cardRef, blockId, actionId, value, ...(item ? { item: item.path } : {}) })
+    host.onAction({ card: cardRef, blockId, actionId, value, ...(item ? { item: item.path } : {}) })
+    return true
   }
 }
 
@@ -159,6 +170,7 @@ export function TextInput({ block }: Props) {
     <div {...blockAttrs('textInput', block)} className="g-block g-field">
       <label className="g-label" htmlFor={inputId}>
         {str(block.label)}
+        <RequiredMark required={required} />
       </label>
       <Field
         id={inputId}
@@ -239,7 +251,9 @@ export function Select({ block }: Props) {
     if (!multiple) return setChosen([value])
     setChosen(current.includes(value) ? current.filter((v) => v !== value) : full ? current : [...current, value])
   }
-  const described = [limit !== undefined ? `${labelId}-hint` : null, error ? errorId : null].filter(Boolean).join(' ')
+  // A group of checkboxes can't carry aria-required, so its description says it.
+  const hinted = limit !== undefined || (multiple && required)
+  const described = [hinted ? `${labelId}-hint` : null, error ? errorId : null].filter(Boolean).join(' ')
 
   const choices = options.map((option) => {
     const checked = current.includes(option.value)
@@ -259,9 +273,11 @@ export function Select({ block }: Props) {
   })
   const extras = (
     <>
-      {limit !== undefined && (
+      {hinted && (
         <span id={`${labelId}-hint`} className="g-hint">
-          Choose up to {limit}.
+          {[multiple && required ? 'Required.' : null, limit !== undefined ? `Choose up to ${limit}.` : null]
+            .filter(Boolean)
+            .join(' ')}
         </span>
       )}
       {error && (
@@ -275,7 +291,10 @@ export function Select({ block }: Props) {
   if (multiple) {
     return (
       <fieldset {...blockAttrs('select', block)} className="g-block g-select" aria-describedby={described || undefined}>
-        <legend className="g-label">{str(block.label)}</legend>
+        <legend className="g-label">
+          {str(block.label)}
+          <RequiredMark required={required} />
+        </legend>
         {choices}
         {extras}
       </fieldset>
@@ -292,6 +311,7 @@ export function Select({ block }: Props) {
     >
       <span id={labelId} className="g-label">
         {str(block.label)}
+        <RequiredMark required={required} />
       </span>
       {choices}
       {extras}
@@ -315,8 +335,8 @@ export function Submit({ block }: Props) {
         onClick={() => {
           if (!form || !id || !action) return
           if (!form.validate()) return
-          send(id, action, form.values())
-          form.clear()
+          // With no host to take it (e.g. a preview), keep what was typed.
+          if (send(id, action, form.values())) form.clear()
         }}
       >
         {str(block.label)}

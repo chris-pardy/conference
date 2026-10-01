@@ -42,6 +42,10 @@
                 {
                   "$type": "app.gather.block.defs#richText",
                   "text": "Network: Atmosphere-Gast, on every floor. Type F sockets by the windows."
+                },
+                {
+                  "$type": "app.gather.block.defs#richText",
+                  "text": "Trouble connecting? Open https://atmosphereconf.org/2027/wifi/troubleshooting-atmosphere-gast-captive-portal-login on your phone."
                 }
               ]
             },

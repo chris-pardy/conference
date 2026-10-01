@@ -206,30 +206,65 @@ function checkDepth(card: Node): CardError | null {
 }
 
 /**
- * The first `cid` string, anywhere in the record, that isn't ASCII. CIDs are
- * ASCII, but the base58 decoder inside @atproto/lexicon accepts characters
- * above U+00FF, which the Rust validator rightly doesn't; checking this
- * first, the same way on both sides, keeps them agreeing. It walks with its
- * own stack (no recursion) in Object.entries order, as `check_cids` does in
- * crates/blocks/src/lexicon.rs.
+ * The first lexicon `cid` that isn't ASCII. CIDs are ASCII, but the base58
+ * decoder inside @atproto/lexicon accepts characters above U+00FF, which
+ * the Rust validator rightly doesn't; checking this first, the same way on
+ * both sides, keeps them agreeing. It looks only where the lexicon declares
+ * a CID (a record source's `record.cid`, a module's `wasm.cid` and
+ * `script.cid`), through blocks this version knows, in document order:
+ * sources, then middleware, then blocks. As `check_cids` in
+ * crates/blocks/src/lexicon.rs. (Runs after the depth check, so recursion
+ * is bounded.)
  */
-function checkCids(record: unknown): CardError | null {
-  // Each entry: a value, its pointer, and whether it sits under an object key "cid".
-  const stack: [unknown, string, boolean][] = [[record, '', false]]
-  while (stack.length > 0) {
-    const [value, at, isCid] = stack.pop() as [unknown, string, boolean]
-    if (isCid && typeof value === 'string' && [...value].some((c) => c.charCodeAt(0) > 0x7f)) {
-      return { path: at, reason: 'format', message: `${at} must be a cid string (ASCII)` }
-    }
-    if (value === null || typeof value !== 'object') continue
-    const array = Array.isArray(value)
-    const entries = array ? value.map((v, i) => [String(i), v] as const) : Object.entries(value as Node)
-    for (let i = entries.length - 1; i >= 0; i--) {
-      const [key, child] = entries[i]
-      stack.push([child, `${at}${pointer([key])}`, !array && key === 'cid'])
+function checkCids(card: Node): CardError | null {
+  const bad = (value: unknown, at: string): CardError | null =>
+    typeof value === 'string' && [...value].some((c) => c.charCodeAt(0) > 0x7f)
+      ? { path: at, reason: 'format', message: `${at} must be a cid string (ASCII)` }
+      : null
+  const cidOf = (value: unknown) => (value as Node | null | undefined)?.cid
+  const module = (ref: unknown, at: string) =>
+    bad(cidOf((ref as Node | null)?.wasm), `${at}/wasm/cid`) ??
+    bad(cidOf((ref as Node | null)?.script), `${at}/script/cid`)
+  for (const [i, source] of asArray(card.sources).entries()) {
+    const ref = (source as Node | null)?.ref as Node | null | undefined
+    if (ref?.$type === `${DEFS_PREFIX}recordSource`) {
+      const error = bad((ref.record as Node | null)?.cid, `/sources/${i}/ref/record/cid`)
+      if (error) return error
     }
   }
-  return null
+  for (const [i, ref] of asArray(card.middleware).entries()) {
+    const error = module(ref, `/middleware/${i}`)
+    if (error) return error
+  }
+  const visit = (blocks: unknown, path: string): CardError | null => {
+    for (const [i, raw] of asArray(blocks).entries()) {
+      const block = raw as Node | null
+      const at = `${path}/${i}`
+      const type =
+        typeof block?.$type === 'string' && block.$type.startsWith(DEFS_PREFIX)
+          ? block.$type.slice(DEFS_PREFIX.length)
+          : null
+      if (!block || !type) continue
+      const error =
+        type === 'custom' || type === 'canvas'
+          ? module(block.module, `${at}/module`)
+          : type === 'section' || type === 'stack'
+            ? visit(block.blocks, `${at}/blocks`)
+            : type === 'columns'
+              ? asArray(block.columns).reduce<CardError | null>(
+                  (err, column, j) => err ?? visit((column as Node | null)?.blocks, `${at}/columns/${j}/blocks`),
+                  null,
+                )
+              : type === 'list'
+                ? visit(block.template, `${at}/template`)
+                : type === 'button'
+                  ? visit((block.opens as Node | null | undefined)?.blocks, `${at}/opens/blocks`)
+                  : null
+      if (error) return error
+    }
+    return null
+  }
+  return visit(card.blocks, '/blocks')
 }
 
 /** Validates an `app.gather.block.card` record against the lexicons. */
@@ -244,7 +279,7 @@ export function validateCard(record: unknown): CardValidation {
       error: { path: '/$type', reason: 'const', message: `/$type must be ${CARD_NSID}` },
     }
   }
-  const early = checkDepth(record as Node) ?? checkCids(record)
+  const early = checkDepth(record as Node) ?? checkCids(record as Node)
   if (early) return { ok: false, error: early }
   const result = lexicons.validate(CARD_NSID, record)
   if (!result.success) return { ok: false, error: toCardError(result.error.message) }

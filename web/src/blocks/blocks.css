@@ -236,6 +236,10 @@ textarea.g-input {
   color: var(--g-color-muted);
 }
 
+.g-required {
+  color: var(--g-color-danger);
+}
+
 .g-hint {
   font-size: 12px;
   color: var(--g-color-muted);
@@ -569,6 +573,8 @@ textarea.g-input {
   font-family: var(--g-font-body);
   font-size: 15px;
   line-height: 1.45;
+  /* Sheets render outside the card, so they need the card's wrapping too. */
+  overflow-wrap: anywhere;
   animation: g-sheet-up 0.22s ease-out;
 }
 
@@ -585,7 +591,12 @@ textarea.g-input {
 }
 
 .g-sheet__title {
+  min-width: 0;
   font-size: 20px;
+}
+
+.g-sheet__close {
+  flex: none;
 }
 
 .g-sheet__body {

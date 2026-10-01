@@ -4180,8 +4180,7 @@
       "createdAt": "2027-04-30T07:00:00.000Z"
     },
     "expect": {
-      "path": "/blocks/0/cid",
-      "reason": "format"
+      "ok": true
     }
   },
   {
@@ -4213,6 +4212,85 @@
     },
     "expect": {
       "path": "/sources/0/ref/record/cid",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "non-ascii cid key in free-form view params",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "v",
+          "ref": {
+            "$type": "app.gather.block.defs#viewSource",
+            "view": "a.b.c",
+            "params": {
+              "cid": "Zaal B—één"
+            }
+          }
+        }
+      ]
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "non-ascii cid in a custom block module",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#custom",
+          "module": {
+            "wasm": {
+              "cid": "bafé",
+              "did": "did:plc:a"
+            }
+          }
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/module/wasm/cid",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "non-ascii cid in a middleware script",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "middleware": [
+        {
+          "wasm": {
+            "cid": "bafyreidfayvfuwqa7qlnopdjiqrxzs6blmoeu4rujcjtnci5beludirz2a",
+            "did": "did:plc:a"
+          },
+          "script": {
+            "cid": "Qm中",
+            "did": "did:plc:a"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/middleware/0/script/cid",
       "reason": "format"
     }
   },

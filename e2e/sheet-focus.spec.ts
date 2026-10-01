@@ -18,6 +18,22 @@ test('TC-32: closing a sheet gives focus back to the button that opened it', asy
   }
 })
 
+test('TC-6: an open sheet with a long token does not scroll sideways', async ({ page }) => {
+  await page.goto('/dev/blocks')
+  const opener = page.getByRole('button', { name: 'Wifi details' })
+  await opener.scrollIntoViewIfNeeded()
+  await opener.click()
+  const sheet = page.getByRole('dialog')
+  await expect(sheet).toContainText('troubleshooting-atmosphere-gast')
+  const { scrollWidth, clientWidth } = await sheet.evaluate((el) => ({
+    scrollWidth: el.scrollWidth,
+    clientWidth: el.clientWidth,
+  }))
+  expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
+  const close = await sheet.getByRole('button', { name: 'Close' }).boundingBox()
+  expect((close?.x ?? 0) + (close?.width ?? 0)).toBeLessThanOrEqual(page.viewportSize()?.width ?? 0)
+})
+
 test('TC-32: Escape closes a sheet after a click on its text', async ({ page }) => {
   await page.goto('/dev/blocks')
   const opener = page.getByRole('button', { name: 'Wifi details' })

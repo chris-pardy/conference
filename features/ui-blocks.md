@@ -1817,3 +1817,27 @@ nits. Everything was fixed, each with a regression test or parity cases.
 5. **[nit] An unsafe link hid a valid mention later in the same facet.**
    **Fixed:** a link or mention counts as applied only when it makes an
    anchor.
+
+### Round 18
+
+Reviewed `d796e80`. All gates passed. Not clean, with no majors for the
+third round running: 0 blocking, 0 major, 1 minor, 3 nits. Everything was
+fixed, each with a regression test or parity cases.
+
+1. **[minor] Sheets didn't wrap long words, so a long URL or code
+   overflowed sideways on a phone, and a long title pushed Close off
+   screen.** Sheets render outside the card and missed its wrapping.
+   **Fixed:** sheets wrap like cards, and the title shrinks so Close stays
+   visible. The gallery's wifi sheet now has a long URL, and a Playwright
+   test checks the open sheet doesn't scroll sideways.
+2. **[nit] Round 17's ASCII rule applied to any key named `cid`**, which
+   is broader than the lexicon (free-form fields, newer block types).
+   **Fixed:** both sides check only where the lexicon declares a CID (a
+   record source's `record.cid`, a module's `wasm.cid` and `script.cid`),
+   through blocks this version knows. The parity fixtures now have 174
+   cases, and all match.
+3. **[nit] A required multi select didn't say it was required.** **Fixed:**
+   its description says "Required.", and every required input shows a
+   visible marker, hidden from assistive tech so names don't change.
+4. **[nit] A submit with no host to take its intent still cleared the
+   form.** **Fixed:** the form clears only when a host took the intent.
