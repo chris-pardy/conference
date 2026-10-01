@@ -2,6 +2,7 @@ import { Component, type ReactNode } from 'react'
 import type { Binding, BlockData } from './bindings'
 import { CardContext, type CardScope } from './context'
 import { Placeholder } from './frame'
+import { idsIn, useStableKeys } from './keys'
 import { registry } from './registry'
 
 export const DEFS = 'app.gather.block.defs'
@@ -28,24 +29,19 @@ export function RenderBlock({ block }: { block: unknown }) {
 
 /** A list of blocks, in order. */
 export function Blocks({ blocks }: { blocks: unknown }) {
+  const list = Array.isArray(blocks) ? blocks : []
+  // A block's identity follows the ids in it (its own and those inside it),
+  // else its type and its place among siblings of that type. A source update
+  // never changes it, so blocks re-render without re-mounting; and when a
+  // card is edited, what someone typed stays with the input it was typed into.
+  const nth = list.map((block, i) => list.slice(0, i).filter((b) => b?.$type === block?.$type).length)
+  const keys = useStableKeys(
+    list,
+    (block) => idsIn([block]),
+    (block, i) => `${(block as BlockData | null)?.$type}@${nth[i]}`,
+  )
   if (!Array.isArray(blocks)) return null
-  // A block's identity is its type and id (ids are unique per form), else its
-  // type and its place among siblings of that type, so a header added above
-  // a section doesn't change the section's. A source update never changes
-  // it, so blocks re-render without re-mounting; and when a card is edited,
-  // what someone typed stays with the input it was typed into.
-  const seen = new Set<string>()
-  const ofType = new Map<unknown, number>()
-  return blocks.map((block, i) => {
-    const b = block as BlockData | null
-    const id = typeof b?.id === 'string' && b.id !== '' ? b.id : null
-    const nth = ofType.get(b?.$type) ?? 0
-    ofType.set(b?.$type, nth + 1)
-    let key = id !== null ? `${b?.$type}#${id}` : `${b?.$type}@${nth}`
-    if (seen.has(key)) key = `${key}@${i}`
-    seen.add(key)
-    return <RenderBlock key={key} block={block} />
-  })
+  return list.map((block, i) => <RenderBlock key={keys[i]} block={block} />)
 }
 
 /**

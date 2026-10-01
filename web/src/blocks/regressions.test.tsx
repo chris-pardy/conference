@@ -218,7 +218,7 @@ test('TC-19: a button in a list sends its own bound value', async () => {
     blockId: 'up',
     actionId: 'upvote',
     value: 'at://did:plc:bob/q/2',
-    item: 'at://did:plc:bob/q/2',
+    item: ['at://did:plc:bob/q/2'],
   })
 })
 
@@ -804,7 +804,7 @@ test('TC-21: a submit inside a list item says which item it came from', async ()
     blockId: 'reply',
     actionId: 'answer',
     value: { answer: 'Ja' },
-    item: 'q2',
+    item: ['q2'],
   })
 })
 
@@ -885,7 +885,7 @@ test('TC-19: list items sharing a key are told apart by position', async () => {
     { resolver },
   )
   for (const name of ['First', 'Second', 'Third']) await user.click(screen.getByRole('button', { name }))
-  expect(onAction.mock.calls.map(([intent]) => intent.item)).toEqual([0, 1, 'q2'])
+  expect(onAction.mock.calls.map(([intent]) => intent.item)).toEqual([[0], [1], ['q2']])
 })
 
 test('TC-31: a different card in the same place starts fresh', async () => {
@@ -976,4 +976,104 @@ test('TC-28: a countdown days away re-renders when its day count changes, not ev
   act(() => vi.advanceTimersByTime(11 * 60 * 60_000 + 60_000))
   expect(time.textContent).toMatch(/in 2 d/)
   spy.mockRestore()
+})
+
+test.each([
+  {
+    name: 'a block with an id added at the top of the same column',
+    before: [block('columns', { columns: [{ blocks: [block('textInput', { id: 'a', label: 'A' })] }] })],
+    after: [
+      block('columns', {
+        columns: [
+          {
+            blocks: [
+              block('button', { id: 'go', label: 'Go', action: 'go' }),
+              block('textInput', { id: 'a', label: 'A' }),
+            ],
+          },
+        ],
+      }),
+    ],
+  },
+  {
+    name: 'an id-less stack added before the stack holding it',
+    before: [block('stack', { blocks: [block('textInput', { id: 'a', label: 'A' })] })],
+    after: [
+      block('stack', { blocks: [block('header', { text: 'Nieuw' })] }),
+      block('stack', { blocks: [block('textInput', { id: 'a', label: 'A' })] }),
+    ],
+  },
+  {
+    name: 'an id-less section added before the section holding it',
+    before: [block('section', { blocks: [block('textInput', { id: 'a', label: 'A' })] })],
+    after: [
+      block('section', { blocks: [block('header', { text: 'Nieuw' })] }),
+      block('section', { blocks: [block('textInput', { id: 'a', label: 'A' })] }),
+    ],
+  },
+  {
+    name: 'a columns block added before the columns holding it',
+    before: [block('columns', { columns: [{ blocks: [block('textInput', { id: 'a', label: 'A' })] }] })],
+    after: [
+      block('columns', { columns: [{ blocks: [block('header', { text: 'Nieuw' })] }] }),
+      block('columns', { columns: [{ blocks: [block('textInput', { id: 'a', label: 'A' })] }] }),
+    ],
+  },
+])('TC-21: typed text survives $name', async ({ before, after }) => {
+  const user = userEvent.setup()
+  const { edit } = editable(before)
+  await user.type(screen.getByRole('textbox', { name: 'A' }), 'hallo')
+  edit(after)
+  expect((screen.getByRole('textbox', { name: 'A' }) as HTMLInputElement).value).toBe('hallo')
+})
+
+test('TC-19: intents from a nested list carry the path of item keys', async () => {
+  const user = userEvent.setup()
+  const resolver = new FixtureResolver({
+    sessions: [
+      { uri: 's1', title: 'Keynote', qs: [{ n: 1, text: 'Recorded?' }] },
+      { uri: 's2', title: 'Lab', qs: [{ n: 1, text: 'Laptops?' }] },
+    ],
+  })
+  const { onAction } = renderCard(
+    card(
+      [
+        block('list', {
+          items: binding('sessions'),
+          key: '/uri',
+          template: [
+            block('list', {
+              items: binding('$item', '/qs'),
+              key: '/n',
+              template: [block('button', { id: 'up', action: 'upvote', bind: { label: binding('$item', '/text') } })],
+            }),
+          ],
+        }),
+      ],
+      { sources: [recordSource('sessions')] },
+    ),
+    { resolver },
+  )
+  await user.click(screen.getByRole('button', { name: 'Recorded?' }))
+  await user.click(screen.getByRole('button', { name: 'Laptops?' }))
+  expect(onAction.mock.calls.map(([intent]) => intent.item)).toEqual([
+    ['s1', 1],
+    ['s2', 1],
+  ])
+})
+
+test('TC-32: a sheet an edit removed and restored does not reopen by itself', async () => {
+  const user = userEvent.setup()
+  const withSheet = block('button', {
+    id: 'd',
+    label: 'Details',
+    opens: { title: 'Details', blocks: [block('context', { text: 'Inside' })] },
+  })
+  const { edit } = editable([withSheet])
+  await user.click(screen.getByRole('button', { name: 'Details' }))
+  expect(screen.getByRole('dialog')).toBeTruthy()
+  edit([block('button', { id: 'd', label: 'Details', action: 'go' })])
+  expect(screen.queryByRole('dialog')).toBeNull()
+  edit([withSheet])
+  expect(screen.queryByRole('dialog')).toBeNull()
 })

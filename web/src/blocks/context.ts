@@ -25,10 +25,11 @@ export function useCard(): CardScope {
 
 /**
  * The element a list is repeating over, seen by bindings as the source
- * `$item`, and its key (the list's `key` pointer value, else its position),
- * which intents sent from inside it carry as `item`.
+ * `$item`, and its path: the keys (the list's `key` pointer value, else the
+ * position) of this item and every list item it's inside, outermost first.
+ * Intents sent from inside it carry the path as `item`.
  */
-export const ItemContext = createContext<{ item: unknown; key: unknown } | null>(null)
+export const ItemContext = createContext<{ item: unknown; path: unknown[] } | null>(null)
 
 /** The inputs a submit block sends: the nearest list item, sheet or card. */
 export const FormContext = createContext<FormStore | null>(null)

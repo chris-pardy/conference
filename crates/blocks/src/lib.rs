@@ -51,20 +51,31 @@ pub fn validate_card(record: &Value) -> Result<(), CardError> {
 }
 
 /// A card record. Blocks and sources stay as JSON: the renderer, not the
-/// appview, interprets them, and unknown block types must survive untouched.
+/// appview, interprets them. A card read and written back is the same
+/// record: unknown block types, and fields a newer lexicon adds, survive
+/// untouched.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Card {
+    #[serde(rename = "$type", default = "card_nsid")]
+    pub record_type: String,
     pub blocks: Vec<Value>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub sources: Vec<Source>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub middleware: Vec<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sources: Option<Vec<Source>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub middleware: Option<Vec<Value>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub time_zone: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fallback_text: Option<String>,
     pub created_at: String,
+    /// Fields this version doesn't know.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, Value>,
+}
+
+fn card_nsid() -> String {
+    CARD_NSID.to_owned()
 }
 
 /// A named source that bindings refer to.
@@ -73,6 +84,9 @@ pub struct Source {
     pub name: String,
     #[serde(rename = "ref")]
     pub source: Value,
+    /// Fields this version doesn't know.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, Value>,
 }
 
 impl Card {

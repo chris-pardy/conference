@@ -1,4 +1,4 @@
-import { useId, useState } from 'react'
+import { useContext, useId, useState } from 'react'
 import { type BlockData, numeric, readPointer, settle, text, useBound } from '../bindings'
 import { FormContext, ItemContext } from '../context'
 import { FormStore } from '../forms'
@@ -45,10 +45,12 @@ export function List({ block }: Props) {
 
 /** One element of a list: the template, seeing the element as `$item`, as its own form. */
 function ListItem({ item, itemKey, template }: { item: unknown; itemKey: unknown; template: unknown }) {
+  // Inside another list's item, the path starts with that item's.
+  const outer = useContext(ItemContext)
   const [form] = useState(() => new FormStore())
   return (
     <li className="g-list__item">
-      <ItemContext value={{ item, key: itemKey }}>
+      <ItemContext value={{ item, path: [...(outer?.path ?? []), itemKey] }}>
         <FormContext value={form}>
           <Blocks blocks={template} />
         </FormContext>

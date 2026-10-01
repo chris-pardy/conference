@@ -1,4 +1,4 @@
-import { useContext, useId, useRef, useState } from 'react'
+import { useContext, useEffect, useId, useRef, useState } from 'react'
 import { ActionContext } from '../ActionContext'
 import { type BlockData, settle, text, useBound } from '../bindings'
 import { FormContext, ItemContext, useCard } from '../context'
@@ -24,8 +24,9 @@ function useSend() {
   const host = useContext(ActionContext)
   const item = useContext(ItemContext)
   return (blockId: string, actionId: string, value: unknown) => {
-    // Inside a list item, the intent says which item it came from.
-    host?.onAction({ card: cardRef, blockId, actionId, value, ...(item ? { item: item.key } : {}) })
+    // Inside a list item, the intent says which item it came from: the path of
+    // keys from the outermost list in.
+    host?.onAction({ card: cardRef, blockId, actionId, value, ...(item ? { item: item.path } : {}) })
   }
 }
 
@@ -36,6 +37,12 @@ export function Button({ block }: Props) {
   const [open, setOpen] = useState(false)
   const opener = useRef<HTMLButtonElement>(null)
   const lastLabel = useRef<string | undefined>(undefined)
+  const sheet = block.opens as { title?: unknown; blocks?: unknown } | undefined
+  // A sheet an edit removes closes for good: restoring it doesn't reopen it.
+  useEffect(() => {
+    if (!sheet && open) setOpen(false)
+  }, [sheet, open])
+  const isOpen = open && sheet !== undefined
   const variant = variantOf(block)
   // A compact card keeps only its one primary button.
   if (surface === 'compact' && block !== compactPrimary) return null
@@ -48,11 +55,10 @@ export function Button({ block }: Props) {
   if (ready) lastLabel.current = label
   // While its sheet is open, a button whose data drops out keeps its last
   // label, so the sheet (and what was typed in it) stays.
-  const shown = ready ? label : open ? lastLabel.current : undefined
+  const shown = ready ? label : isOpen ? lastLabel.current : undefined
   if (!shown) {
     return <Placeholder type="button" block={block} state={state === 'loading' ? 'loading' : 'unavailable'} />
   }
-  const sheet = block.opens as { title?: unknown; blocks?: unknown } | undefined
   const id = str(block.id)
   const action = str(block.action)
   return (
@@ -62,7 +68,7 @@ export function Button({ block }: Props) {
         type="button"
         className={`g-button g-button--${variant}`}
         aria-haspopup={sheet ? 'dialog' : undefined}
-        aria-expanded={sheet ? open : undefined}
+        aria-expanded={sheet ? isOpen : undefined}
         onClick={() => {
           if (sheet) setOpen(true)
           else if (id && action) send(id, action, value)
@@ -70,7 +76,7 @@ export function Button({ block }: Props) {
       >
         {shown}
       </button>
-      {sheet && open && (
+      {sheet && isOpen && (
         <Sheet
           title={str(sheet.title) ?? shown}
           blocks={sheet.blocks}

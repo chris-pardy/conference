@@ -11,8 +11,12 @@ export interface ActionIntent {
   blockId: string
   actionId: string
   value: unknown
-  /** Sent from inside a list item: that item's key. Absent outside lists. */
-  item?: unknown
+  /**
+   * Sent from inside a list item: the keys of that item and of every list
+   * item it's inside, outermost first (one key for a single list). Absent
+   * outside lists.
+   */
+  item?: unknown[]
 }
 
 export interface ActionHost {
