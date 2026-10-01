@@ -1,0 +1,88 @@
+{
+  "title": "Layout: a stack and columns of stats",
+  "card": {
+    "$type": "app.gather.block.card",
+    "blocks": [
+      {
+        "$type": "app.gather.block.defs#header",
+        "text": "Dag 2 in cijfers"
+      },
+      {
+        "$type": "app.gather.block.defs#stack",
+        "blocks": [
+          {
+            "$type": "app.gather.block.defs#badge",
+            "text": "Live",
+            "tone": "success"
+          },
+          {
+            "$type": "app.gather.block.defs#richText",
+            "text": "Numbers update as people check in at the garderobe."
+          },
+          {
+            "$type": "app.gather.block.defs#context",
+            "text": "Checked in since 08:30"
+          }
+        ]
+      },
+      {
+        "$type": "app.gather.block.defs#columns",
+        "columns": [
+          {
+            "blocks": [
+              {
+                "$type": "app.gather.block.defs#stat",
+                "label": "attendees",
+                "bind": {
+                  "value": {
+                    "source": "stats",
+                    "path": "/attendees"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "blocks": [
+              {
+                "$type": "app.gather.block.defs#stat",
+                "value": "38",
+                "label": "talks"
+              }
+            ]
+          },
+          {
+            "blocks": [
+              {
+                "$type": "app.gather.block.defs#stat",
+                "value": "3",
+                "label": "rooms"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "timeZone": "Europe/Amsterdam",
+    "createdAt": "2027-04-30T07:00:00.000Z",
+    "sources": [
+      {
+        "name": "stats",
+        "ref": {
+          "$type": "app.gather.block.defs#recordSource",
+          "record": {
+            "space": "ats://did:plc:organizer/app.gather.conference/amsterdam-2027",
+            "did": "did:plc:organizer",
+            "collection": "app.gather.demo.item",
+            "rkey": "stats"
+          }
+        }
+      }
+    ]
+  },
+  "sources": {
+    "stats": {
+      "attendees": 412
+    }
+  }
+}

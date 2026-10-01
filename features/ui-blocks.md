@@ -1,9 +1,9 @@
 ---
-status: ready
+status: complete
 impact: cross-cutting
 depends-on: [ci-pipeline]
-branch:
-tests-commit:
+branch: feature/ui-blocks
+tests-commit: eb0f71353cb5f8a8628d9d6f1269d4eaf18df6a9
 ---
 
 # UI blocks
@@ -931,6 +931,87 @@ tests/support/blocks/                  seed space, gallery cards, demo middlewar
 
 </details>
 
+## Build refresh (2026-09-30)
+
+**What changed since the spec:** only [`ci-pipeline`](ci-pipeline.md),
+now complete. It landed as the analysis assumed: `crates/server`, the
+React + Vite PWA in `web/`, vitest projects `unit` (jsdom,
+`web/src/**/*.test.tsx`), `integration` and `tooling`, and Playwright on a
+Pixel 7 against the built PWA via `vite preview`, with service workers
+blocked. Nothing in it contradicts the design or the test cases, and the
+verdict stays cross-cutting. `react-router` and lexicon codegen are still
+this feature's to add.
+
+**Lexicon decisions the tests needed** (approved by the user at the start
+of the build). Lexicons have no maps, no unions of plain values and no
+floats, so:
+
+- **Bindings:** literal properties stay plain. An optional `bind` object
+  on a block maps a property name to a `#binding` (`{source, path}`), and a
+  bound property replaces the literal one. `#computed` stays reserved for
+  `block-sandbox`.
+- **Sources:** `sources` is an array of `#source {name, ref}`, where `ref`
+  is the `#recordSource` / `#collectionSource` / `#profileSource` /
+  `#viewSource` union.
+- **Forms:** `textInput` and `select` hold values. A `submit` block sends
+  one intent whose value maps each input's id to its value, for every input
+  in its form (the nearest list item, sheet or card), then clears them.
+  Single and multi select are one `select` def with `multiple`.
+- **Time zone:** the card has an optional IANA `timeZone`, used for every
+  time on it, falling back to the viewer's.
+- **Rich text:** the facet model of `app.bsky.richtext.facet`, with our
+  own features: `mention`, `link`, `tag`, plus `bold` and `italic`.
+- **Values:** option and button values are strings, and progress values
+  are integers (`value` of `max`, default 100).
+
+The lexicons are in `lexicons/app/gather/block/{defs,card}.json`.
+
+**Test contract** (what the frozen tests rely on besides the lexicons):
+
+- **Modules:**
+  - `<BlockCard cardRef card surface />`
+  - `SourceResolverContext`, and `FixtureResolver(sources, {profiles})`
+    with `loading()`, `forbidden()`, `failing()` and `set(name, value)`.
+    A name it doesn't know is missing.
+  - `ActionContext` holding `{onAction}`. An intent is `{card, blockId,
+    actionId, value}`, plus `item` when sent from inside a list item: an
+    array of steps, outermost list first, each `{key}` (the list's `key`
+    value) or `{index}` (the position, when the item has no unique key).
+    So `[{key: "q2"}]` for a single list. Added in round 7, made a path in
+    round 11 and tagged in round 12, each by the user's decision.
+  - `validateCard(record)`, which returns `{ok: true}` or
+    `{ok: false, error: {path, reason, message}}`, and
+    `conference_blocks::validate_card`, which returns a `CardError` with
+    the same `path` (a JSON pointer) and `reason` (`required`,
+    `min-length`, …)
+- **DOM:**
+  - Each rendered block's root has `data-block="<type>"`, plus
+    `data-block-id` when it has an id.
+  - Buttons have `data-variant` and badges `data-tone`. An unsupported
+    value becomes `default` or `neutral`.
+  - A block whose data isn't ready has `data-state`: `loading` (also
+    `aria-busy`), `unavailable` (the text "Unavailable") or `empty` for a
+    list.
+  - The card root has `data-surface` and `data-card` (the card URI).
+  - A button that opens a sheet has `aria-haspopup="dialog"`, and the
+    sheet is a `dialog`.
+  - Single select is a radio group, and multi select a group of
+    checkboxes.
+- **Theme:** `web/src/theme/tokens.css` defines `--g-color-*` (including
+  `primary`, `danger`, `info`, `warning` and `success`) and `--g-font-*`.
+- **Gallery** (`/dev/blocks`):
+  - an `h1` mentioning blocks
+  - sample cards in `web/src/blocks/gallery/*.card.json`, each holding its
+    record under `card`
+  - an intent log (`role="log"`, named for intents) with one list item per
+    intent
+  - examples of a stack of three or more blocks, columns of stats, a QR
+    code for `https://atmosphereconf.org/2027/check-in`, primary and danger
+    buttons, info, warning and success badges, a button that opens a
+    sheet, and the loading, unavailable and empty states
+- **Codegen:** `check:build` fails with a message saying the generated
+  types are out of date.
+
 ## Test cases
 
 The scenario follows the design canvas: AtmosphereConf 2027 in Amsterdam,
@@ -1229,3 +1310,558 @@ Friday 30 April (day 2), 24-hour clock, and the `Atmosphere-Gast` wifi.
   check), and the gallery is at its own address
 
 ## Review log
+
+### Round 1
+
+Reviewed `4f5b512`. All gates passed (`pnpm check`, frozen tests
+unchanged). Not clean: 0 blocking, 2 major, 6 minor, 1 nit. Everything was
+fixed.
+
+1. **[major] The Rust validator didn't accept the same records as
+   `@atproto/lexicon`.** It diverged on date-only and lowercase datetimes,
+   `T24:00` and junk CIDs. **Fixed:**
+   - `crates/blocks/src/datetime.rs` ports `isDatetimeStringLenient` rule
+     for rule (`iso-datestring-validator` plus the strict atproto check),
+     quirks included.
+   - CIDs are parsed with the `cid` crate, limited to the prefixes
+     multiformats accepts, and re-encoded to rule out trailing bytes.
+   - The URI pattern spells out JavaScript's ASCII `\w` and its `\s` set.
+   - 110 parity cases, recorded from `@atproto/lexicon`
+     (`tests/fixtures/cards/parity.json`), now run on both sides
+     (`validate-parity.test.ts`, `crates/blocks/tests/parity.rs`).
+2. **[major] A sheet opened from a compact card hid its inputs.**
+   **Fixed:** the sheet renders its blocks on the `sheet` surface.
+   Regression test added.
+3. **[minor] An optional input holding only whitespace was sent.**
+   **Fixed:** whitespace alone counts as empty. Regression test added.
+4. **[minor] A failed image never retried after its bound URL changed.**
+   **Fixed:** the failure is tied to the URL that failed. Regression test
+   added.
+5. **[minor] A compact card could show more than one primary button.**
+   **Fixed:** the card picks the first primary button anywhere in its tree,
+   and only that button renders. Regression test added.
+6. **[minor] A countdown re-rendered every second forever.** **Fixed:** it
+   re-renders only when its text changes (every minute, then every second
+   in the last minute), and stops once it has ended. Regression tests added.
+7. **[minor] The source store was rebuilt whenever `card.sources` changed
+   identity.** **Fixed:** the store is keyed on the sources' content, so a
+   re-parsed card keeps its watches. Regression test added.
+8. **[minor] The sheet had no focus trap and didn't lock page scroll.**
+   **Fixed:** Tab and Shift+Tab wrap inside the sheet, the page behind
+   doesn't scroll, and Escape closes the sheet and returns focus to its
+   button. Regression test added.
+9. **[nit] Mentions hard-coded bsky.app.** **Fixed:** `ProfileLinkContext`
+   lets hosts route mentions, and bsky.app stays the default.
+
+Also from a visual check of the gallery on a phone: the latest intent now
+shows briefly at the bottom of the screen, since the log is far below the
+cards.
+
+### Round 2
+
+Reviewed `99fa7b4`. All gates passed. Not clean: 0 blocking, 3 major, 2
+minor, 1 nit. Everything was fixed, and each fix has a regression test in
+`regressions.test.tsx` or in the parity fixtures.
+
+1. **[major] A button's bound `value` was dropped**, so every button in a
+   list sent the same intent. **Fixed:** the button binds `value` and
+   sends it.
+2. **[major] QR codes truncated non-ASCII characters** (qrcode-generator
+   keeps only the low byte by default). **Fixed:** values are encoded as
+   UTF-8. A value too long to encode shows as unavailable instead of
+   throwing.
+3. **[major] A countdown whose end is more than about 24.8 days away
+   overflowed `setTimeout`** and re-rendered every millisecond. **Fixed:**
+   the delay is capped at a day.
+4. **[minor] An array in an object's position failed at a different path
+   in Rust.** **Fixed:** Rust reads an array's properties as JavaScript
+   does (indices, `length` and inherited methods such as `at`). Ten array
+   cases were added to the parity fixtures (now 120), and all match.
+5. **[minor] A block that threw stayed unavailable after its source
+   recovered.** **Fixed:** while a block is down, its error boundary keeps
+   watching the block's own sources, and retries when one changes or when
+   the block itself changes.
+6. **[nit] Hidden inputs on a compact card still joined its form.**
+   **Fixed:** they don't register.
+
+**Decided by the user during this round:** the NSID namespace becomes
+`app.eventside` (domain `eventside.app`). The frozen tests use
+`app.gather.*`, so the rename lands as its own PR right after this one
+merges, not on this branch.
+
+### Round 3
+
+Reviewed `484b396`. All gates passed. Not clean: 0 blocking, 1 major, 4
+minor, 2 nits. Each fix below has a regression test.
+
+1. **[major] A datetime with no offset passes validation, but rendered in
+   the device's zone.** **Fixed:** a time with no offset is wall-clock time
+   in the card's `timeZone` (the viewer's when the card has none), handling
+   daylight-saving changes correctly (`web/src/blocks/time.ts`).
+2. **[minor] A source going back to `loading` unmounted bound blocks**,
+   wiping text typed into a sheet or list item. **Fixed:** once a source
+   has answered, reloading keeps its last value (stale while revalidating).
+   Only the first load shows a skeleton.
+3. **[minor] Inputs sharing an id in one form overwrote each other.**
+   **Fixed:** both validators add the same rule after the lexicon check:
+   ids are unique within each form (the card, each sheet, each list
+   template), and so are a select's option values. Ten cases were added to
+   the parity fixtures (now 130), and all match.
+4. **[minor] Copy did nothing, silently, without the Clipboard API.**
+   **Fixed:** it falls back to selecting the text and using the older copy
+   command. If that fails too, it says "Couldn't copy: select the text to
+   copy it".
+5. **[minor] Card image URLs are fetched from each viewer's device**, which
+   would let a third-party author track views. **Partly fixed:** images and
+   avatars no longer load over plain http. **Deferred:** routing media
+   through blob refs or an appview proxy is a design decision for the
+   features where third parties author cards (`feed-templates`,
+   `feed-apps`) and for `block-actions`' live sources. Today only the
+   organizer authors cards. To be raised when those features are specced.
+6. **[nit] The QR fix patched qrcode-generator globally.** **Fixed:** the
+   value goes in as UTF-8 bytes, with no global change.
+7. **[nit] `aria-valuenow` could fall outside its range.** **Fixed:** it's
+   clamped to `0..max`, as the bar already was.
+
+### Round 4
+
+The first round 4 reviewer stalled without reporting. A fresh one reviewed
+`deb81fd`. All gates passed. Not clean: 0 blocking, 2 major, 1 minor, 2
+nits. Each fix below has a regression test.
+
+1. **[major] A new `cid` (an edited card) or a new resolver rebuilt the
+   source store**, and blocks dropped to skeletons for a commit, wiping
+   text typed in list items and open sheets. **Fixed:** the store is kept
+   across `cid` changes (it reads the current ref when it watches). When it
+   must be replaced (a new resolver or changed sources), the new store
+   starts from the old one's ready values for unchanged sources.
+2. **[major] Datetimes that pass validation didn't all render** (basic
+   format, `T1900`, comma fractions). **Fixed:** `parseDatetime` follows
+   the validator's lenient grammar. A test renders every valid datetime in
+   the parity fixtures. The one exception is a month written "0,", a quirk
+   the ISO library lets through, which names no month and shows
+   unavailable.
+3. **[minor] Duplicate source names and a source named `$item` passed
+   validation.** **Fixed:** both validators reject them (`duplicate`,
+   `reserved`). Four cases were added to the parity fixtures (now 134),
+   and all match.
+4. **[nit] A bound `max` of zero or less inverted the progress range.**
+   **Fixed:** the bar shows as unavailable.
+5. **[nit] A facet with both a mention and a link nested one link in
+   another.** **Fixed:** a range takes only its first mention or link,
+   and still layers bold, italic and tags.
+
+### Round 5
+
+Reviewed `d21ed36`. All gates passed. Not clean: 0 blocking, 2 major, 4
+minor, 2 nits. Everything above nit was fixed before blocking, with a
+regression test each, so no known defect is left on the branch.
+
+1. **[major] Blocks were keyed by position**, so when an edited card gained
+   a block, typed text moved to the wrong input. **Fixed:** a block's key is
+   its type plus id (ids are unique per form), else its type plus
+   position.
+2. **[major] Round 4's carry-over showed one viewer's data under another's
+   resolver.** **Fixed:** values carry over only when the resolver (the
+   viewer's authority) is the same, and a carried value is dropped once its
+   source really answers.
+3. **[minor] The sheet's focus trap leaked past a trailing radio group.**
+   **Fixed:** the sheet handles every Tab itself, treating a radio group as
+   one stop as browsers do, and the page behind is `inert` while it's open.
+4. **[minor] An image bound to an unavailable source showed its alt text,
+   not the placeholder.** **Fixed:** it shows the same placeholder as any
+   block. Alt text is only for an image that fails to load.
+5. **[minor] Lengths counted code points, not what people see.**
+   **Fixed:** they count graphemes, as atproto's `maxGraphemes` does.
+6. **[minor] A button's bound value could be sent as an object or a
+   number.** **Fixed:** it's sent as text, and a non-text value makes the
+   button unavailable.
+7. **[nit] `minLength` greater than `maxLength` passes validation.** Not
+   fixed: it's another cross-field rule for both validators, and it's
+   harmless (the input just can't be submitted).
+8. **[nit] `at://` URIs on sessions and rooms don't link.** Not fixed: no
+   schedule feature exists to route them to yet. That feature should add a
+   link context like `ProfileLinkContext`.
+
+### Blocked after round 5
+
+Five rounds without a clean review, so the build stops here for a human
+decision (see `implement-feature`). Every finding above nit, in all five
+rounds, has been fixed. What's left: the two round 5 nits above, and
+round 3's deferred media proxy.
+
+**What keeps coming back.** Findings cluster in three areas, and each
+round's fix tends to expose the next case:
+
+- **State across updates** (rounds 1 #7, 3 #2, 4 #1, 5 #1 and #2): what a
+  card keeps when sources reload, the card is edited, or the resolver
+  changes. Each fix closed one path, and the next review found another. The
+  rules now are: block identity is type plus id; a store survives `cid`
+  changes; values carry over only under the same resolver; reloads keep the
+  last value.
+- **Validator and renderer parity** (rounds 1 #1, 2 #4, 3 #3, 4 #2 and #3):
+  `@atproto/lexicon`'s lenient grammar and JavaScript object semantics,
+  mirrored in Rust and then in the renderer. 134 shared parity cases now
+  pin it down.
+- **Sheet accessibility** (rounds 1 #8, 5 #3).
+
+The number of majors per round hasn't fallen (2, 3, 1, 2, 2). Reviewers
+keep finding new edge cases rather than repeats, which points to the size
+of the surface (24 block types, four surfaces, two validators) more than
+to unstable fixes.
+
+**Options for the human:**
+1. Ship as is: open the PR with the demo, then do the `app.eventside`
+   rename.
+2. Run more review rounds.
+3. Narrow what's reviewed, e.g. accept the state lifecycle and validation
+   parity as they stand and review only what changed in a round.
+
+**Decision (user, 2026-10-01):** more review rounds, until a round comes
+back clean. Unblocked.
+
+### Round 6
+
+Reviewed `b1cb218`. All gates passed. Not clean: 0 blocking, 2 major, 3
+minor, 1 nit. Everything was fixed, each with a regression test or parity
+cases.
+
+1. **[major] Blocks without an id were keyed by absolute position**, so a
+   header added above a section or a list remounted it and wiped its
+   inputs. **Fixed:** they're keyed by type plus their place among
+   siblings of that type.
+2. **[major] An edit that changed a block's bindings re-subscribed it**,
+   and if it was the only watcher the source was dropped and loaded again.
+   That showed a skeleton, closed an open sheet and lost its text.
+   **Fixed:** the store lets go of a source a microtask later, so a block
+   that re-subscribes in the same commit finds it still watched, with its
+   value. Blocks watch each source once, by the set of sources.
+3. **[minor] A binding to an undeclared source (or `$item` outside a list)
+   passed validation.** **Fixed:** both validators reject it as
+   `unknown-source`. `$item` is allowed in a list template, and in a sheet
+   opened from one.
+4. **[minor] A button with neither `action` nor `opens` (or both) was
+   valid.** **Fixed:** both validators require exactly one. Neither is
+   `required` at `/action`; both is `exclusive` at `/opens`. Eleven cases
+   were added to the parity fixtures (now 145), and all match.
+5. **[minor] Errors on a failed submit weren't announced.** **Fixed:**
+   focus moves to the first invalid input, so its error is read out
+   through its description.
+6. **[nit] Years 0–99 were read as 1900–1999.** **Fixed:** dates are built
+   with `setUTCFullYear`, including the time zone offset lookup.
+
+### Round 7
+
+Reviewed `45c88ab`. All gates passed. Not clean: 0 blocking, 2 major, 2
+minor, 3 nits. Everything above nit was fixed, each with a regression test
+or parity cases.
+
+1. **[major] A select kept choices that an edit had removed**, and sent
+   them and counted them against `required` and the limit. **Fixed:** only
+   choices that are still options count, for the value, validation, the
+   limit and what's checked.
+2. **[major] A submit inside a list item didn't say which item it came
+   from.** It touched the intent contract, so it went to the user, who
+   chose to add `item`. **Fixed:** intents sent from inside a list item
+   (buttons and submits alike) carry `item`, the item's key (the list's
+   `key` value, else its index). Intents from outside a list leave it out.
+   The gallery log shows it, and the test contract above records it.
+3. **[minor] The validators disagreed on a `bind` array on block types
+   without `bind`.** **Fixed:** Rust reads it as JavaScript's
+   `Object.entries` does. Four cases were added to the parity fixtures
+   (now 149), and all match.
+4. **[minor] After an edit added an input above another, a failed submit
+   focused the wrong one.** **Fixed:** focus goes to the invalid input
+   that's first on screen (sorted by document position), not the first to
+   register.
+5. **[nit] Session and room links left the PWA.** **Fixed:** they open in a
+   new tab, like rich-text links.
+6. **[nit] Compact cards built a QR path they never show.** **Fixed.**
+7. **[nit] A button with no label passes validation and shows as
+   unavailable.** Not fixed: it's harmless (it fails visibly, not
+   silently), as with round 5 #7.
+
+The reviewer's probe setup left a stray `node_modules/node_modules`
+symlink (ignored by git), which was removed.
+
+### Round 8
+
+Reviewed `de8b0b9`. All gates passed. Not clean: 0 blocking, 2 major, 1
+minor, 1 nit. Everything above nit was fixed, each with a regression test
+or parity cases.
+
+1. **[major] Ids only had to be unique per form**, so blocks in different
+   list templates or sheets could send identical intents. `block-actions`
+   finds the block by `blockId` (for tallies, and to validate input).
+   **Fixed:** ids are unique across the whole card, sheets and list
+   templates included, in both validators. This replaces round 3's
+   per-form rule. A template's ids still repeat once per item; `item` tells
+   items apart. The parity fixtures now have 150 cases, and all match. The
+   list cases now declare their source, which they'd failed on since
+   round 6.
+2. **[major] An edit that lowered `maxSelections` let more choices through
+   than the new limit.** **Fixed:** validation rejects it ("Choose at most
+   N (now M)") until the attendee unchecks some.
+3. **[minor] List items sharing a key sent the same `item`.** **Fixed:**
+   when several items share a key, each of them is named by its position
+   instead.
+4. **[nit] `19:00:7` is read as 19:00 and 0.7 seconds.** Not fixed: that
+   is how the validator's own grammar reads it (`.` then digits is a
+   fraction), and displayed times only show hours and minutes.
+
+### Round 9
+
+Reviewed `c20c001`. All gates passed. Not clean: 0 blocking, 1 major, 2
+minor, 1 nit. Everything was fixed.
+
+1. **[major] Closing a sheet never gave focus back to its opener in a real
+   browser.** Focus was returned while the page was still `inert` (from
+   round 5), which browsers ignore; jsdom doesn't enforce `inert`, so the
+   unit test passed. **Fixed:** the sheet removes `inert` first, then
+   returns focus. A Playwright test (`e2e/sheet-focus.spec.ts`) checks
+   this in Chromium for Escape and for the Close button.
+2. **[minor] A `BlockCard` given a different card (a new uri) kept the
+   previous card's dismissed state, form and typed text.** **Fixed:** the
+   card body is keyed by uri, so a different card starts fresh. A new cid
+   (the same card, edited) still keeps everything. Regression test added.
+3. **[minor] The Rust id-uniqueness check was quadratic** (about 1.2 s for
+   a 2.3 MB card). **Fixed:** ids, option values and source names use hash
+   sets.
+4. **[nit] Year 0 without an offset came out about 3 years off** (Intl
+   counts it as 1 BC). **Fixed:** BC years are mapped back. Seconds also
+   round down correctly before 1970, which was found while fixing this.
+   Regression test added.
+
+### Round 10
+
+Reviewed `1710257`. All gates passed. Not clean: 0 blocking, 1 major, 2
+minor, 1 nit. Everything was fixed, each with a regression test or a
+parity case.
+
+1. **[major] Columns were keyed by position**, so a column added before
+   another remounted it and lost its inputs (the same defect as round 6
+   #1, in `columns`). **Fixed:** a column is keyed by the first block id in
+   it (ids are unique across the card), else its position.
+2. **[minor] A button whose bound data dropped out while its sheet was open
+   unmounted the sheet**, lost its text, and reopened it by itself on
+   recovery. **Fixed:** while its sheet is open, the button keeps its last
+   good label. Once the sheet is closed, the button shows its data's real
+   state.
+3. **[minor] Rust ordered `bind` keys by insertion, not as
+   `Object.entries` does** (array-index keys first, ascending), so two bad
+   bindings failed at different paths. **Fixed:** `js_entries` sorts them
+   the JavaScript way. A parity case was added (now 151), and all match.
+4. **[nit] A countdown days away re-rendered every minute.** **Fixed:** past
+   48 hours it waits until its day count changes (capped at a day).
+
+### Round 11
+
+Reviewed `91dfec9`. All gates passed. Not clean: 0 blocking, 2 major, 2
+minor. Everything was fixed, each with a regression test.
+
+1. **[major] Identity across edits was still positional in two cases**: a
+   same-type container added before an id-less one, and a block with an id
+   added at the top of a column. **Fixed:** one rule for blocks and
+   columns (`web/src/blocks/keys.ts`). An item keeps the key it had for any
+   id it held before (its own or one inside it); items with no ids fall
+   back to type plus place. A test covers each of the four reported edits.
+2. **[major] Intents from a nested list didn't say which outer item they
+   came from.** It touched the intent contract, so it went to the user,
+   who chose to make **`item` always a path**: an array of keys from the
+   outermost list inward (`["q2"]` for a single list, `["s1", 1]` nested).
+   The test contract above is updated.
+3. **[minor] A button's open state outlived its sheet**, so a sheet that an
+   edit removed and later restored reopened by itself. **Fixed:** removing
+   the sheet closes it for good, and only an open sheet keeps the button's
+   last label.
+4. **[minor] The Rust `Card` type didn't round-trip** (it dropped `$type`
+   and unknown fields). **Fixed:** it keeps `$type`, and unknown fields on
+   the card and its sources; empty and missing lists stay distinct.
+   `crates/blocks/tests/card.rs` checks the round trip.
+
+### Round 12
+
+Reviewed `79e23e0`. All gates passed. Not clean: 0 blocking, 2 major, 1
+nit. Everything was fixed, each with a regression test.
+
+1. **[major] A position fallback in `item` could equal another item's
+   numeric key**, so two items sent the same path. It touched the intent
+   contract, so it went to the user, who chose **tagged steps**: each step
+   is `{key}` or `{index}`. The test contract above is updated.
+2. **[major] Moving an input out of a container could remount the
+   container that stayed** (the moved input took the old key first).
+   **Fixed:** a previous key goes only to an item of the same kind, and to
+   the one that kept the most of its ids, whatever their order.
+3. **[nit] With duplicate ids (an invalid card), keys swapped on each
+   render.** **Fixed:** the first item holding an id keeps it.
+
+### Round 13
+
+Reviewed `274c8db`. All gates passed. Not clean: 0 blocking, 1 major, 1
+minor, 2 nits. Everything was fixed.
+
+1. **[major] Nested sheets unmounting together left the page unscrollable**
+   (each sheet restored the overflow it saw on opening, and the inner one
+   saw `hidden`). **Fixed:** the scroll lock is counted across all sheets.
+   The first sheet saves the page's overflow and the last one restores it.
+   Regression test added.
+2. **[minor] An empty `id` or `action` passed validation and made a dead
+   button.** **Fixed:** the lexicon gives every block `id` and every
+   `action` a `minLength` of 1, and the types are regenerated. Both
+   validators reject them (`min-length`). The parity fixtures now have 154
+   cases, and all match.
+3. **[nit] Tab in a nested sheet also ran the outer sheet's trap**, because
+   events bubble through portals. **Fixed:** the sheet handling Tab stops
+   it there. Regression test added.
+4. **[nit] `preserve_order` applies to `serde_json` across the whole
+   workspace.** **Fixed:** the manifest says so, and that code needing
+   sorted keys must sort them itself.
+
+### Round 14
+
+Reviewed `41e1917`. All gates passed. Not clean, but no majors: 0
+blocking, 0 major, 3 minor, 3 nits. All minors and two nits were fixed;
+one nit is recorded as a decision.
+
+1. **[minor] Escape did nothing once focus had left the sheet** (e.g. after
+   a click on its text). **Fixed:** Escape is handled on the document and
+   closes only the innermost open sheet. The dialog is focusable, so a
+   click inside it keeps focus there. A Playwright test covers it.
+2. **[minor] The default tokens overrode a host's theme**, because they
+   load with the lazy blocks CSS, after the host's stylesheet. **Fixed:**
+   the defaults sit in a cascade layer (`gather-theme-defaults`), so any
+   host rule outside a layer wins whatever the load order. (A host theme
+   inside its own layer still loses: see round 15 #3.) A Playwright test
+   covers it, and TC-33 still passes.
+3. **[minor] A list `key` or a binding `path` that isn't a JSON pointer
+   passed validation.** **Fixed:** both validators reject it (`format`).
+4. **[nit] Binding error paths didn't escape `bind` keys as JSON pointer
+   segments.** **Fixed** on both sides.
+5. **[nit] Button group values weren't required to be unique.** **Fixed:**
+   the same rule as a select's options, on both sides. Items 3–5 added
+   six parity cases (now 160), and all match.
+6. **[nit] The default fonts are named but never loaded.** Recorded as a
+   decision in `tokens.css`: hosting the font files (and precaching them
+   for offline use) comes with per-organizer theming, which chooses the
+   fonts. Until then, viewers without them get the system fallbacks.
+
+### Round 15
+
+Reviewed `a2507be`. All gates passed. Not clean: 0 blocking, 1 major, 1
+minor, 3 nits. Everything was fixed.
+
+1. **[major] Nothing limited nesting depth.** A card 500 stacks deep passed
+   validation and crashed the whole React root. The TS validator threw at
+   1500 levels, and Rust could abort the process. **Fixed:** blocks may nest
+   at most 10 deep (`MAX_DEPTH`; the gallery's deepest is 3). Both
+   validators check this first, with an explicit stack, not recursion, and
+   reject deeper cards as `max-depth`. The renderer shows anything deeper
+   as unavailable, and its id walks stop at the same depth, so an
+   unvalidated card can't crash it either. Six parity cases (now 166), a
+   Rust test at 2000 levels, and TS tests at 3000 (validation) and 500
+   (rendering).
+2. **[minor] Round 14's Escape fix let Escape reach the host.** **Fixed:**
+   inside a sheet, the dialog handles Escape and stops it. When focus has
+   left every sheet, a document listener in the capture phase closes the
+   innermost sheet and stops the key there. A regression test checks that
+   the host sees neither.
+3. **[nit] Round 14's log entry overstated the cascade layer fix.**
+   **Fixed:** the entry and `tokens.css` now say that a host theme inside
+   its own layer still loses, and what per-organizer theming must do about
+   it.
+4. **[nit] Round 14 left doc comments on the wrong functions.** **Fixed**
+   on both sides.
+5. **[nit] The JSON pointer rule didn't check `~` escapes.** **Fixed:** `~`
+   must be `~0` or `~1`, on both sides, with parity cases.
+
+### Round 16
+
+Reviewed `29b5b84`. All gates passed. Not clean: 0 blocking, 1 major, 2
+nits. Everything was fixed, each with a regression test.
+
+1. **[major] A facet with thousands of features nested the DOM as deep, and
+   crashed the browser tab** (10,000 bolds), past round 15's block depth
+   cap. **Fixed:** a range applies each kind of feature at most once, so
+   nesting is bounded whatever a card lists. The lexicon also caps
+   `facet.features` at 8 (types regenerated), so both validators reject
+   such cards (`max-length`). The parity fixtures now have 168 cases, and
+   all match.
+2. **[nit] An untouched multi select sent `[]`, unlike other empty inputs.**
+   **Fixed:** it's left out of the submit value.
+3. **[nit] If an edit removed a sheet's opener, closing the sheet left
+   focus on `<body>`.** **Fixed:** the card root (focusable with
+   `tabIndex=-1`) takes focus instead.
+
+### Round 17
+
+Reviewed `6eedf6c`. All gates passed. The reviewer fuzzed both validators
+with 190,000 cards and rendered 4,000 fuzzed cards. Not clean, with no
+majors for the second round running: 0 blocking, 0 major, 2 minor, 3
+nits. Everything was fixed, each with a regression test or parity cases.
+
+1. **[minor] A base58 CID with a character above U+00FF passed the TS
+   validator (a quirk of the decoder inside @atproto/lexicon) but not
+   Rust.** **Fixed:** both validators check first that every `cid` string
+   in the record is ASCII (an iterative walk in `Object.entries` order on
+   both sides), rather than copying the quirk. Three parity cases (now
+   171), and all match.
+2. **[minor] Profile lookups reached the resolver under a made-up name a
+   card source could also use.** **Fixed:** they pass the name `""` (card
+   source names can't be empty). The `SourceResolver.watch` contract says
+   so, and that resolvers should cache by ref.
+3. **[nit] A nested sheet whose opener an edit removed sent focus to the
+   inert card root.** **Fixed:** focus goes to the enclosing open sheet,
+   and to the card root only when no sheet is open.
+4. **[nit] A person's avatar that failed to load showed a broken image.**
+   **Fixed:** it falls back to the initial.
+5. **[nit] An unsafe link hid a valid mention later in the same facet.**
+   **Fixed:** a link or mention counts as applied only when it makes an
+   anchor.
+
+### Round 18
+
+Reviewed `d796e80`. All gates passed. Not clean, with no majors for the
+third round running: 0 blocking, 0 major, 1 minor, 3 nits. Everything was
+fixed, each with a regression test or parity cases.
+
+1. **[minor] Sheets didn't wrap long words, so a long URL or code
+   overflowed sideways on a phone, and a long title pushed Close off
+   screen.** Sheets render outside the card and missed its wrapping.
+   **Fixed:** sheets wrap like cards, and the title shrinks so Close stays
+   visible. The gallery's wifi sheet now has a long URL, and a Playwright
+   test checks the open sheet doesn't scroll sideways.
+2. **[nit] Round 17's ASCII rule applied to any key named `cid`**, which
+   is broader than the lexicon (free-form fields, newer block types).
+   **Fixed:** both sides check only where the lexicon declares a CID (a
+   record source's `record.cid`, a module's `wasm.cid` and `script.cid`),
+   through blocks this version knows. The parity fixtures now have 174
+   cases, and all match.
+3. **[nit] A required multi select didn't say it was required.** **Fixed:**
+   its description says "Required.", and every required input shows a
+   visible marker, hidden from assistive tech so names don't change.
+4. **[nit] A submit with no host to take its intent still cleared the
+   form.** **Fixed:** the form clears only when a host took the intent.
+
+### Round 19: clean
+
+Reviewed `a82a402`. All gates passed. The reviewer fuzzed the narrowed CID
+check on both validators with 20,000 cards: 0 mismatches. **Clean: 0
+blocking, 0 major, 0 minor, 6 nits.** Five nits were fixed before shipping,
+and one was declined:
+
+1. **[nit] With a nested sheet open, removing the outer sheet sent focus to
+   the card, not the outer opener.** **Fixed:** a closing sheet leaves
+   focus alone if it's already somewhere live outside any sheet.
+   Regression test added.
+2. **[nit] An emoji-led name gave half an emoji as the avatar initial.**
+   **Fixed:** the initial is the first grapheme. Regression test added.
+3. **[nit] "in 1 min" shows for only the last second of the minute.**
+   Declined: the frozen TC-28 pins "1 min" at exactly 60 seconds left, so
+   minutes round up.
+4. **[nit] Dismissing an ephemeral card drops focus to `<body>`.** **Fixed**
+   by documentation: `onDismiss` says the host should move focus, since
+   the host decides what comes next.
+5. **[nit] Sheets leave a theme set on a wrapper around the card** (they
+   render in a portal). **Fixed** by documentation: `tokens.css` says to
+   set themes on `:root`.
+6. **[nit] Three comments no longer matched the code.** **Fixed.**

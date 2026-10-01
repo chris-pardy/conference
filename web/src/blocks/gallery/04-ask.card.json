@@ -1,0 +1,29 @@
+{
+  "title": "A text input and a submit: the value is the form",
+  "card": {
+    "$type": "app.gather.block.card",
+    "blocks": [
+      {
+        "$type": "app.gather.block.defs#header",
+        "text": "Ask the organizers"
+      },
+      {
+        "$type": "app.gather.block.defs#textInput",
+        "id": "question",
+        "label": "Your question",
+        "placeholder": "Waar is de garderobe?",
+        "required": true,
+        "maxLength": 280
+      },
+      {
+        "$type": "app.gather.block.defs#submit",
+        "id": "ask",
+        "label": "Ask",
+        "action": "ask",
+        "variant": "primary"
+      }
+    ],
+    "timeZone": "Europe/Amsterdam",
+    "createdAt": "2027-04-30T07:00:00.000Z"
+  }
+}

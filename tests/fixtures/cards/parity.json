@@ -1,0 +1,4380 @@
+[
+  {
+    "name": "createdAt \"2027-04-30T07:00:00.000Z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-30T19:00:00+02:00\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T19:00:00+02:00"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-30T19:00:00-05:30\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T19:00:00-05:30"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-30T19:00:00+05:45\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T19:00:00+05:45"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-30T19:00:00+14:00\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T19:00:00+14:00"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-30T19:00:00-12:00\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T19:00:00-12:00"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-30T19:00:00+02:45\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T19:00:00+02:45"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-30T19:00:00+00:30\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T19:00:00+00:30"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-30T19:00:00-00:00\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T19:00:00-00:00"
+    },
+    "expect": {
+      "path": "/createdAt",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-30T19:00:00+0200\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T19:00:00+0200"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-30\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30"
+    },
+    "expect": {
+      "path": "/createdAt",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-30t19:00:00z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30t19:00:00z"
+    },
+    "expect": {
+      "path": "/createdAt",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-30 19:00:00Z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30 19:00:00Z"
+    },
+    "expect": {
+      "path": "/createdAt",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-30T19:00Z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T19:00Z"
+    },
+    "expect": {
+      "path": "/createdAt",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-30T19:00\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T19:00"
+    },
+    "expect": {
+      "path": "/createdAt",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-30T19:00:00\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T19:00:00"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-30T24:00:00Z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T24:00:00Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-30T24:30:00Z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T24:30:00Z"
+    },
+    "expect": {
+      "path": "/createdAt",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-30T23:59:60Z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T23:59:60Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"2027-02-29T00:00:00Z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-02-29T00:00:00Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"2028-02-29T00:00:00Z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2028-02-29T00:00:00Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"2027-02-30T00:00:00Z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-02-30T00:00:00Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-31T00:00:00Z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-31T00:00:00Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"2027-13-01T00:00:00Z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-13-01T00:00:00Z"
+    },
+    "expect": {
+      "path": "/createdAt",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "createdAt \"2027-00-10T00:00:00Z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-00-10T00:00:00Z"
+    },
+    "expect": {
+      "path": "/createdAt",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "createdAt \"2027-0,-10T00:00:00Z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-0,-10T00:00:00Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"0000-01-01T00:00:00Z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "0000-01-01T00:00:00Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"0000-01-01T00:00:00+01:00\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "0000-01-01T00:00:00+01:00"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"9999-12-31T23:59:59Z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "9999-12-31T23:59:59Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"9999-12-31T23:59:59-01:00\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "9999-12-31T23:59:59-01:00"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"1985-04-12T23:20:50.1235678912345Z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "1985-04-12T23:20:50.1235678912345Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"1985-04-12T23:20:50.123456789Z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "1985-04-12T23:20:50.123456789Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"1985-04-12T23:20:50,5Z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "1985-04-12T23:20:50,5Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"20270430T190000Z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "20270430T190000Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-30T19:00:00.Z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T19:00:00.Z"
+    },
+    "expect": {
+      "path": "/createdAt",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-30T19:00:7Z\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T19:00:7Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"2027-04-30T10:00:00+01:00-05\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T10:00:00+01:00-05"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "createdAt \"yesterday\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "yesterday"
+    },
+    "expect": {
+      "path": "/createdAt",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "createdAt \"\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": ""
+    },
+    "expect": {
+      "path": "/createdAt",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "time.at date only",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#time",
+          "at": "2027-04-30"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/at",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "cid \"bafyreidfayvfuwqa7qlnopdjiqrxzs6blmoeu4rujcjtnci5beludirz2a\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#recordSource",
+            "record": {
+              "space": "ats://x",
+              "did": "did:plc:organizer",
+              "collection": "app.gather.demo.item",
+              "rkey": "r1",
+              "cid": "bafyreidfayvfuwqa7qlnopdjiqrxzs6blmoeu4rujcjtnci5beludirz2a"
+            }
+          }
+        }
+      ]
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "cid \"bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#recordSource",
+            "record": {
+              "space": "ats://x",
+              "did": "did:plc:organizer",
+              "collection": "app.gather.demo.item",
+              "rkey": "r1",
+              "cid": "bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku"
+            }
+          }
+        }
+      ]
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "cid \"QmPK1s3pNYLi9ERiq3BDxKa4XosgWwFRQUydHUtz4YgpqB\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#recordSource",
+            "record": {
+              "space": "ats://x",
+              "did": "did:plc:organizer",
+              "collection": "app.gather.demo.item",
+              "rkey": "r1",
+              "cid": "QmPK1s3pNYLi9ERiq3BDxKa4XosgWwFRQUydHUtz4YgpqB"
+            }
+          }
+        }
+      ]
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "cid \"zdj7WhuEjrB52m1BisYCtmjH1hSKa7yZ3jEZ9JcXaFRD51wVz\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#recordSource",
+            "record": {
+              "space": "ats://x",
+              "did": "did:plc:organizer",
+              "collection": "app.gather.demo.item",
+              "rkey": "r1",
+              "cid": "zdj7WhuEjrB52m1BisYCtmjH1hSKa7yZ3jEZ9JcXaFRD51wVz"
+            }
+          }
+        }
+      ]
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "cid \"babcdefghij\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#recordSource",
+            "record": {
+              "space": "ats://x",
+              "did": "did:plc:organizer",
+              "collection": "app.gather.demo.item",
+              "rkey": "r1",
+              "cid": "babcdefghij"
+            }
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/sources/0/ref/record/cid",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "cid \"BAFYREIDFAYVFUWQA7QLNOPDJIQRXZS6BLMOEU4RUJCJTNCI5BELUDIRZ2A\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#recordSource",
+            "record": {
+              "space": "ats://x",
+              "did": "did:plc:organizer",
+              "collection": "app.gather.demo.item",
+              "rkey": "r1",
+              "cid": "BAFYREIDFAYVFUWQA7QLNOPDJIQRXZS6BLMOEU4RUJCJTNCI5BELUDIRZ2A"
+            }
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/sources/0/ref/record/cid",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "cid \"f01711220a8b1f0bd2e5a1b1cd4e56a4e2c1ea1d5c7b0e6b4a1e4b8f9c7c9d0e1f2a3b4c5\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#recordSource",
+            "record": {
+              "space": "ats://x",
+              "did": "did:plc:organizer",
+              "collection": "app.gather.demo.item",
+              "rkey": "r1",
+              "cid": "f01711220a8b1f0bd2e5a1b1cd4e56a4e2c1ea1d5c7b0e6b4a1e4b8f9c7c9d0e1f2a3b4c5"
+            }
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/sources/0/ref/record/cid",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "cid \"Qm\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#recordSource",
+            "record": {
+              "space": "ats://x",
+              "did": "did:plc:organizer",
+              "collection": "app.gather.demo.item",
+              "rkey": "r1",
+              "cid": "Qm"
+            }
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/sources/0/ref/record/cid",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "cid \"\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#recordSource",
+            "record": {
+              "space": "ats://x",
+              "did": "did:plc:organizer",
+              "collection": "app.gather.demo.item",
+              "rkey": "r1",
+              "cid": ""
+            }
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/sources/0/ref/record/cid",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "did \"did:plc:alice\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#person",
+          "did": "did:plc:alice"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "did \"did:web:example.com\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#person",
+          "did": "did:web:example.com"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "did \"did:PLC:alice\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#person",
+          "did": "did:PLC:alice"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/did",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "did \"did:plc:\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#person",
+          "did": "did:plc:"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/did",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "did \"did:plc:alice%\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#person",
+          "did": "did:plc:alice%"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/did",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "did \"alice\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#person",
+          "did": "alice"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/did",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "uri \"https://atmosphereconf.org/2027\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#image",
+          "url": "https://atmosphereconf.org/2027",
+          "alt": "x"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "uri \"at://did:plc:x/app.bsky.feed.post/1\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#image",
+          "url": "at://did:plc:x/app.bsky.feed.post/1",
+          "alt": "x"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "uri \"mailto:hi@example.com\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#image",
+          "url": "mailto:hi@example.com",
+          "alt": "x"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "uri \"https:/x\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#image",
+          "url": "https:/x",
+          "alt": "x"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/url",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "uri \"https://\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#image",
+          "url": "https://",
+          "alt": "x"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/url",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "uri \"no scheme\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#image",
+          "url": "no scheme",
+          "alt": "x"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/url",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "uri \"https://example.com/a b\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#image",
+          "url": "https://example.com/a b",
+          "alt": "x"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/url",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "uri \"é:x\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#image",
+          "url": "é:x",
+          "alt": "x"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/url",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "uri \"https://example.com/ \"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#image",
+          "url": "https://example.com/ ",
+          "alt": "x"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/url",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "uri \"https://example.com/\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#image",
+          "url": "https://example.com/",
+          "alt": "x"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "nsid \"app.gather.demo.question\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "c",
+          "ref": {
+            "$type": "app.gather.block.defs#collectionSource",
+            "collection": "app.gather.demo.question"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "nsid \"app.gather\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "c",
+          "ref": {
+            "$type": "app.gather.block.defs#collectionSource",
+            "collection": "app.gather"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/sources/0/ref/collection",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "nsid \"app.gather.demo.1question\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "c",
+          "ref": {
+            "$type": "app.gather.block.defs#collectionSource",
+            "collection": "app.gather.demo.1question"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/sources/0/ref/collection",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "nsid \"a.b.c\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "c",
+          "ref": {
+            "$type": "app.gather.block.defs#collectionSource",
+            "collection": "a.b.c"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "nsid \"app..demo\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "c",
+          "ref": {
+            "$type": "app.gather.block.defs#collectionSource",
+            "collection": "app..demo"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/sources/0/ref/collection",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "nsid \"com.example.fooBar\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "c",
+          "ref": {
+            "$type": "app.gather.block.defs#collectionSource",
+            "collection": "com.example.fooBar"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "rkey \"self\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#recordSource",
+            "record": {
+              "space": "ats://x",
+              "did": "did:plc:organizer",
+              "collection": "app.gather.demo.item",
+              "rkey": "self"
+            }
+          }
+        }
+      ]
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "rkey \"3lwelkom2027\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#recordSource",
+            "record": {
+              "space": "ats://x",
+              "did": "did:plc:organizer",
+              "collection": "app.gather.demo.item",
+              "rkey": "3lwelkom2027"
+            }
+          }
+        }
+      ]
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "rkey \".\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#recordSource",
+            "record": {
+              "space": "ats://x",
+              "did": "did:plc:organizer",
+              "collection": "app.gather.demo.item",
+              "rkey": "."
+            }
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/sources/0/ref/record/rkey",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "rkey \"..\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#recordSource",
+            "record": {
+              "space": "ats://x",
+              "did": "did:plc:organizer",
+              "collection": "app.gather.demo.item",
+              "rkey": ".."
+            }
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/sources/0/ref/record/rkey",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "rkey \"a/b\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#recordSource",
+            "record": {
+              "space": "ats://x",
+              "did": "did:plc:organizer",
+              "collection": "app.gather.demo.item",
+              "rkey": "a/b"
+            }
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/sources/0/ref/record/rkey",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "rkey \"a b\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#recordSource",
+            "record": {
+              "space": "ats://x",
+              "did": "did:plc:organizer",
+              "collection": "app.gather.demo.item",
+              "rkey": "a b"
+            }
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/sources/0/ref/record/rkey",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "rkey \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#recordSource",
+            "record": {
+              "space": "ats://x",
+              "did": "did:plc:organizer",
+              "collection": "app.gather.demo.item",
+              "rkey": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+            }
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/sources/0/ref/record/rkey",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "string 300 ascii bytes",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "string 301 ascii bytes",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/text",
+      "reason": "max-length"
+    }
+  },
+  {
+    "name": "string 100 euro signs (300 bytes)",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "string 101 euro signs (303 bytes)",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/text",
+      "reason": "max-length"
+    }
+  },
+  {
+    "name": "string 75 emoji (300 bytes)",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "string 76 emoji (304 bytes)",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇🧇"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/text",
+      "reason": "max-length"
+    }
+  },
+  {
+    "name": "source name empty",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/sources/0/name",
+      "reason": "min-length"
+    }
+  },
+  {
+    "name": "text is a number",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": 42
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/text",
+      "reason": "type"
+    }
+  },
+  {
+    "name": "text is null",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": null
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/text",
+      "reason": "type"
+    }
+  },
+  {
+    "name": "progress value 62",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#progress",
+          "value": 62
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "progress value 62.5",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#progress",
+          "value": 62.5
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/value",
+      "reason": "type"
+    }
+  },
+  {
+    "name": "progress value -1",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#progress",
+          "value": -1
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/value",
+      "reason": "minimum"
+    }
+  },
+  {
+    "name": "progress value \"62\"",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#progress",
+          "value": "62"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/value",
+      "reason": "type"
+    }
+  },
+  {
+    "name": "progress max 0",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#progress",
+          "value": 1,
+          "max": 0
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/max",
+      "reason": "minimum"
+    }
+  },
+  {
+    "name": "required is a string",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#textInput",
+          "id": "t",
+          "label": "x",
+          "required": "yes"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/required",
+      "reason": "type"
+    }
+  },
+  {
+    "name": "blocks is an object",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": {},
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks",
+      "reason": "type"
+    }
+  },
+  {
+    "name": "blocks has 51 items",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        },
+        {
+          "$type": "app.gather.block.defs#divider"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks",
+      "reason": "max-length"
+    }
+  },
+  {
+    "name": "block without $type",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "text": "no type"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/$type",
+      "reason": "required"
+    }
+  },
+  {
+    "name": "block is a string",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": ["header"],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/$type",
+      "reason": "required"
+    }
+  },
+  {
+    "name": "unknown block type",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.future#hologram",
+          "size": 3
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "unknown block type without #",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.future",
+          "size": 3
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "nested error",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#section",
+          "blocks": [
+            {
+              "$type": "app.gather.block.defs#button",
+              "label": "x"
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/blocks/0/id",
+      "reason": "required"
+    }
+  },
+  {
+    "name": "list without template",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#list",
+          "items": {
+            "source": "q"
+          }
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/template",
+      "reason": "required"
+    }
+  },
+  {
+    "name": "columns empty",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#columns",
+          "columns": []
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/columns",
+      "reason": "min-length"
+    }
+  },
+  {
+    "name": "facet feature without $type",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#richText",
+          "text": "hi",
+          "facets": [
+            {
+              "index": {
+                "byteStart": 0,
+                "byteEnd": 1
+              },
+              "features": [{}]
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/facets/0/features/0/$type",
+      "reason": "required"
+    }
+  },
+  {
+    "name": "collection filter is a string",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "c",
+          "ref": {
+            "$type": "app.gather.block.defs#collectionSource",
+            "collection": "a.b.c",
+            "filter": "x"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/sources/0/ref/filter",
+      "reason": "type"
+    }
+  },
+  {
+    "name": "collection filter is an array",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "c",
+          "ref": {
+            "$type": "app.gather.block.defs#collectionSource",
+            "collection": "a.b.c",
+            "filter": []
+          }
+        }
+      ]
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "missing createdAt",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#divider"
+        }
+      ]
+    },
+    "expect": {
+      "path": "/createdAt",
+      "reason": "required"
+    }
+  },
+  {
+    "name": "wrong $type",
+    "card": {
+      "$type": "app.gather.block.other",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/$type",
+      "reason": "const"
+    }
+  },
+  {
+    "name": "card is an array",
+    "card": [],
+    "expect": {
+      "path": "",
+      "reason": "type"
+    }
+  },
+  {
+    "name": "bind value is a string",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#stat",
+          "bind": {
+            "value": "stats"
+          }
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/bind/value",
+      "reason": "type"
+    }
+  },
+  {
+    "name": "extra unknown property",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "pinned": true
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "aspectRatio is an empty array",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#image",
+          "alt": "x",
+          "aspectRatio": []
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/aspectRatio/width",
+      "reason": "required"
+    }
+  },
+  {
+    "name": "aspectRatio is an array",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#image",
+          "alt": "x",
+          "aspectRatio": [16, 9]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/aspectRatio/width",
+      "reason": "required"
+    }
+  },
+  {
+    "name": "opens is an empty array",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#button",
+          "id": "b",
+          "label": "x",
+          "opens": []
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/opens/blocks",
+      "reason": "required"
+    }
+  },
+  {
+    "name": "header bind is an empty array",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "bind": []
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/bind/at",
+      "reason": "type"
+    }
+  },
+  {
+    "name": "time bind is an array of bindings",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#time",
+          "bind": [
+            {
+              "source": "s"
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/bind/at",
+      "reason": "type"
+    }
+  },
+  {
+    "name": "source is an array",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [[]]
+    },
+    "expect": {
+      "path": "/sources/0/name",
+      "reason": "required"
+    }
+  },
+  {
+    "name": "facet index is an array",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#richText",
+          "text": "hi",
+          "facets": [
+            {
+              "index": [0, 1],
+              "features": []
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/facets/0/index/byteStart",
+      "reason": "required"
+    }
+  },
+  {
+    "name": "record ref is an array",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#recordSource",
+            "record": []
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/sources/0/ref/record/space",
+      "reason": "required"
+    }
+  },
+  {
+    "name": "column is an array",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#columns",
+          "columns": [[]]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/columns/0/blocks",
+      "reason": "required"
+    }
+  },
+  {
+    "name": "list items binding is an array",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#list",
+          "items": ["q"],
+          "template": []
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/items/source",
+      "reason": "required"
+    }
+  },
+  {
+    "name": "duplicate input ids",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#textInput",
+          "id": "q",
+          "label": "q"
+        },
+        {
+          "$type": "app.gather.block.defs#textInput",
+          "id": "q",
+          "label": "q"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/1/id",
+      "reason": "duplicate"
+    }
+  },
+  {
+    "name": "duplicate id nested in a section",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#textInput",
+          "id": "q",
+          "label": "q"
+        },
+        {
+          "$type": "app.gather.block.defs#section",
+          "blocks": [
+            {
+              "$type": "app.gather.block.defs#textInput",
+              "id": "q",
+              "label": "q"
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/1/blocks/0/id",
+      "reason": "duplicate"
+    }
+  },
+  {
+    "name": "duplicate id across columns",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#columns",
+          "columns": [
+            {
+              "blocks": [
+                {
+                  "$type": "app.gather.block.defs#textInput",
+                  "id": "a",
+                  "label": "a"
+                }
+              ]
+            },
+            {
+              "blocks": [
+                {
+                  "$type": "app.gather.block.defs#textInput",
+                  "id": "a",
+                  "label": "a"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/columns/1/blocks/0/id",
+      "reason": "duplicate"
+    }
+  },
+  {
+    "name": "same id in the card and its sheet",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#textInput",
+          "id": "q",
+          "label": "q"
+        },
+        {
+          "$type": "app.gather.block.defs#button",
+          "id": "b",
+          "label": "x",
+          "opens": {
+            "blocks": [
+              {
+                "$type": "app.gather.block.defs#textInput",
+                "id": "q",
+                "label": "q"
+              }
+            ]
+          }
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/1/opens/blocks/0/id",
+      "reason": "duplicate"
+    }
+  },
+  {
+    "name": "duplicate id inside a sheet",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#button",
+          "id": "b",
+          "label": "x",
+          "opens": {
+            "blocks": [
+              {
+                "$type": "app.gather.block.defs#textInput",
+                "id": "q",
+                "label": "q"
+              },
+              {
+                "$type": "app.gather.block.defs#textInput",
+                "id": "q",
+                "label": "q"
+              }
+            ]
+          }
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/opens/blocks/1/id",
+      "reason": "duplicate"
+    }
+  },
+  {
+    "name": "same id in the card and a list template",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#textInput",
+          "id": "q",
+          "label": "q"
+        },
+        {
+          "$type": "app.gather.block.defs#list",
+          "items": {
+            "source": "s"
+          },
+          "template": [
+            {
+              "$type": "app.gather.block.defs#textInput",
+              "id": "q",
+              "label": "q"
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/blocks/1/template/0/id",
+      "reason": "duplicate"
+    }
+  },
+  {
+    "name": "same id in two list templates",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#list",
+          "items": {
+            "source": "s"
+          },
+          "template": [
+            {
+              "$type": "app.gather.block.defs#textInput",
+              "id": "q",
+              "label": "q"
+            }
+          ]
+        },
+        {
+          "$type": "app.gather.block.defs#list",
+          "items": {
+            "source": "s"
+          },
+          "template": [
+            {
+              "$type": "app.gather.block.defs#textInput",
+              "id": "q",
+              "label": "q"
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/blocks/1/template/0/id",
+      "reason": "duplicate"
+    }
+  },
+  {
+    "name": "duplicate id inside a list template",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#list",
+          "items": {
+            "source": "s"
+          },
+          "template": [
+            {
+              "$type": "app.gather.block.defs#textInput",
+              "id": "q",
+              "label": "q"
+            },
+            {
+              "$type": "app.gather.block.defs#textInput",
+              "id": "q",
+              "label": "q"
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/blocks/0/template/1/id",
+      "reason": "duplicate"
+    }
+  },
+  {
+    "name": "duplicate id on an unknown block type",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#textInput",
+          "id": "q",
+          "label": "q"
+        },
+        {
+          "$type": "app.gather.future#hologram",
+          "id": "q"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "duplicate select option values",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#select",
+          "id": "s",
+          "label": "x",
+          "options": [
+            {
+              "label": "A",
+              "value": "a"
+            },
+            {
+              "label": "B",
+              "value": "b"
+            },
+            {
+              "label": "A again",
+              "value": "a"
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/options/2/value",
+      "reason": "duplicate"
+    }
+  },
+  {
+    "name": "duplicate source names",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "tally",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        },
+        {
+          "name": "other",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        },
+        {
+          "name": "tally",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/sources/2/name",
+      "reason": "duplicate"
+    }
+  },
+  {
+    "name": "source named $item",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "$item",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/sources/0/name",
+      "reason": "reserved"
+    }
+  },
+  {
+    "name": "source named item",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "item",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "duplicate source and duplicate id",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#textInput",
+          "id": "q",
+          "label": "q"
+        },
+        {
+          "$type": "app.gather.block.defs#textInput",
+          "id": "q",
+          "label": "q"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "a",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        },
+        {
+          "name": "a",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/sources/1/name",
+      "reason": "duplicate"
+    }
+  },
+  {
+    "name": "binding to an undeclared source",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#stat",
+          "bind": {
+            "value": {
+              "source": "tallly",
+              "path": "/total"
+            }
+          }
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "tally",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/blocks/0/bind/value/source",
+      "reason": "unknown-source"
+    }
+  },
+  {
+    "name": "binding to a declared source",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#stat",
+          "bind": {
+            "value": {
+              "source": "tally",
+              "path": "/total"
+            }
+          }
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "tally",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "$item outside a list",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#stat",
+          "bind": {
+            "value": {
+              "source": "$item",
+              "path": "/total"
+            }
+          }
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/bind/value/source",
+      "reason": "unknown-source"
+    }
+  },
+  {
+    "name": "$item inside a list template",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#list",
+          "items": {
+            "source": "qs"
+          },
+          "template": [
+            {
+              "$type": "app.gather.block.defs#stat",
+              "bind": {
+                "value": {
+                  "source": "$item",
+                  "path": "/total"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "qs",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "$item in a sheet opened from a list item",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#list",
+          "items": {
+            "source": "qs"
+          },
+          "template": [
+            {
+              "$type": "app.gather.block.defs#button",
+              "id": "b",
+              "label": "x",
+              "opens": {
+                "blocks": [
+                  {
+                    "$type": "app.gather.block.defs#stat",
+                    "bind": {
+                      "value": {
+                        "source": "$item",
+                        "path": "/total"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "qs",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "list items from an undeclared source",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#list",
+          "items": {
+            "source": "nope"
+          },
+          "template": []
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/items/source",
+      "reason": "unknown-source"
+    }
+  },
+  {
+    "name": "undeclared source nested in a column",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#columns",
+          "columns": [
+            {
+              "blocks": [
+                {
+                  "$type": "app.gather.block.defs#stat",
+                  "bind": {
+                    "value": {
+                      "source": "nope",
+                      "path": "/total"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/columns/0/blocks/0/bind/value/source",
+      "reason": "unknown-source"
+    }
+  },
+  {
+    "name": "second binding undeclared",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#progress",
+          "bind": {
+            "value": {
+              "source": "a"
+            },
+            "max": {
+              "source": "b"
+            }
+          }
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "a",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/blocks/0/bind/max/source",
+      "reason": "unknown-source"
+    }
+  },
+  {
+    "name": "bind array on a section",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#section",
+          "blocks": [],
+          "bind": [
+            {
+              "source": "nope"
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/bind/0/source",
+      "reason": "unknown-source"
+    }
+  },
+  {
+    "name": "bind array on a text input",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#textInput",
+          "id": "t",
+          "label": "x",
+          "bind": [
+            {
+              "source": "nope"
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/bind/0/source",
+      "reason": "unknown-source"
+    }
+  },
+  {
+    "name": "bind string on a stack",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#stack",
+          "blocks": [],
+          "bind": "nope"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "bind object on a submit",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#submit",
+          "id": "s",
+          "label": "x",
+          "action": "a",
+          "bind": {
+            "label": {
+              "source": "nope"
+            }
+          }
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/bind/label/source",
+      "reason": "unknown-source"
+    }
+  },
+  {
+    "name": "bind with an integer-like key after a named one",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#button",
+          "id": "b",
+          "action": "go",
+          "bind": {
+            "2": {
+              "source": "third"
+            },
+            "10": {
+              "source": "other"
+            },
+            "label": {
+              "source": "nope"
+            },
+            "01": {
+              "source": "fourth"
+            }
+          }
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/bind/2/source",
+      "reason": "unknown-source"
+    }
+  },
+  {
+    "name": "button with an empty id",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#button",
+          "id": "",
+          "label": "Go",
+          "action": "go"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/id",
+      "reason": "min-length"
+    }
+  },
+  {
+    "name": "submit with an empty action",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#submit",
+          "id": "s",
+          "label": "Go",
+          "action": ""
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/action",
+      "reason": "min-length"
+    }
+  },
+  {
+    "name": "header with an empty id",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "id": "",
+          "text": "x"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/id",
+      "reason": "min-length"
+    }
+  },
+  {
+    "name": "binding path without a leading slash",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#stat",
+          "bind": {
+            "value": {
+              "source": "tally",
+              "path": "total"
+            }
+          }
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "tally",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/blocks/0/bind/value/path",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "binding path empty",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#stat",
+          "bind": {
+            "value": {
+              "source": "tally",
+              "path": ""
+            }
+          }
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "tally",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "list key without a leading slash",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#list",
+          "items": {
+            "source": "qs"
+          },
+          "key": "id",
+          "template": []
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "qs",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/blocks/0/key",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "list items path without a leading slash",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#list",
+          "items": {
+            "source": "qs",
+            "path": "items"
+          },
+          "key": "/id",
+          "template": []
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "qs",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/blocks/0/items/path",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "bind key needing pointer escapes",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#button",
+          "id": "b",
+          "action": "go",
+          "bind": {
+            "a/b~c": {
+              "source": "nope"
+            }
+          }
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/bind/a~1b~0c/source",
+      "reason": "unknown-source"
+    }
+  },
+  {
+    "name": "duplicate button group values",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#buttonGroup",
+          "id": "g",
+          "action": "vote",
+          "buttons": [
+            {
+              "label": "A",
+              "value": "same"
+            },
+            {
+              "label": "B",
+              "value": "same"
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/buttons/1/value",
+      "reason": "duplicate"
+    }
+  },
+  {
+    "name": "nesting exactly at the limit",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#stack",
+          "blocks": [
+            {
+              "$type": "app.gather.block.defs#stack",
+              "blocks": [
+                {
+                  "$type": "app.gather.block.defs#stack",
+                  "blocks": [
+                    {
+                      "$type": "app.gather.block.defs#stack",
+                      "blocks": [
+                        {
+                          "$type": "app.gather.block.defs#stack",
+                          "blocks": [
+                            {
+                              "$type": "app.gather.block.defs#stack",
+                              "blocks": [
+                                {
+                                  "$type": "app.gather.block.defs#stack",
+                                  "blocks": [
+                                    {
+                                      "$type": "app.gather.block.defs#stack",
+                                      "blocks": [
+                                        {
+                                          "$type": "app.gather.block.defs#stack",
+                                          "blocks": [
+                                            {
+                                              "$type": "app.gather.block.defs#header",
+                                              "text": "deep"
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "nesting one past the limit",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#stack",
+          "blocks": [
+            {
+              "$type": "app.gather.block.defs#stack",
+              "blocks": [
+                {
+                  "$type": "app.gather.block.defs#stack",
+                  "blocks": [
+                    {
+                      "$type": "app.gather.block.defs#stack",
+                      "blocks": [
+                        {
+                          "$type": "app.gather.block.defs#stack",
+                          "blocks": [
+                            {
+                              "$type": "app.gather.block.defs#stack",
+                              "blocks": [
+                                {
+                                  "$type": "app.gather.block.defs#stack",
+                                  "blocks": [
+                                    {
+                                      "$type": "app.gather.block.defs#stack",
+                                      "blocks": [
+                                        {
+                                          "$type": "app.gather.block.defs#stack",
+                                          "blocks": [
+                                            {
+                                              "$type": "app.gather.block.defs#stack",
+                                              "blocks": [
+                                                {
+                                                  "$type": "app.gather.block.defs#header",
+                                                  "text": "deep"
+                                                }
+                                              ]
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/blocks/0/blocks/0/blocks/0/blocks/0/blocks/0/blocks/0/blocks/0/blocks/0/blocks/0/blocks/0",
+      "reason": "max-depth"
+    }
+  },
+  {
+    "name": "deep nesting with an error inside",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#stack",
+          "blocks": [
+            {
+              "$type": "app.gather.block.defs#stack",
+              "blocks": [
+                {
+                  "$type": "app.gather.block.defs#stack",
+                  "blocks": [
+                    {
+                      "$type": "app.gather.block.defs#stack",
+                      "blocks": [
+                        {
+                          "$type": "app.gather.block.defs#stack",
+                          "blocks": [
+                            {
+                              "$type": "app.gather.block.defs#stack",
+                              "blocks": [
+                                {
+                                  "$type": "app.gather.block.defs#stack",
+                                  "blocks": [
+                                    {
+                                      "$type": "app.gather.block.defs#stack",
+                                      "blocks": [
+                                        {
+                                          "$type": "app.gather.block.defs#stack",
+                                          "blocks": [
+                                            {
+                                              "$type": "app.gather.block.defs#stack",
+                                              "blocks": [
+                                                {
+                                                  "$type": "app.gather.block.defs#stack",
+                                                  "blocks": [
+                                                    {
+                                                      "$type": "app.gather.block.defs#stack",
+                                                      "blocks": [
+                                                        {
+                                                          "$type": "app.gather.block.defs#stack",
+                                                          "blocks": [
+                                                            {
+                                                              "$type": "app.gather.block.defs#stack",
+                                                              "blocks": [
+                                                                {
+                                                                  "$type": "app.gather.block.defs#stack",
+                                                                  "blocks": [
+                                                                    {
+                                                                      "$type": "app.gather.block.defs#stack",
+                                                                      "blocks": [
+                                                                        {
+                                                                          "$type": "app.gather.block.defs#stack",
+                                                                          "blocks": [
+                                                                            {
+                                                                              "$type": "app.gather.block.defs#stack",
+                                                                              "blocks": [
+                                                                                {
+                                                                                  "$type": "app.gather.block.defs#stack",
+                                                                                  "blocks": [
+                                                                                    {
+                                                                                      "$type": "app.gather.block.defs#stack",
+                                                                                      "blocks": [
+                                                                                        {
+                                                                                          "$type": "app.gather.block.defs#stack",
+                                                                                          "blocks": [
+                                                                                            {
+                                                                                              "$type": "app.gather.block.defs#stack",
+                                                                                              "blocks": [
+                                                                                                {
+                                                                                                  "$type": "app.gather.block.defs#stack",
+                                                                                                  "blocks": [
+                                                                                                    {
+                                                                                                      "$type": "app.gather.block.defs#stack",
+                                                                                                      "blocks": [
+                                                                                                        {
+                                                                                                          "$type": "app.gather.block.defs#stack",
+                                                                                                          "blocks": [
+                                                                                                            {
+                                                                                                              "$type": "app.gather.block.defs#stack",
+                                                                                                              "blocks": [
+                                                                                                                {
+                                                                                                                  "$type": "app.gather.block.defs#stack",
+                                                                                                                  "blocks": [
+                                                                                                                    {
+                                                                                                                      "$type": "app.gather.block.defs#stack",
+                                                                                                                      "blocks": [
+                                                                                                                        {
+                                                                                                                          "$type": "app.gather.block.defs#stack",
+                                                                                                                          "blocks": [
+                                                                                                                            {
+                                                                                                                              "$type": "app.gather.block.defs#stack",
+                                                                                                                              "blocks": [
+                                                                                                                                {
+                                                                                                                                  "$type": "app.gather.block.defs#stack",
+                                                                                                                                  "blocks": [
+                                                                                                                                    {
+                                                                                                                                      "$type": "app.gather.block.defs#stack",
+                                                                                                                                      "blocks": [
+                                                                                                                                        {
+                                                                                                                                          "$type": "app.gather.block.defs#stack",
+                                                                                                                                          "blocks": [
+                                                                                                                                            {
+                                                                                                                                              "$type": "app.gather.block.defs#stack",
+                                                                                                                                              "blocks": [
+                                                                                                                                                {
+                                                                                                                                                  "$type": "app.gather.block.defs#stack",
+                                                                                                                                                  "blocks": [
+                                                                                                                                                    {
+                                                                                                                                                      "$type": "app.gather.block.defs#stack",
+                                                                                                                                                      "blocks": [
+                                                                                                                                                        {
+                                                                                                                                                          "$type": "app.gather.block.defs#stack",
+                                                                                                                                                          "blocks": [
+                                                                                                                                                            {
+                                                                                                                                                              "$type": "app.gather.block.defs#stack",
+                                                                                                                                                              "blocks": [
+                                                                                                                                                                {
+                                                                                                                                                                  "$type": "app.gather.block.defs#stack",
+                                                                                                                                                                  "blocks": [
+                                                                                                                                                                    {
+                                                                                                                                                                      "$type": "app.gather.block.defs#stack",
+                                                                                                                                                                      "blocks": [
+                                                                                                                                                                        {
+                                                                                                                                                                          "$type": "app.gather.block.defs#header",
+                                                                                                                                                                          "text": 42
+                                                                                                                                                                        }
+                                                                                                                                                                      ]
+                                                                                                                                                                    }
+                                                                                                                                                                  ]
+                                                                                                                                                                }
+                                                                                                                                                              ]
+                                                                                                                                                            }
+                                                                                                                                                          ]
+                                                                                                                                                        }
+                                                                                                                                                      ]
+                                                                                                                                                    }
+                                                                                                                                                  ]
+                                                                                                                                                }
+                                                                                                                                              ]
+                                                                                                                                            }
+                                                                                                                                          ]
+                                                                                                                                        }
+                                                                                                                                      ]
+                                                                                                                                    }
+                                                                                                                                  ]
+                                                                                                                                }
+                                                                                                                              ]
+                                                                                                                            }
+                                                                                                                          ]
+                                                                                                                        }
+                                                                                                                      ]
+                                                                                                                    }
+                                                                                                                  ]
+                                                                                                                }
+                                                                                                              ]
+                                                                                                            }
+                                                                                                          ]
+                                                                                                        }
+                                                                                                      ]
+                                                                                                    }
+                                                                                                  ]
+                                                                                                }
+                                                                                              ]
+                                                                                            }
+                                                                                          ]
+                                                                                        }
+                                                                                      ]
+                                                                                    }
+                                                                                  ]
+                                                                                }
+                                                                              ]
+                                                                            }
+                                                                          ]
+                                                                        }
+                                                                      ]
+                                                                    }
+                                                                  ]
+                                                                }
+                                                              ]
+                                                            }
+                                                          ]
+                                                        }
+                                                      ]
+                                                    }
+                                                  ]
+                                                }
+                                              ]
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/blocks/0/blocks/0/blocks/0/blocks/0/blocks/0/blocks/0/blocks/0/blocks/0/blocks/0/blocks/0",
+      "reason": "max-depth"
+    }
+  },
+  {
+    "name": "deep nesting through columns, templates and sheets",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#columns",
+          "columns": [
+            {
+              "blocks": [
+                {
+                  "$type": "app.gather.block.defs#button",
+                  "id": "b",
+                  "label": "x",
+                  "opens": {
+                    "blocks": [
+                      {
+                        "$type": "app.gather.block.defs#stack",
+                        "blocks": [
+                          {
+                            "$type": "app.gather.block.defs#stack",
+                            "blocks": [
+                              {
+                                "$type": "app.gather.block.defs#stack",
+                                "blocks": [
+                                  {
+                                    "$type": "app.gather.block.defs#stack",
+                                    "blocks": [
+                                      {
+                                        "$type": "app.gather.block.defs#stack",
+                                        "blocks": [
+                                          {
+                                            "$type": "app.gather.block.defs#stack",
+                                            "blocks": [
+                                              {
+                                                "$type": "app.gather.block.defs#stack",
+                                                "blocks": [
+                                                  {
+                                                    "$type": "app.gather.block.defs#stack",
+                                                    "blocks": [
+                                                      {
+                                                        "$type": "app.gather.block.defs#header",
+                                                        "text": "deep"
+                                                      }
+                                                    ]
+                                                  }
+                                                ]
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/columns/0/blocks/0/opens/blocks/0/blocks/0/blocks/0/blocks/0/blocks/0/blocks/0/blocks/0/blocks/0/blocks/0",
+      "reason": "max-depth"
+    }
+  },
+  {
+    "name": "pointer with a bad tilde escape",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#stat",
+          "bind": {
+            "value": {
+              "source": "tally",
+              "path": "/a~2"
+            }
+          }
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "tally",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/blocks/0/bind/value/path",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "pointer with good tilde escapes",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#stat",
+          "bind": {
+            "value": {
+              "source": "tally",
+              "path": "/a~0b~1c"
+            }
+          }
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "tally",
+          "ref": {
+            "$type": "app.gather.block.defs#profileSource",
+            "did": "did:plc:a"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "facet with eight features",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#richText",
+          "text": "hello",
+          "facets": [
+            {
+              "index": {
+                "byteStart": 0,
+                "byteEnd": 5
+              },
+              "features": [
+                {
+                  "$type": "app.gather.block.defs#bold"
+                },
+                {
+                  "$type": "app.gather.block.defs#bold"
+                },
+                {
+                  "$type": "app.gather.block.defs#bold"
+                },
+                {
+                  "$type": "app.gather.block.defs#bold"
+                },
+                {
+                  "$type": "app.gather.block.defs#bold"
+                },
+                {
+                  "$type": "app.gather.block.defs#bold"
+                },
+                {
+                  "$type": "app.gather.block.defs#bold"
+                },
+                {
+                  "$type": "app.gather.block.defs#bold"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "facet with nine features",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#richText",
+          "text": "hello",
+          "facets": [
+            {
+              "index": {
+                "byteStart": 0,
+                "byteEnd": 5
+              },
+              "features": [
+                {
+                  "$type": "app.gather.block.defs#bold"
+                },
+                {
+                  "$type": "app.gather.block.defs#bold"
+                },
+                {
+                  "$type": "app.gather.block.defs#bold"
+                },
+                {
+                  "$type": "app.gather.block.defs#bold"
+                },
+                {
+                  "$type": "app.gather.block.defs#bold"
+                },
+                {
+                  "$type": "app.gather.block.defs#bold"
+                },
+                {
+                  "$type": "app.gather.block.defs#bold"
+                },
+                {
+                  "$type": "app.gather.block.defs#bold"
+                },
+                {
+                  "$type": "app.gather.block.defs#bold"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/facets/0/features",
+      "reason": "max-length"
+    }
+  },
+  {
+    "name": "base58 cid with a character above U+00FF",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#recordSource",
+            "record": {
+              "space": "ats://x",
+              "did": "did:plc:organizer",
+              "collection": "app.gather.demo.item",
+              "rkey": "r1",
+              "cid": "QmYwAPJzv5CZsnA625s3中f2nemtYgPpHdWEz79ojWnPbdG"
+            }
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/sources/0/ref/record/cid",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "cid field with an emoji in an unknown block",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.future#hologram",
+          "cid": "bafy😀"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "non-ascii cid after a lexicon error",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": 42
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "s",
+          "ref": {
+            "$type": "app.gather.block.defs#recordSource",
+            "record": {
+              "space": "x",
+              "did": "did:plc:a",
+              "collection": "a.b.c",
+              "rkey": "r",
+              "cid": "Qmé"
+            }
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/sources/0/ref/record/cid",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "non-ascii cid key in free-form view params",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "sources": [
+        {
+          "name": "v",
+          "ref": {
+            "$type": "app.gather.block.defs#viewSource",
+            "view": "a.b.c",
+            "params": {
+              "cid": "Zaal B—één"
+            }
+          }
+        }
+      ]
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "non-ascii cid in a custom block module",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#custom",
+          "module": {
+            "wasm": {
+              "cid": "bafé",
+              "did": "did:plc:a"
+            }
+          }
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/module/wasm/cid",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "non-ascii cid in a middleware script",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#header",
+          "text": "Welkom"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z",
+      "middleware": [
+        {
+          "wasm": {
+            "cid": "bafyreidfayvfuwqa7qlnopdjiqrxzs6blmoeu4rujcjtnci5beludirz2a",
+            "did": "did:plc:a"
+          },
+          "script": {
+            "cid": "Qm中",
+            "did": "did:plc:a"
+          }
+        }
+      ]
+    },
+    "expect": {
+      "path": "/middleware/0/script/cid",
+      "reason": "format"
+    }
+  },
+  {
+    "name": "button with neither action nor sheet",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#button",
+          "id": "go",
+          "label": "Go"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/action",
+      "reason": "required"
+    }
+  },
+  {
+    "name": "button with both action and sheet",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#button",
+          "id": "go",
+          "label": "Go",
+          "action": "go",
+          "opens": {
+            "blocks": []
+          }
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/opens",
+      "reason": "exclusive"
+    }
+  },
+  {
+    "name": "button with an empty action",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#button",
+          "id": "go",
+          "label": "Go",
+          "action": ""
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/action",
+      "reason": "min-length"
+    }
+  },
+  {
+    "name": "button and input sharing an id",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#button",
+          "id": "q",
+          "label": "x",
+          "action": "x"
+        },
+        {
+          "$type": "app.gather.block.defs#textInput",
+          "id": "q",
+          "label": "q"
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/1/id",
+      "reason": "duplicate"
+    }
+  }
+]

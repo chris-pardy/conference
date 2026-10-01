@@ -1,0 +1,90 @@
+{
+  "title": "Data display: progress, stats and badges in every tone",
+  "card": {
+    "$type": "app.gather.block.card",
+    "blocks": [
+      {
+        "$type": "app.gather.block.defs#header",
+        "text": "Snack poll results"
+      },
+      {
+        "$type": "app.gather.block.defs#progress",
+        "label": "Bitterballen",
+        "bind": {
+          "value": {
+            "source": "poll",
+            "path": "/bitterballen"
+          }
+        }
+      },
+      {
+        "$type": "app.gather.block.defs#progress",
+        "label": "Stroopwafel",
+        "bind": {
+          "value": {
+            "source": "poll",
+            "path": "/stroopwafel"
+          }
+        }
+      },
+      {
+        "$type": "app.gather.block.defs#progress",
+        "label": "Kaas",
+        "bind": {
+          "value": {
+            "source": "poll",
+            "path": "/kaas"
+          }
+        }
+      },
+      {
+        "$type": "app.gather.block.defs#section",
+        "title": "Status",
+        "blocks": [
+          {
+            "$type": "app.gather.block.defs#badge",
+            "text": "Open",
+            "tone": "success"
+          },
+          {
+            "$type": "app.gather.block.defs#badge",
+            "text": "Tip: card only",
+            "tone": "info"
+          },
+          {
+            "$type": "app.gather.block.defs#badge",
+            "text": "Druk bij de koffie",
+            "tone": "warning"
+          },
+          {
+            "$type": "app.gather.block.defs#badge",
+            "text": "Lift out of order",
+            "tone": "danger"
+          },
+          {
+            "$type": "app.gather.block.defs#badge",
+            "text": "Day 2"
+          }
+        ]
+      }
+    ],
+    "timeZone": "Europe/Amsterdam",
+    "createdAt": "2027-04-30T07:00:00.000Z",
+    "sources": [
+      {
+        "name": "poll",
+        "ref": {
+          "$type": "app.gather.block.defs#viewSource",
+          "view": "app.gather.block.view.actionTally"
+        }
+      }
+    ]
+  },
+  "sources": {
+    "poll": {
+      "bitterballen": 62,
+      "stroopwafel": 27,
+      "kaas": 11
+    }
+  }
+}

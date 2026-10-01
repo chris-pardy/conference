@@ -1,0 +1,84 @@
+{
+  "lexicon": 1,
+  "id": "app.gather.block.card",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "A card: a tree of blocks bound to named sources. Written into a space.",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["blocks", "createdAt"],
+        "properties": {
+          "blocks": {
+            "type": "array",
+            "description": "The blocks, in order.",
+            "items": {
+              "type": "union",
+              "refs": [
+                "app.gather.block.defs#section",
+                "app.gather.block.defs#header",
+                "app.gather.block.defs#divider",
+                "app.gather.block.defs#context",
+                "app.gather.block.defs#richText",
+                "app.gather.block.defs#image",
+                "app.gather.block.defs#stack",
+                "app.gather.block.defs#columns",
+                "app.gather.block.defs#button",
+                "app.gather.block.defs#buttonGroup",
+                "app.gather.block.defs#textInput",
+                "app.gather.block.defs#select",
+                "app.gather.block.defs#submit",
+                "app.gather.block.defs#list",
+                "app.gather.block.defs#progress",
+                "app.gather.block.defs#stat",
+                "app.gather.block.defs#badge",
+                "app.gather.block.defs#person",
+                "app.gather.block.defs#sessionRef",
+                "app.gather.block.defs#room",
+                "app.gather.block.defs#time",
+                "app.gather.block.defs#copyable",
+                "app.gather.block.defs#qr",
+                "app.gather.block.defs#custom",
+                "app.gather.block.defs#canvas"
+              ]
+            },
+            "maxLength": 50,
+            "minLength": 1
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "ref",
+              "ref": "app.gather.block.defs#source"
+            },
+            "maxLength": 20
+          },
+          "middleware": {
+            "type": "array",
+            "description": "Reserved for block-actions.",
+            "items": {
+              "type": "ref",
+              "ref": "app.gather.block.defs#moduleRef"
+            },
+            "maxLength": 10
+          },
+          "timeZone": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "IANA zone for the card's times, e.g. Europe/Amsterdam. Defaults to the viewer's."
+          },
+          "fallbackText": {
+            "type": "string",
+            "maxLength": 3000,
+            "description": "Plain text for notifications and search."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime"
+          }
+        }
+      }
+    }
+  }
+}

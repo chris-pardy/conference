@@ -1,0 +1,97 @@
+{
+  "title": "Placeholders: loading, and unavailable (never why)",
+  "card": {
+    "$type": "app.gather.block.card",
+    "blocks": [
+      {
+        "$type": "app.gather.block.defs#header",
+        "text": "Wachtrij bij de garderobe"
+      },
+      {
+        "$type": "app.gather.block.defs#stat",
+        "label": "people waiting",
+        "bind": {
+          "value": {
+            "source": "queue",
+            "path": "/count"
+          }
+        }
+      },
+      {
+        "$type": "app.gather.block.defs#stat",
+        "label": "minutes to wait",
+        "bind": {
+          "value": {
+            "source": "secret",
+            "path": "/minutes"
+          }
+        }
+      },
+      {
+        "$type": "app.gather.block.defs#progress",
+        "label": "Hangers left",
+        "bind": {
+          "value": {
+            "source": "hangers",
+            "path": "/percent"
+          }
+        }
+      },
+      {
+        "$type": "app.gather.block.defs#context",
+        "text": "The first is still loading; the others are unavailable."
+      }
+    ],
+    "timeZone": "Europe/Amsterdam",
+    "createdAt": "2027-04-30T07:00:00.000Z",
+    "sources": [
+      {
+        "name": "queue",
+        "ref": {
+          "$type": "app.gather.block.defs#recordSource",
+          "record": {
+            "space": "ats://did:plc:organizer/app.gather.conference/amsterdam-2027",
+            "did": "did:plc:organizer",
+            "collection": "app.gather.demo.item",
+            "rkey": "queue"
+          }
+        }
+      },
+      {
+        "name": "secret",
+        "ref": {
+          "$type": "app.gather.block.defs#recordSource",
+          "record": {
+            "space": "ats://did:plc:organizer/app.gather.conference/amsterdam-2027",
+            "did": "did:plc:organizer",
+            "collection": "app.gather.demo.item",
+            "rkey": "secret"
+          }
+        }
+      },
+      {
+        "name": "hangers",
+        "ref": {
+          "$type": "app.gather.block.defs#recordSource",
+          "record": {
+            "space": "ats://did:plc:organizer/app.gather.conference/amsterdam-2027",
+            "did": "did:plc:organizer",
+            "collection": "app.gather.demo.item",
+            "rkey": "hangers"
+          }
+        }
+      }
+    ]
+  },
+  "sources": {
+    "queue": {
+      "$fixture": "loading"
+    },
+    "secret": {
+      "$fixture": "forbidden"
+    },
+    "hangers": {
+      "total": 400
+    }
+  }
+}

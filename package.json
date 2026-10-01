@@ -9,7 +9,7 @@
   "scripts": {
     "check": "pnpm run check:lint && pnpm run check:build && pnpm run check:test && pnpm run check:frozen",
     "check:lint": "cargo fmt --all --check && cargo clippy --workspace --all-targets --locked -- -D warnings && biome ci .",
-    "check:build": "tsc -p tsconfig.json && pnpm --filter @conference/web build && cargo build --workspace --locked",
+    "check:build": "node scripts/lexicons.ts check && tsc -p tsconfig.json && pnpm --filter @conference/web build && cargo build --workspace --locked",
     "check:test": "node scripts/with-vivarium.ts pnpm run test:all",
     "check:frozen": "bash scripts/frozen-tests.sh",
     "test:all": "pnpm run test:rust && pnpm run test:unit && pnpm run test:integration && pnpm run test:tooling && pnpm run test:e2e",
@@ -18,17 +18,23 @@
     "test:integration": "cargo build -p conference-server --locked && node scripts/with-vivarium.ts vitest run --project integration",
     "test:tooling": "node scripts/with-vivarium.ts vitest run --project tooling",
     "test:e2e": "cargo build -p conference-server --locked && pnpm --filter @conference/web build && node scripts/with-vivarium.ts playwright test",
-    "lint:fix": "cargo fmt --all && biome check --write ."
+    "lint:fix": "cargo fmt --all && biome check --write .",
+    "lex:gen": "node scripts/lexicons.ts gen"
   },
   "devDependencies": {
+    "@atproto/lex-cli": "0.10.14",
     "@biomejs/biome": "2.5.15",
     "@playwright/test": "1.63.0",
     "@testing-library/react": "16.3.3",
+    "@testing-library/user-event": "14.6.7",
     "@types/node": "26.6.3",
+    "@types/pngjs": "6.0.5",
     "@vitejs/plugin-react": "6.1.1",
     "@vivarium-dev/cli": "0.0.1",
     "@vivarium-dev/client": "0.0.1",
     "jsdom": "30.1.1",
+    "jsqr": "1.4.0",
+    "pngjs": "7.0.0",
     "typescript": "7.0.2",
     "vite": "8.3.1",
     "vitest": "5.0.3",

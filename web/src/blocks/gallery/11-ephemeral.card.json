@@ -1,0 +1,24 @@
+{
+  "title": "Ephemeral surface: only you see it, and you can dismiss it",
+  "surface": "ephemeral",
+  "card": {
+    "$type": "app.gather.block.card",
+    "blocks": [
+      {
+        "$type": "app.gather.block.defs#header",
+        "text": "Je vraag is ontvangen"
+      },
+      {
+        "$type": "app.gather.block.defs#richText",
+        "text": "We read questions out after the keynote. You can ask another any time."
+      },
+      {
+        "$type": "app.gather.block.defs#badge",
+        "text": "Received",
+        "tone": "success"
+      }
+    ],
+    "timeZone": "Europe/Amsterdam",
+    "createdAt": "2027-04-30T07:00:00.000Z"
+  }
+}

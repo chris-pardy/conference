@@ -1,0 +1,74 @@
+{
+  "title": "Buttons, a button group, a person and a countdown",
+  "card": {
+    "$type": "app.gather.block.card",
+    "blocks": [
+      {
+        "$type": "app.gather.block.defs#header",
+        "text": "Borrel op vrijdag"
+      },
+      {
+        "$type": "app.gather.block.defs#person",
+        "did": "did:plc:organizer"
+      },
+      {
+        "$type": "app.gather.block.defs#time",
+        "mode": "countdown",
+        "label": "Bitterballen after the talks",
+        "at": "2027-04-30T19:00:00+02:00",
+        "end": "2027-04-30T21:00:00+02:00"
+      },
+      {
+        "$type": "app.gather.block.defs#room",
+        "name": "Café de Rozengracht",
+        "detail": "Rozengracht 42, a short walk along the canal"
+      },
+      {
+        "$type": "app.gather.block.defs#button",
+        "id": "rsvp",
+        "label": "Ik kom!",
+        "action": "going",
+        "value": "yes",
+        "variant": "primary"
+      },
+      {
+        "$type": "app.gather.block.defs#button",
+        "id": "cancel",
+        "label": "Afmelden",
+        "action": "not-going",
+        "value": "no",
+        "variant": "danger"
+      },
+      {
+        "$type": "app.gather.block.defs#buttonGroup",
+        "id": "snack",
+        "label": "Favourite snack",
+        "action": "vote",
+        "buttons": [
+          {
+            "label": "Stroopwafel",
+            "value": "stroopwafel"
+          },
+          {
+            "label": "Bitterballen",
+            "value": "bitterballen"
+          },
+          {
+            "label": "Kaas",
+            "value": "kaas"
+          }
+        ]
+      }
+    ],
+    "timeZone": "Europe/Amsterdam",
+    "createdAt": "2027-04-30T07:00:00.000Z",
+    "sources": []
+  },
+  "profiles": {
+    "did:plc:organizer": {
+      "did": "did:plc:organizer",
+      "handle": "atmosphereconf.org",
+      "displayName": "AtmosphereConf"
+    }
+  }
+}
