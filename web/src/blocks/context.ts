@@ -1,4 +1,4 @@
-import { createContext, useContext } from 'react'
+import { createContext, type RefObject, useContext } from 'react'
 import type { CardRef } from './ActionContext'
 import type { Surface } from './BlockCard'
 import type { FormStore } from './forms'
@@ -13,6 +13,8 @@ export interface CardScope {
   timeZone?: string
   /** On a compact card, the one button it keeps, wherever that button is in the tree. */
   compactPrimary?: unknown
+  /** The card's root element, focusable as a last resort (e.g. when a sheet's opener is gone). */
+  root?: RefObject<HTMLElement | null>
 }
 
 export const CardContext = createContext<CardScope | null>(null)

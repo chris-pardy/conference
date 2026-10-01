@@ -1773,3 +1773,21 @@ minor, 3 nits. Everything was fixed.
    on both sides.
 5. **[nit] The JSON pointer rule didn't check `~` escapes.** **Fixed:** `~`
    must be `~0` or `~1`, on both sides, with parity cases.
+
+### Round 16
+
+Reviewed `29b5b84`. All gates passed. Not clean: 0 blocking, 1 major, 2
+nits. Everything was fixed, each with a regression test.
+
+1. **[major] A facet with thousands of features nested the DOM as deep, and
+   crashed the browser tab** (10,000 bolds), past round 15's block depth
+   cap. **Fixed:** a range applies each kind of feature at most once, so
+   nesting is bounded whatever a card lists. The lexicon also caps
+   `facet.features` at 8 (types regenerated), so both validators reject
+   such cards (`max-length`). The parity fixtures now have 168 cases, and
+   all match.
+2. **[nit] An untouched multi select sent `[]`, unlike other empty inputs.**
+   **Fixed:** it's left out of the submit value.
+3. **[nit] If an edit removed a sheet's opener, closing the sheet left
+   focus on `<body>`.** **Fixed:** the card root (focusable with
+   `tabIndex=-1`) takes focus instead.

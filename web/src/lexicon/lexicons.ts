@@ -1340,6 +1340,7 @@ export const schemaDict = {
                 'lex:app.gather.block.defs#italic',
               ],
             },
+            maxLength: 8,
           },
         },
       },

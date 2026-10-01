@@ -94,13 +94,15 @@ export function RichText({ text, facets }: { text: string; facets?: unknown }): 
     if (range.start < at) continue
     if (range.start > at) out.push(decode(at, range.start))
     let node: ReactNode = decode(range.start, range.end)
-    // A link can't hold another link, so a range takes only its first mention or link.
-    let linked = false
+    // Each kind of feature applies once (bold twice is still bold), and a
+    // link can't hold another link, so a range takes only its first mention
+    // or link. That bounds the nesting whatever a card lists.
+    const applied = new Set<unknown>()
     range.features.forEach((feature, i) => {
       const $type = (feature as { $type?: unknown })?.$type
-      const isLink = $type === `${DEFS}#mention` || $type === `${DEFS}#link`
-      if (isLink && linked) return
-      linked ||= isLink
+      const kind = $type === `${DEFS}#mention` ? `${DEFS}#link` : $type
+      if (applied.has(kind)) return
+      applied.add(kind)
       node = applyFeature(feature, node, i, profileHref)
     })
     out.push(<span key={range.start}>{node}</span>)

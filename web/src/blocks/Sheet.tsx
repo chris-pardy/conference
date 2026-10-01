@@ -69,6 +69,8 @@ export function Sheet({
   const returnTo = useRef(returnFocus)
   returnTo.current = returnFocus
   const card = useCard()
+  const cardRoot = useRef(card.root)
+  cardRoot.current = card.root
   const scope = useMemo(() => ({ ...card, surface: 'sheet' as const, compactPrimary: undefined }), [card])
   const [form] = useState(() => new FormStore())
   const titleId = useId()
@@ -104,7 +106,9 @@ export function Sheet({
       unlockScroll()
       for (const el of behind) el.removeAttribute('inert')
       // Only now: browsers won't focus an element that's still inert.
-      returnTo.current?.focus()
+      // If an edit removed the opener, the card itself takes focus instead.
+      const target = returnTo.current?.isConnected ? returnTo.current : cardRoot.current?.current
+      target?.focus()
     }
   }, [])
 

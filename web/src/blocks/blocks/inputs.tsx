@@ -208,7 +208,8 @@ export function Select({ block }: Props) {
     {
       id,
       // Selections are sent in the options' order.
-      value: () => (multiple ? current : current[0]),
+      // Nothing chosen is left out, as for an empty text input.
+      value: () => (current.length === 0 ? undefined : multiple ? current : current[0]),
       validate: () => {
         const problem =
           required && current.length === 0

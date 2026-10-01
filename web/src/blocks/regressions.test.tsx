@@ -1239,3 +1239,47 @@ test('TC-32: Escape in a sheet closes it without reaching the host', async () =>
     document.removeEventListener('keydown', onDocument)
   }
 })
+
+test('TC-5: a facet with thousands of features nests only once per kind', () => {
+  const features = [
+    ...Array.from({ length: 10_000 }, () => ({ $type: 'app.gather.block.defs#bold' })),
+    { $type: 'app.gather.block.defs#italic' },
+    { $type: 'app.gather.block.defs#link', uri: 'https://example.com/a' },
+    { $type: 'app.gather.block.defs#mention', did: 'did:plc:alice' },
+  ]
+  const { container } = renderCard(
+    card([block('richText', { text: 'hello', facets: [{ index: { byteStart: 0, byteEnd: 5 }, features }] })]),
+  )
+  expect(container.querySelectorAll('strong')).toHaveLength(1)
+  expect(container.querySelectorAll('em')).toHaveLength(1)
+  expect(container.querySelectorAll('a')).toHaveLength(1)
+  expect(container.querySelector('a')?.getAttribute('href')).toBe('https://example.com/a')
+})
+
+test('TC-24: an untouched optional multi select is left out, like other empty inputs', async () => {
+  const user = userEvent.setup()
+  const { onAction } = renderCard(
+    card([
+      block('textInput', { id: 'note', label: 'Note' }),
+      block('select', { id: 'one', label: 'One', options: [{ label: 'A', value: 'a' }] }),
+      block('select', { id: 'many', label: 'Many', multiple: true, options: [{ label: 'B', value: 'b' }] }),
+      block('submit', { id: 's', label: 'Send', action: 'send' }),
+    ]),
+  )
+  await user.click(screen.getByRole('button', { name: 'Send' }))
+  expect(onAction).toHaveBeenCalledWith({ card: CARD_REF, blockId: 's', actionId: 'send', value: {} })
+})
+
+test('TC-32: when an edit removes the button whose sheet is open, focus goes to the card', async () => {
+  const user = userEvent.setup()
+  const opener = block('button', {
+    id: 'b',
+    label: 'Details',
+    opens: { title: 'Details', blocks: [block('context', { text: 'Inside' })] },
+  })
+  const { edit, container } = editable([block('header', { text: 'Wifi' }), opener])
+  await user.click(screen.getByRole('button', { name: 'Details' }))
+  edit([block('header', { text: 'Wifi' })])
+  expect(screen.queryByRole('dialog')).toBeNull()
+  expect(document.activeElement).toBe(container.querySelector('[data-card]'))
+})

@@ -86,6 +86,7 @@ function CardBody({ cardRef, card, surface, onDismiss }: BlockCardProps) {
   const resolver = useContext(SourceResolverContext)
   const [dismissed, setDismissed] = useState(false)
   const [form] = useState(() => new FormStore())
+  const root = useRef<HTMLElement>(null)
 
   // Keyed on the sources' content, so a host that re-fetches or re-parses the
   // same card keeps its store, and bound blocks don't drop back to loading.
@@ -121,6 +122,7 @@ function CardBody({ cardRef, card, surface, onDismiss }: BlockCardProps) {
       surface,
       timeZone: typeof card.timeZone === 'string' ? card.timeZone : undefined,
       compactPrimary: compact?.primary,
+      root,
     }),
     [uri, cid, store, surface, card.timeZone, compact],
   )
@@ -131,7 +133,13 @@ function CardBody({ cardRef, card, surface, onDismiss }: BlockCardProps) {
   return (
     <CardContext value={scope}>
       <FormContext value={form}>
-        <article className={`g-card g-card--${surface}`} data-card={uri} data-surface={surface}>
+        <article
+          ref={root}
+          tabIndex={-1}
+          className={`g-card g-card--${surface}`}
+          data-card={uri}
+          data-surface={surface}
+        >
           {surface === 'ephemeral' && (
             <div className="g-card__ephemeral">
               <span className="g-card__only-you">Only you can see this</span>

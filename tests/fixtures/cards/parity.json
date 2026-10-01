@@ -4032,6 +4032,110 @@
     }
   },
   {
+    "name": "facet with eight features",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#richText",
+          "text": "hello",
+          "facets": [
+            {
+              "index": {
+                "byteStart": 0,
+                "byteEnd": 5
+              },
+              "features": [
+                {
+                  "$type": "app.gather.block.defs#bold"
+                },
+                {
+                  "$type": "app.gather.block.defs#bold"
+                },
+                {
+                  "$type": "app.gather.block.defs#bold"
+                },
+                {
+                  "$type": "app.gather.block.defs#bold"
+                },
+                {
+                  "$type": "app.gather.block.defs#bold"
+                },
+                {
+                  "$type": "app.gather.block.defs#bold"
+                },
+                {
+                  "$type": "app.gather.block.defs#bold"
+                },
+                {
+                  "$type": "app.gather.block.defs#bold"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "ok": true
+    }
+  },
+  {
+    "name": "facet with nine features",
+    "card": {
+      "$type": "app.gather.block.card",
+      "blocks": [
+        {
+          "$type": "app.gather.block.defs#richText",
+          "text": "hello",
+          "facets": [
+            {
+              "index": {
+                "byteStart": 0,
+                "byteEnd": 5
+              },
+              "features": [
+                {
+                  "$type": "app.gather.block.defs#bold"
+                },
+                {
+                  "$type": "app.gather.block.defs#bold"
+                },
+                {
+                  "$type": "app.gather.block.defs#bold"
+                },
+                {
+                  "$type": "app.gather.block.defs#bold"
+                },
+                {
+                  "$type": "app.gather.block.defs#bold"
+                },
+                {
+                  "$type": "app.gather.block.defs#bold"
+                },
+                {
+                  "$type": "app.gather.block.defs#bold"
+                },
+                {
+                  "$type": "app.gather.block.defs#bold"
+                },
+                {
+                  "$type": "app.gather.block.defs#bold"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "createdAt": "2027-04-30T07:00:00.000Z"
+    },
+    "expect": {
+      "path": "/blocks/0/facets/0/features",
+      "reason": "max-length"
+    }
+  },
+  {
     "name": "button with neither action nor sheet",
     "card": {
       "$type": "app.gather.block.card",
