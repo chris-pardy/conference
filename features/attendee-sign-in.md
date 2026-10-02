@@ -1,5 +1,5 @@
 ---
-status: design-review
+status: ready
 impact: cross-cutting
 depends-on: [ci-pipeline]
 branch:
@@ -131,16 +131,13 @@ feature's to ask for.
 
 ## Open questions
 
-- Session storage in the appview (SQLite, or something else) is the first
-  database in the project. Architecture analysis should decide this for
-  everyone.
-- How the test helper signs in. Vivarium's consent page turned out to be a
-  plain HTML form (pick an account, or type a handle and it's created on
-  the fly), with no JavaScript, so the helper can run the real flow over
-  HTTP.
-- How a later feature asks for more scopes. Settled in design review
-  round 3: it adds them to the sign-in scope list, and there's no step-up
-  for now.
+None. All were resolved in design review:
+
+- **Session storage:** SQLite or Postgres, through sqlx `Any` (rounds 1–2).
+- **How the test helper signs in:** it runs the real flow against
+  vivarium's no-JavaScript consent form (round 1).
+- **How later features get more scopes:** they add them to the sign-in
+  scope list, and there's no step-up for now (round 3).
 
 ## Architecture analysis
 
@@ -706,5 +703,241 @@ For later features:
   impact on `space-sync` (organizer scopes) and `block-actions`.
 
 ## Test cases
+
+Ana and Bram are attendees with vivarium accounts. Mallory is an attacker
+with an account of her own. Unless a case says otherwise, the sign-in
+scopes are the default (`atproto` only).
+
+### Signing in
+
+### TC-1: Ana signs in with her handle
+
+- **Given** Ana has an atproto account with a profile (display name and
+  avatar) and isn't signed in
+- **When** she taps "Sign in", enters her handle, and picks her account on
+  her PDS's consent screen
+- **Then** she's back in the app, signed in
+- **And** the header shows her avatar and handle
+
+### TC-2: Signing in returns Ana to the page she started from
+
+- **Given** Ana is on the block gallery page and isn't signed in
+- **When** she signs in from there
+- **Then** she lands back on the block gallery page, signed in
+
+### TC-3: An account without a profile still signs in
+
+- **Given** Bram has an atproto account with no profile record
+- **When** he signs in
+- **Then** the header shows his handle and an initial in place of an avatar
+
+### TC-4: An unknown handle is reported, not sent anywhere
+
+- **Given** Ana isn't signed in
+- **When** she enters a handle that doesn't exist
+- **Then** she stays on the sign-in page with a message that the handle
+  couldn't be found
+- **And** she isn't signed in
+
+### TC-5: Declining consent leaves Ana signed out
+
+- **Given** Ana has started signing in
+- **When** her PDS sends her back with consent declined
+- **Then** she sees the sign-in page with a message that sign-in was
+  cancelled
+- **And** she isn't signed in
+
+### TC-6: Picking a different account at the PDS is refused
+
+- **Given** Ana entered her own handle to sign in
+- **When** she picks Bram's account on the consent screen instead
+- **Then** sign-in fails with a message that the account didn't match
+- **And** nobody is signed in
+
+### TC-7: Who's signed in, as the app sees it
+
+- **Given** Ana is signed in
+- **When** the app asks who's signed in
+- **Then** it gets her DID, her handle, her display name and avatar, the
+  scopes she granted (just `atproto`), and a CSRF token
+- **And** when nobody is signed in, or the cookie is unknown or malformed,
+  the answer is "sign-in required", never "session expired"
+
+### Signing up
+
+### TC-8: A newcomer creates an account and comes back signed in
+
+- **Given** Bram has no atproto account
+- **When** he taps "Create account" and creates the account on the sign-up
+  PDS
+- **Then** he's back in the app, signed in with his new handle
+
+### TC-9: Creating an account asks the PDS for its sign-up screen
+
+- **Given** the appview's sign-up PDS is configured
+- **When** someone taps "Create account"
+- **Then** the authorization request goes to that PDS's authorization
+  server, asks it to create an account, and names no existing account
+
+### Staying signed in
+
+### TC-10: Ana stays signed in when she closes and reopens the app
+
+- **Given** Ana is signed in
+- **When** she closes the app and opens it again later
+- **Then** she's still signed in
+
+### TC-11: Ana stays signed in across a backend restart
+
+- **Given** Ana is signed in
+- **When** the backend restarts
+- **Then** she's still signed in
+- **And** the backend can still renew her tokens
+
+### TC-12: Tokens are renewed in the background
+
+- **Given** Ana is signed in, and her access token will expire before the
+  next renewal run
+- **When** a renewal run happens and Ana does nothing
+- **Then** her session has a new access token, and she's still signed in
+
+### TC-13: Two renewals at once don't sign Ana out
+
+- **Given** two backend instances share one database and Ana is signed in
+- **When** both try to renew her tokens over several renewal runs
+- **Then** she's still signed in, and her tokens keep being renewed
+
+### TC-14: An unreachable authorization server doesn't sign anyone out
+
+- **Given** Ana is signed in
+- **When** her PDS's authorization server can't be reached during a
+  renewal run
+- **Then** she's still signed in
+
+### Signing out and expiry
+
+### TC-15: Ana signs out
+
+- **Given** Ana is signed in
+- **When** she signs out from the account menu
+- **Then** the header shows "Sign in", with no "session expired" banner
+- **And** her old cookie no longer signs anyone in
+- **And** her tokens are revoked at her PDS's authorization server
+
+### TC-16: An idle session expires, and Ana gets back to her page
+
+- **Given** Ana signed in and then went idle past the idle timeout
+- **When** she opens the block gallery page
+- **Then** she sees a banner that her session expired
+- **And** when she taps its sign-in button, she signs in as herself
+  without retyping her handle, and lands back on the block gallery page
+
+### TC-17: A revoked account is noticed without Ana doing anything
+
+- **Given** Ana is signed in
+- **When** her account is deleted at her PDS, and a renewal run happens
+- **Then** her session has ended before she does anything
+- **And** the next time the app asks, it hears "session expired"
+
+### TC-18: Growing the sign-in scopes asks people to sign in again
+
+- **Given** Ana signed in when the sign-in scopes were `atproto` only
+- **When** the backend restarts asking for `atproto transition:generic`
+- **Then** the app hears "session expired" for Ana's session
+- **And** when she signs in again, her session has both scopes
+
+### Security
+
+### TC-19: A sign-in started in someone else's browser can't be finished in Ana's
+
+- **Given** Mallory starts signing in with her own account and approves it
+- **When** Ana's browser opens Mallory's callback link
+- **Then** sign-in fails with an error
+- **And** Ana isn't signed in as Mallory
+
+### TC-20: Signing in replaces whatever session the browser had
+
+- **Given** Ana's browser carries a session cookie from before
+- **When** she signs in
+- **Then** her new session cookie is different from the old one
+- **And** the old cookie no longer signs anyone in
+
+### TC-21: A callback link only works once
+
+- **Given** Ana has just signed in through a callback
+- **When** the same callback link is opened again
+- **Then** it fails with an error and creates no session
+
+### TC-22: Sign-in never redirects off-site
+
+- **Given** a sign-in link whose return address is another site
+  (`https://evil.example`, `//evil.example`, `/\evil.example`, or an
+  encoded form of one of them)
+- **When** Ana signs in with it
+- **Then** she lands on the app's home page
+
+### TC-23: Changes without the CSRF token are refused
+
+- **Given** Ana is signed in
+- **When** a request to sign her out arrives with her cookie but without
+  her CSRF token, or with the wrong one
+- **Then** it's refused
+- **And** she's still signed in
+
+### TC-24: Private addresses are refused outside dev
+
+- **Given** the backend runs with the private-network guard on
+- **When** Ana tries to sign in with an account whose PDS is on a loopback
+  address
+- **Then** sign-in fails with an error, and nothing is fetched from that
+  address
+
+### The appview as a client
+
+### TC-25: The appview publishes its client metadata and keys
+
+- **Given** the backend is running
+- **When** anyone fetches its client metadata and its key set
+- **Then** the metadata names the client ID, the callback address, the
+  sign-in scopes and `private_key_jwt` authentication
+- **And** the key set holds only public keys
+
+### TC-26: The signing key stays the same across restarts
+
+- **Given** the backend generated its own signing key
+- **When** it restarts on the same database
+- **Then** it publishes the same key
+
+### TC-27: The backend picks its database from its URL
+
+- **Given** a database URL
+- **When** the backend starts
+- **Then** a `sqlite:` URL runs on SQLite and a `postgres:` URL selects
+  Postgres
+- **And** any other scheme stops startup with a message naming the
+  supported ones
+
+### Regressions
+
+### TC-28: The backend starts without atproto, on a fresh database
+
+- **Given** a fresh database and an unreachable atproto service
+- **When** the backend starts
+- **Then** it serves its health check, reporting atproto as unreachable
+
+### TC-29: The home page and block gallery work signed out
+
+- **Given** nobody is signed in
+- **When** someone opens the home page and the block gallery
+- **Then** the home page shows the backend and atproto status
+- **And** the gallery renders its cards
+- **And** both pages show the header with "Sign in"
+
+### TC-30: The installed app doesn't swallow sign-in
+
+- **Given** the PWA is installed and its service worker is active
+- **When** Ana starts signing in
+- **Then** the sign-in request reaches the backend, not the cached app
+  shell, and the flow completes
 
 ## Review log
