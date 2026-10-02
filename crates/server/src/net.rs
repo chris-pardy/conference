@@ -69,13 +69,30 @@ fn is_public_v4(ip: Ipv4Addr) -> bool {
 }
 
 fn is_public_v6(ip: Ipv6Addr) -> bool {
-    let first = ip.segments()[0];
+    let segments = ip.segments();
+    let first = segments[0];
+    let embedded = |hi: u16, lo: u16| Ipv4Addr::from((u32::from(hi) << 16) | u32::from(lo));
+    // Forms that reach an IPv4 address: NAT64, 6to4, and IPv4-compatible.
+    if segments[..6] == [0x64, 0xff9b, 0, 0, 0, 0] {
+        return is_public_v4(embedded(segments[6], segments[7]));
+    }
+    if first == 0x2002 {
+        return is_public_v4(embedded(segments[1], segments[2]));
+    }
+    if segments[..6] == [0; 6] {
+        return false;
+    }
     !(ip.is_loopback()
         || ip.is_unspecified()
         || ip.is_multicast()
         || (first & 0xfe00) == 0xfc00 // unique local
         || (first & 0xffc0) == 0xfe80 // link-local
         || first == 0x2001 && ip.segments()[1] == 0x0db8) // documentation
+}
+
+/// The public addresses among those a name resolved to.
+fn public_only(addrs: Vec<SocketAddr>) -> Vec<SocketAddr> {
+    addrs.into_iter().filter(|a| is_public(a.ip())).collect()
 }
 
 /// A resolver that drops every non-public address it's given.
@@ -87,7 +104,7 @@ impl Resolve for PublicOnly {
             let host = name.as_str().to_owned();
             let addrs: Vec<SocketAddr> =
                 tokio::net::lookup_host((host.as_str(), 0)).await?.collect();
-            let public: Vec<SocketAddr> = addrs.into_iter().filter(|a| is_public(a.ip())).collect();
+            let public = public_only(addrs);
             if public.is_empty() {
                 return Err(format!("{host} has no public address").into());
             }
@@ -107,7 +124,12 @@ pub struct Http {
 impl Http {
     pub fn new(allow_private: bool) -> Self {
         let builder = || {
-            reqwest::Client::builder().timeout(TIMEOUT).redirect(reqwest::redirect::Policy::none())
+            // No proxies from the environment: a proxy would resolve hostnames
+            // itself, out of reach of the private-network guard.
+            reqwest::Client::builder()
+                .timeout(TIMEOUT)
+                .redirect(reqwest::redirect::Policy::none())
+                .no_proxy()
         };
         let trusted = builder().build().expect("the HTTP client has a valid static configuration");
         let guarded = if allow_private {
@@ -171,7 +193,10 @@ mod tests {
         ] {
             assert!(!is_public(ip.parse().unwrap()), "{ip}");
         }
-        for ip in ["1.1.1.1", "2606:4700::1111"] {
+        for ip in ["64:ff9b::a00:5", "2002:0a00:0005::1", "::10.0.0.5"] {
+            assert!(!is_public(ip.parse().unwrap()), "{ip}");
+        }
+        for ip in ["1.1.1.1", "2606:4700::1111", "64:ff9b::101:101", "2002:0101:0101::1"] {
             assert!(is_public(ip.parse().unwrap()), "{ip}");
         }
         let strict = Http::new(false);
@@ -181,5 +206,10 @@ mod tests {
         assert!(strict.guarded("http://pds.example/x").is_err());
         assert!(strict.guarded("https://pds.example/x").is_ok());
         assert!(Http::new(true).guarded("http://localhost:2580/x").is_ok());
+
+        // What the resolver keeps of a name's addresses.
+        let resolved: Vec<SocketAddr> =
+            ["10.0.0.5:0", "1.1.1.1:0", "[::1]:0"].iter().map(|a| a.parse().unwrap()).collect();
+        assert_eq!(public_only(resolved), vec!["1.1.1.1:0".parse::<SocketAddr>().unwrap()]);
     }
 }

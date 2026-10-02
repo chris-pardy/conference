@@ -69,6 +69,9 @@ pub struct OAuthClient {
     down: Arc<Mutex<HashMap<String, i64>>>,
 }
 
+const MAX_NONCE_BYTES: usize = 512;
+const MAX_NONCES: usize = 1024;
+
 /// How long an unreachable authorization server is left alone.
 const BACKOFF_MS: i64 = 30_000;
 
@@ -194,8 +197,17 @@ impl OAuthClient {
         self.nonces.lock().expect("the nonce cache isn't poisoned").get(&origin(url)).cloned()
     }
 
+    /// Remembers a server's nonce. Bounded, since anyone can make the appview
+    /// talk to servers of their choosing: oversized nonces are ignored, and a
+    /// full cache starts over (nonces are only an optimization).
     pub fn remember_nonce(&self, url: &str, nonce: &str) {
+        if nonce.len() > MAX_NONCE_BYTES {
+            return;
+        }
         let mut nonces = self.nonces.lock().expect("the nonce cache isn't poisoned");
+        if nonces.len() >= MAX_NONCES {
+            nonces.clear();
+        }
         nonces.insert(origin(url), nonce.to_owned());
     }
 

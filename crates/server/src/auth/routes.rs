@@ -317,11 +317,7 @@ async fn complete(
     }
 
     let profile = profile(state, &identity.pds, &did).await;
-    // Whatever session this browser had is replaced, never promoted.
-    if let Some(old) = cookies::session(headers, state.secure_cookies()) {
-        retire(state, &sha256_b64(&old)).await;
-    }
-    let cookie = session::create(
+    let created = session::create(
         &state.db,
         NewSession {
             did: &did,
@@ -337,11 +333,20 @@ async fn complete(
             scopes: &scopes,
         },
     )
-    .await
-    .map_err(|err| {
-        eprintln!("callback: could not store the session: {err}");
-        "server_error"
-    })?;
+    .await;
+    let cookie = match created {
+        Ok(cookie) => cookie,
+        Err(err) => {
+            // The browser keeps whatever session it had; nothing holds the new grant.
+            eprintln!("callback: could not store the session: {err}");
+            revoke().await;
+            return Err("server_error");
+        }
+    };
+    // Only now is whatever session this browser had replaced, never promoted.
+    if let Some(old) = cookies::session(headers, state.secure_cookies()) {
+        retire(state, &sha256_b64(&old)).await;
+    }
     Ok(cookie)
 }
 

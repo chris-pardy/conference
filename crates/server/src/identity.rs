@@ -73,7 +73,7 @@ impl Resolver {
                 "the document for {did} is for someone else"
             )));
         }
-        let pds = pds_endpoint(&doc)
+        let pds = pds_endpoint(&doc, did)
             .ok_or_else(|| IdentityError::Unresolvable(format!("{did} names no PDS")))?;
         let claimed = claimed_handle(&doc);
         // `handle.invalid` only when the handle definitely doesn't point back;
@@ -136,10 +136,11 @@ pub fn is_valid_did(did: &str) -> bool {
     false
 }
 
-fn pds_endpoint(doc: &Value) -> Option<String> {
+fn pds_endpoint(doc: &Value, did: &str) -> Option<String> {
     doc.get("service")?.as_array()?.iter().find_map(|service| {
         let id = service.get("id")?.as_str()?;
-        let is_pds = id == "#atproto_pds" || id.ends_with("#atproto_pds");
+        let is_pds = (id == "#atproto_pds" || id == format!("{did}#atproto_pds"))
+            && service.get("type")?.as_str()? == "AtprotoPersonalDataServer";
         let endpoint = service.get("serviceEndpoint")?.as_str()?;
         is_pds.then(|| endpoint.trim_end_matches('/').to_owned())
     })
@@ -183,7 +184,13 @@ mod tests {
             "alsoKnownAs": ["at://ana.example.com"],
             "service": [{ "id": "#atproto_pds", "type": "AtprotoPersonalDataServer", "serviceEndpoint": "https://pds.example/" }]
         });
-        assert_eq!(pds_endpoint(&doc), Some("https://pds.example".into()));
+        assert_eq!(pds_endpoint(&doc, "did:plc:abc"), Some("https://pds.example".into()));
+        let theirs = json!({
+            "service": [{ "id": "did:plc:other#atproto_pds", "type": "AtprotoPersonalDataServer", "serviceEndpoint": "https://x.example" }]
+        });
+        assert_eq!(pds_endpoint(&theirs, "did:plc:abc"), None);
+        let untyped = json!({ "service": [{ "id": "#atproto_pds", "type": "Other", "serviceEndpoint": "https://x.example" }] });
+        assert_eq!(pds_endpoint(&untyped, "did:plc:abc"), None);
         assert_eq!(claimed_handle(&doc), Some("ana.example.com".into()));
     }
 }

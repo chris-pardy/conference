@@ -1,5 +1,5 @@
 ---
-status: implementing
+status: blocked
 impact: cross-cutting
 depends-on: [ci-pipeline]
 branch: feature/attendee-sign-in
@@ -1132,3 +1132,57 @@ fixed.
    hour".**
    - Fixed: it's capped at once an hour. Only idle timeouts shorter than
      10 hours (as in tests) touch more often, every tenth of the timeout.
+
+### Round 5
+
+The reviewer found 0 blocking, 0 major, 3 minor and 2 nits. `pnpm check`
+was green. Every finding was fixed after the review, and `pnpm check` is
+green again. No reviewer has seen these fixes yet.
+
+1. **[minor] The guarded client honored `HTTP(S)_PROXY`, so a proxy would
+   bypass the private-network guard.**
+   - Fixed: both clients use `.no_proxy()`.
+   - An egress proxy, if one is ever needed, has to be configured
+     explicitly and enforce the address policy itself.
+2. **[minor] The DPoP nonce cache could grow without bound, keyed by
+   attacker-chosen origins.**
+   - Fixed: nonces over 512 bytes are ignored, and the cache starts over
+     when it reaches 1024 origins. Nonces are only an optimization.
+3. **[minor] A failed session insert left the person signed out, with the
+   new grant unrevoked.**
+   - Fixed: the callback now creates the new session before retiring the
+     browser's old one, and revokes the new grant if the insert fails.
+4. **[nit] IPv6 forms that embed an IPv4 address passed as public, and the
+   DNS filter had no test.**
+   - Fixed: NAT64 (`64:ff9b::/96`) and 6to4 (`2002::/16`) are judged by
+     their embedded IPv4 address, and IPv4-compatible `::a.b.c.d` is
+     refused.
+   - The filter is now a function with its own unit test.
+5. **[nit] `pds_endpoint` accepted any `…#atproto_pds` service.**
+   - Fixed: it accepts only `#atproto_pds` or `<did>#atproto_pds`, with
+     `type: AtprotoPersonalDataServer`.
+
+### Blocked after round 5
+
+The pipeline allows five review rounds. None came back clean, so this needs
+a human decision before shipping.
+
+**What the rounds found:**
+- No round found anything blocking, and only round 2 found a major issue
+  (unbounded response bodies, now fixed).
+- Every finding was fixed except one suggestion, declined in round 2 with a
+  reason that hasn't been disputed.
+- The findings don't recur. Each round went one layer deeper into new edge
+  cases, mostly around the network boundary (SSRF, resource limits) and
+  races between renewal, sign-out and re-sign-in. The earlier fixes held
+  in every later round.
+- Two findings were follow-ups on earlier fixes: round 3 found the round 2
+  backoff blocked revocation, and round 4 found the round 1 lease could be
+  outlived by the PDS client's own refresh loop.
+
+**Current state:** all 30 test cases pass, the frozen tests are unchanged,
+and `pnpm check` is green with the round 5 fixes.
+
+**The choices:**
+- Accept the branch as it stands and ship it.
+- Run a sixth round to review the round 5 fixes.
