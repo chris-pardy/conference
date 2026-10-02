@@ -11,6 +11,8 @@ const proxy = {
   '^/health(\\?|$)': serverUrl,
   '^/api/': serverUrl,
   '^/xrpc/': serverUrl,
+  '^/oauth/': serverUrl,
+  '^/oauth-client-metadata\\.json(\\?|$)': serverUrl,
 }
 
 export default defineConfig({
@@ -19,7 +21,15 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       // Backend routes must reach the server, never the cached app shell.
-      workbox: { navigateFallbackDenylist: [/^\/api\//, /^\/xrpc\//, /^\/health(\?|$)/] },
+      workbox: {
+        navigateFallbackDenylist: [
+          /^\/api\//,
+          /^\/xrpc\//,
+          /^\/health(\?|$)/,
+          /^\/oauth\//,
+          /^\/oauth-client-metadata\.json(\?|$)/,
+        ],
+      },
       injectRegister: 'script',
       manifest: {
         name: 'Conference',

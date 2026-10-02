@@ -1,0 +1,406 @@
+//! The appview as a confidential atproto OAuth client: its metadata and keys,
+//! authorization-server discovery, pushed authorization requests, and the
+//! token endpoint (code exchange, refresh) and revocation, all with
+//! `private_key_jwt` client assertions and DPoP.
+
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
+use serde::Deserialize;
+use serde_json::{Value, json};
+
+use crate::db::{Db, now_ms};
+use crate::keys::{EcKey, client_assertion, dpop_proof, random_token};
+use crate::net::Http;
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct AuthServer {
+    pub issuer: String,
+    pub authorization_endpoint: String,
+    pub token_endpoint: String,
+    pub pushed_authorization_request_endpoint: String,
+    pub revocation_endpoint: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenSet {
+    pub access_token: String,
+    pub refresh_token: Option<String>,
+    pub expires_in: Option<i64>,
+    pub scope: Option<String>,
+    pub sub: Option<String>,
+}
+
+/// How a call to an authorization server failed.
+#[derive(Debug)]
+pub enum OAuthError {
+    /// The server refused the grant: the session behind it is over.
+    InvalidGrant(String),
+    /// Any other refusal (a 4xx with some other error).
+    Rejected(String),
+    /// Network errors and 5xx: worth retrying, never a reason to end a session.
+    Unavailable(String),
+}
+
+impl std::fmt::Display for OAuthError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidGrant(why) => write!(f, "invalid grant: {why}"),
+            Self::Rejected(why) => write!(f, "rejected: {why}"),
+            Self::Unavailable(why) => write!(f, "unavailable: {why}"),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct OAuthClient {
+    pub client_id: String,
+    pub redirect_uri: String,
+    pub public_url: String,
+    pub scope: String,
+    pub key: EcKey,
+    pub http: Http,
+    /// The latest DPoP nonce each server handed out, by origin.
+    nonces: Arc<Mutex<HashMap<String, String>>>,
+    /// Authorization-server metadata by issuer, with when it was fetched.
+    servers: Arc<Mutex<HashMap<String, (AuthServer, i64)>>>,
+}
+
+/// How long fetched authorization-server metadata is reused.
+const METADATA_TTL_MS: i64 = 10 * 60 * 1000;
+
+impl OAuthClient {
+    pub fn new(public_url: &str, scopes: &[String], key: EcKey, http: Http) -> Self {
+        let scope = scopes.join(" ");
+        Self {
+            client_id: client_id(public_url, &scope),
+            redirect_uri: format!("{public_url}/oauth/callback"),
+            public_url: public_url.to_owned(),
+            scope,
+            key,
+            http,
+            nonces: Arc::default(),
+            servers: Arc::default(),
+        }
+    }
+
+    /// The client metadata document served at the client ID.
+    pub fn metadata(&self) -> Value {
+        json!({
+            "client_id": self.client_id,
+            "client_name": "Eventside",
+            "client_uri": self.public_url,
+            "redirect_uris": [self.redirect_uri],
+            "scope": self.scope,
+            "grant_types": ["authorization_code", "refresh_token"],
+            "response_types": ["code"],
+            "token_endpoint_auth_method": "private_key_jwt",
+            "token_endpoint_auth_signing_alg": "ES256",
+            "dpop_bound_access_tokens": true,
+            "application_type": "web",
+            "jwks_uri": format!("{}/oauth/jwks.json", self.public_url),
+        })
+    }
+
+    pub fn jwks(&self) -> Value {
+        let mut key = self.key.public_jwk();
+        key["alg"] = json!("ES256");
+        key["use"] = json!("sig");
+        json!({ "keys": [key] })
+    }
+
+    /// The authorization server behind a PDS, with the spec's checks: the PDS
+    /// names it, and its metadata's issuer is the URL it was fetched from.
+    pub async fn discover(&self, pds: &str) -> Result<AuthServer, String> {
+        let resource_url = format!("{pds}/.well-known/oauth-protected-resource");
+        let resource: Value = self.get_json(&resource_url).await?;
+        let issuer = resource
+            .get("authorization_servers")
+            .and_then(Value::as_array)
+            .and_then(|servers| servers.first())
+            .and_then(Value::as_str)
+            .ok_or_else(|| format!("{pds} names no authorization server"))?
+            .trim_end_matches('/')
+            .to_owned();
+        self.auth_server(&issuer).await
+    }
+
+    /// An issuer's metadata, reused for a while: refreshes and revocations
+    /// for sessions whose issuer was checked when they were created.
+    pub async fn cached_auth_server(&self, issuer: &str) -> Result<AuthServer, String> {
+        let now = now_ms();
+        let cached =
+            self.servers.lock().expect("the metadata cache isn't poisoned").get(issuer).cloned();
+        if let Some((server, at)) = cached
+            && now - at < METADATA_TTL_MS
+        {
+            return Ok(server);
+        }
+        let server = self.auth_server(issuer).await?;
+        self.servers
+            .lock()
+            .expect("the metadata cache isn't poisoned")
+            .insert(issuer.to_owned(), (server.clone(), now));
+        Ok(server)
+    }
+
+    /// An authorization server's metadata, checked against its issuer.
+    pub async fn auth_server(&self, issuer: &str) -> Result<AuthServer, String> {
+        let metadata_url = format!("{issuer}/.well-known/oauth-authorization-server");
+        let server: AuthServer = serde_json::from_value(self.get_json(&metadata_url).await?)
+            .map_err(|e| format!("{metadata_url}: {e}"))?;
+        if server.issuer.trim_end_matches('/') != issuer {
+            return Err(format!("{metadata_url} claims to be {}", server.issuer));
+        }
+        for endpoint in [
+            &server.authorization_endpoint,
+            &server.token_endpoint,
+            &server.pushed_authorization_request_endpoint,
+        ] {
+            self.http.guarded(endpoint)?;
+        }
+        Ok(server)
+    }
+
+    async fn get_json(&self, url: &str) -> Result<Value, String> {
+        let res =
+            self.http.guarded(url)?.get(url).send().await.map_err(|e| format!("{url}: {e}"))?;
+        if !res.status().is_success() {
+            return Err(format!("{url} answered {}", res.status()));
+        }
+        res.json().await.map_err(|e| format!("{url}: {e}"))
+    }
+
+    /// Pushes an authorization request, returning the URL to send the browser to.
+    pub async fn par(
+        &self,
+        server: &AuthServer,
+        request: &ParRequest<'_>,
+    ) -> Result<String, OAuthError> {
+        let assertion = client_assertion(&self.key, &self.client_id, &server.issuer);
+        let mut form = vec![
+            ("response_type", "code"),
+            ("client_id", self.client_id.as_str()),
+            ("redirect_uri", self.redirect_uri.as_str()),
+            ("scope", self.scope.as_str()),
+            ("state", request.state),
+            ("code_challenge", request.code_challenge),
+            ("code_challenge_method", "S256"),
+            ("client_assertion_type", ASSERTION_TYPE),
+            ("client_assertion", assertion.as_str()),
+        ];
+        if let Some(hint) = request.login_hint {
+            form.push(("login_hint", hint));
+        }
+        if let Some(prompt) = request.prompt {
+            form.push(("prompt", prompt));
+        }
+        let body = self
+            .post_form(&server.pushed_authorization_request_endpoint, &form, request.dpop_key)
+            .await?;
+        let request_uri = body
+            .get("request_uri")
+            .and_then(Value::as_str)
+            .ok_or_else(|| OAuthError::Rejected("the PAR response has no request_uri".into()))?;
+        let mut url = url::Url::parse(&server.authorization_endpoint)
+            .map_err(|e| OAuthError::Rejected(format!("bad authorization endpoint: {e}")))?;
+        url.query_pairs_mut()
+            .append_pair("client_id", &self.client_id)
+            .append_pair("request_uri", request_uri);
+        Ok(url.into())
+    }
+
+    /// Exchanges an authorization code for tokens.
+    pub async fn exchange_code(
+        &self,
+        server: &AuthServer,
+        code: &str,
+        verifier: &str,
+        dpop_key: &EcKey,
+    ) -> Result<TokenSet, OAuthError> {
+        let assertion = client_assertion(&self.key, &self.client_id, &server.issuer);
+        let form = [
+            ("grant_type", "authorization_code"),
+            ("code", code),
+            ("code_verifier", verifier),
+            ("client_id", self.client_id.as_str()),
+            ("redirect_uri", self.redirect_uri.as_str()),
+            ("client_assertion_type", ASSERTION_TYPE),
+            ("client_assertion", assertion.as_str()),
+        ];
+        self.token_request(server, &form, dpop_key).await
+    }
+
+    pub async fn refresh(
+        &self,
+        server: &AuthServer,
+        refresh_token: &str,
+        dpop_key: &EcKey,
+    ) -> Result<TokenSet, OAuthError> {
+        let assertion = client_assertion(&self.key, &self.client_id, &server.issuer);
+        let form = [
+            ("grant_type", "refresh_token"),
+            ("refresh_token", refresh_token),
+            ("client_id", self.client_id.as_str()),
+            ("client_assertion_type", ASSERTION_TYPE),
+            ("client_assertion", assertion.as_str()),
+        ];
+        self.token_request(server, &form, dpop_key).await
+    }
+
+    /// Revokes a token. Servers without a revocation endpoint are skipped.
+    pub async fn revoke(
+        &self,
+        server: &AuthServer,
+        token: &str,
+        dpop_key: &EcKey,
+    ) -> Result<(), OAuthError> {
+        let Some(endpoint) = &server.revocation_endpoint else { return Ok(()) };
+        let assertion = client_assertion(&self.key, &self.client_id, &server.issuer);
+        let form = [
+            ("token", token),
+            ("token_type_hint", "refresh_token"),
+            ("client_id", self.client_id.as_str()),
+            ("client_assertion_type", ASSERTION_TYPE),
+            ("client_assertion", assertion.as_str()),
+        ];
+        self.post_form(endpoint, &form, dpop_key).await.map(|_| ())
+    }
+
+    async fn token_request(
+        &self,
+        server: &AuthServer,
+        form: &[(&str, &str)],
+        dpop_key: &EcKey,
+    ) -> Result<TokenSet, OAuthError> {
+        let body = self.post_form(&server.token_endpoint, form, dpop_key).await?;
+        serde_json::from_value(body)
+            .map_err(|e| OAuthError::Rejected(format!("bad token response: {e}")))
+    }
+
+    /// POSTs a form with a DPoP proof, retrying once with the server's nonce.
+    async fn post_form(
+        &self,
+        url: &str,
+        form: &[(&str, &str)],
+        dpop_key: &EcKey,
+    ) -> Result<Value, OAuthError> {
+        let client = self.http.guarded(url).map_err(OAuthError::Rejected)?;
+        let origin = origin(url);
+        for attempt in 0..2 {
+            let nonce =
+                self.nonces.lock().expect("the nonce cache isn't poisoned").get(&origin).cloned();
+            let proof = dpop_proof(dpop_key, "POST", url, nonce.as_deref(), None);
+            let res = client
+                .post(url)
+                .header("DPoP", proof)
+                .form(form)
+                .send()
+                .await
+                .map_err(|e| OAuthError::Unavailable(format!("{url}: {e}")))?;
+            let status = res.status();
+            if let Some(new) = res.headers().get("dpop-nonce").and_then(|v| v.to_str().ok()) {
+                self.nonces
+                    .lock()
+                    .expect("the nonce cache isn't poisoned")
+                    .insert(origin.clone(), new.to_owned());
+            }
+            let text =
+                res.text().await.map_err(|e| OAuthError::Unavailable(format!("{url}: {e}")))?;
+            let body: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+            if status.is_success() {
+                return Ok(body);
+            }
+            let error = body.get("error").and_then(Value::as_str).unwrap_or_default();
+            if error == "use_dpop_nonce" && attempt == 0 {
+                continue;
+            }
+            let why = format!("{url} answered {status}: {text}");
+            return Err(if status.is_server_error() {
+                OAuthError::Unavailable(why)
+            } else if error == "invalid_grant" {
+                OAuthError::InvalidGrant(why)
+            } else {
+                OAuthError::Rejected(why)
+            });
+        }
+        Err(OAuthError::Rejected(format!("{url} kept asking for a new DPoP nonce")))
+    }
+}
+
+pub struct ParRequest<'a> {
+    pub state: &'a str,
+    pub code_challenge: &'a str,
+    pub dpop_key: &'a EcKey,
+    pub login_hint: Option<&'a str>,
+    pub prompt: Option<&'a str>,
+}
+
+/// The client ID: the metadata document's URL. Authorization servers cache
+/// client metadata, so a server that saw the old scope list would refuse the
+/// new one. Beyond the base `atproto` scope, the scope list is part of the
+/// ID, which changes exactly when the list does.
+fn client_id(public_url: &str, scope: &str) -> String {
+    let base = format!("{public_url}/oauth-client-metadata.json");
+    if scope == "atproto" {
+        base
+    } else {
+        format!(
+            "{base}?scope={}",
+            percent_encoding::utf8_percent_encode(scope, percent_encoding::NON_ALPHANUMERIC)
+        )
+    }
+}
+
+const ASSERTION_TYPE: &str = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer";
+
+fn origin(url: &str) -> String {
+    url::Url::parse(url).map_or_else(|_| url.to_owned(), |u| u.origin().ascii_serialization())
+}
+
+/// The client's signing key: the configured one, or one generated once and
+/// kept in the database. Several instances racing to generate agree on the
+/// oldest.
+pub async fn signing_key(db: &Db, configured: Option<&str>) -> Result<EcKey, String> {
+    if let Some(jwk) = configured {
+        let key = EcKey::from_jwk(jwk).map_err(|e| format!("OAUTH_SIGNING_KEY: {e}"))?;
+        let kid = key.kid.clone().unwrap_or_else(|| "eventside-1".into());
+        return Ok(key.with_kid(kid));
+    }
+    let existing = || {
+        sqlx::query_as::<_, (String, String)>(
+            "SELECT kid, private_jwk FROM client_keys ORDER BY created_at, kid LIMIT 1",
+        )
+        .fetch_optional(db)
+    };
+    if existing().await.map_err(|e| e.to_string())?.is_none() {
+        let key = EcKey::generate();
+        sqlx::query("INSERT INTO client_keys (kid, private_jwk, created_at) VALUES ($1, $2, $3) ON CONFLICT (kid) DO NOTHING")
+            .bind(random_token(12))
+            .bind(key.private_jwk())
+            .bind(now_ms())
+            .execute(db)
+            .await
+            .map_err(|e| format!("could not store the signing key: {e}"))?;
+    }
+    let (kid, jwk) =
+        existing().await.map_err(|e| e.to_string())?.ok_or("the signing key vanished")?;
+    Ok(EcKey::from_jwk(&jwk)?.with_kid(kid))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_client_id_changes_when_the_scopes_do() {
+        assert_eq!(
+            client_id("https://app.example", "atproto"),
+            "https://app.example/oauth-client-metadata.json"
+        );
+        assert_eq!(
+            client_id("https://app.example", "atproto transition:generic"),
+            "https://app.example/oauth-client-metadata.json?scope=atproto%20transition%3Ageneric"
+        );
+    }
+}

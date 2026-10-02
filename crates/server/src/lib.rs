@@ -1,6 +1,17 @@
+use std::ops::Deref;
+use std::sync::Arc;
 use std::time::Duration;
 
-use axum::{Json, Router, extract::State, routing::get};
+use axum::routing::{get, post};
+use axum::{Json, Router, extract::State, middleware};
+
+pub mod auth;
+pub mod config;
+pub mod db;
+pub mod identity;
+pub mod keys;
+pub mod net;
+pub mod oauth;
 
 pub mod health {
     use serde::Serialize;
@@ -24,29 +35,60 @@ pub mod health {
     }
 }
 
+use config::Config;
 use health::{AtprotoStatus, HealthReport, health_report};
 
 /// How long a health check waits for the atproto service before calling it unreachable.
 const ATPROTO_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Clone)]
-pub struct AppState {
-    atproto_url: String,
-    http: reqwest::Client,
+pub struct AppState(Arc<Inner>);
+
+pub struct Inner {
+    pub config: Config,
+    pub db: db::Db,
+    pub http: net::Http,
+    pub oauth: oauth::OAuthClient,
+    pub resolver: identity::Resolver,
+    probe: reqwest::Client,
+}
+
+impl Deref for AppState {
+    type Target = Inner;
+
+    fn deref(&self) -> &Inner {
+        &self.0
+    }
 }
 
 impl AppState {
-    pub fn new(atproto_url: impl Into<String>) -> Self {
-        let http = reqwest::Client::builder()
+    /// Connects the database and loads the signing key. Never touches atproto,
+    /// so the server starts even when the network is down.
+    pub async fn build(config: Config, public_url: String) -> Result<Self, String> {
+        let db = db::connect(&config.database_url).await?;
+        let key = oauth::signing_key(&db, config.signing_key.as_deref()).await?;
+        let http = net::Http::new(config.allow_private_network);
+        let oauth = oauth::OAuthClient::new(&public_url, &config.scopes, key, http.clone());
+        let resolver = identity::Resolver {
+            http: http.clone(),
+            plc_url: config.plc_url.clone(),
+            handle_resolver_url: config.handle_resolver_url.clone(),
+        };
+        let probe = reqwest::Client::builder()
             .timeout(ATPROTO_PROBE_TIMEOUT)
             .build()
             .expect("the HTTP client has a valid static configuration");
-        Self { atproto_url: atproto_url.into().trim_end_matches('/').to_owned(), http }
+        Ok(Self(Arc::new(Inner { config, db, http, oauth, resolver, probe })))
+    }
+
+    /// Cookies are `Secure` and `__Host-` prefixed when the app is served over HTTPS.
+    pub fn secure_cookies(&self) -> bool {
+        self.oauth.public_url.starts_with("https://")
     }
 
     async fn atproto_status(&self) -> AtprotoStatus {
-        let url = format!("{}/xrpc/_health", self.atproto_url);
-        match self.http.get(&url).send().await {
+        let url = format!("{}/xrpc/_health", self.config.atproto_url);
+        match self.probe.get(&url).send().await {
             Ok(res) if res.status().is_success() => AtprotoStatus::Reachable,
             Ok(res) => {
                 eprintln!("atproto health probe: {url} answered {}", res.status());
@@ -61,7 +103,18 @@ impl AppState {
 }
 
 pub fn router(state: AppState) -> Router {
-    Router::new().route("/health", get(health)).with_state(state)
+    use auth::routes;
+    Router::new()
+        .route("/health", get(health))
+        .route("/oauth-client-metadata.json", get(routes::client_metadata))
+        .route("/oauth/jwks.json", get(routes::jwks))
+        .route("/oauth/login", get(routes::login))
+        .route("/oauth/signup", get(routes::signup))
+        .route("/oauth/callback", get(routes::callback))
+        .route("/oauth/logout", post(routes::logout))
+        .route("/xrpc/app.eventside.auth.getSession", get(routes::get_session))
+        .layer(middleware::from_fn_with_state(state.clone(), auth::require_csrf))
+        .with_state(state)
 }
 
 async fn health(State(state): State<AppState>) -> Json<HealthReport> {

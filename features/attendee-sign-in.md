@@ -702,6 +702,32 @@ For later features:
 - Updated the tests for renewal, refresh refused and scopes grown, and the
   impact on `space-sync` (organizer scopes) and `block-actions`.
 
+### Build notes
+
+Where the build refined the approved design:
+
+- **The OAuth protocol is hand-rolled** in `crates/server/src/oauth.rs` and
+  `keys.rs` (ES256 JWS, DPoP with nonce retry, PAR, token, refresh and
+  revoke), not built on `atproto-oauth`. This is the fallback the design
+  named. On reading the crate:
+  - Its token and refresh calls parse the body without checking the HTTP
+    status. That loses the `invalid_grant` vs. `5xx` distinction the
+    renewer depends on.
+  - Its `oauth_refresh` rediscovers the authorization server from the DID
+    document on every refresh.
+- **The client ID carries the scope list once it grows past `atproto`**
+  (`…/oauth-client-metadata.json?scope=…`). Authorization servers cache
+  client metadata. Vivarium caches it for 60 s and ignores cache headers,
+  and production servers cache too. Without a new client ID, a server keeps
+  refusing scopes that the cached metadata doesn't list. With `atproto`
+  alone, the ID is the plain metadata URL.
+- **The session cookie lives for the idle timeout plus 30 days** (the
+  tombstone), not just the idle timeout. An idle session has to still send
+  its cookie for the PWA to hear `SessionExpired`, and the ended row is
+  kept for those same 30 days.
+- **The default database** is `sqlite://data/eventside.db?mode=rwc`,
+  relative to the working directory. `data/` is git-ignored.
+
 ## Test cases
 
 Ana and Bram are attendees with vivarium accounts. Mallory is an attacker
