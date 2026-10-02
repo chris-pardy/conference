@@ -967,3 +967,45 @@ scopes are the default (`atproto` only).
   shell, and the flow completes
 
 ## Review log
+
+### Round 1
+
+The reviewer found 0 blocking, 0 major, 7 minor and 2 nits. `pnpm check`
+was green and the frozen files unchanged. Every finding was fixed.
+
+1. **[minor] An expired session could never be signed out, so its cookie
+   stuck for 30 days.**
+   - Fixed: the CSRF layer now lets `/oauth/logout` through for an ended
+     session, which holds no tokens.
+   - The expired banner has a "Not you? Sign out" button.
+2. **[minor] Sessions ended by idle timeout or grown scopes weren't
+   revoked.**
+   - Fixed: `session::end` now revokes the grant in the background before
+     wiping it.
+   - `session::wipe` (no revoke) is kept only for grants the server has
+     already refused.
+3. **[minor] The renewer refreshed sessions granted under an older scope
+   list, using the new client ID.**
+   - Fixed: a refresh first checks the scopes, and ends and revokes the
+     session if any are missing. That covers the renewer and on-demand
+     refreshes alike.
+4. **[minor] `pds_client()` spun for 10 s on a session with no refresh
+   token.**
+   - Fixed: once the access token is stale and there's no refresh token,
+     the session ends and the client returns `SessionExpired`.
+5. **[minor] A `handle.invalid` session couldn't be signed back in.**
+   - Fixed: `SessionExpired` now carries the DID too, and the PWA uses it
+     when the handle didn't verify.
+   - `/oauth/login` accepts a DID, skipping handle resolution.
+6. **[minor] A refresh could outlast its 30 s lease.**
+   - Fixed: the lease is now 90 s, and each refresh is cut off at 60 s.
+7. **[minor] `discover` didn't check the protected-resource `resource`
+   field.**
+   - Fixed: it must equal the PDS URL.
+8. **[nit] `iss` was checked after `error` on the callback.**
+   - Fixed: it's checked first (RFC 9207). Vivarium sends `iss` on denials,
+     and TC-5 still passes.
+9. **[nit] Sign-out failures were silent, and a network error went
+   unhandled.**
+   - Fixed: `signOut` catches errors and reports whether it worked, and the
+     account menu shows a message when it didn't.

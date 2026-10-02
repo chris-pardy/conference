@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, Outlet, useLocation } from 'react-router'
 import { SessionProvider } from './auth/SessionProvider'
-import { type SessionInfo, startSignIn, useSession } from './auth/session'
+import { type SessionInfo, signInHint, startSignIn, useSession } from './auth/session'
 import './Shell.css'
 
 /** The layout around every page: the session, and the header with the account control. */
@@ -42,6 +42,7 @@ function AccountControl() {
 function AccountMenu({ user }: { user: SessionInfo }) {
   const { signOut } = useSession()
   const [open, setOpen] = useState(false)
+  const [failed, setFailed] = useState(false)
   const menu = useRef<HTMLDivElement>(null)
 
   // Close on a click elsewhere or Escape.
@@ -88,32 +89,45 @@ function AccountMenu({ user }: { user: SessionInfo }) {
             className="shell__menu-item"
             onClick={() => {
               setOpen(false)
-              void signOut()
+              setFailed(false)
+              void signOut().then((ok) => setFailed(!ok))
             }}
           >
             Sign out
           </button>
         </div>
       )}
+      {failed && (
+        <p className="shell__menu shell__error" role="alert">
+          Couldn’t sign out. Check your connection and try again.
+        </p>
+      )}
     </div>
   )
 }
 
 function ExpiredBanner() {
-  const { session } = useSession()
+  const { session, signOut } = useSession()
   const location = useLocation()
   if (session.kind !== 'expired') return null
   const returnTo = location.pathname + location.search
+  const hint = signInHint(session)
   return (
     <div className="shell__expired" role="alert">
       <span>Your session has expired.</span>
-      {session.handle ? (
-        <button type="button" onClick={() => startSignIn(session.handle as string, returnTo)}>
-          Sign in again
+      <span className="shell__expired-actions">
+        {hint ? (
+          <button type="button" onClick={() => startSignIn(hint, returnTo)}>
+            Sign in again
+          </button>
+        ) : (
+          <Link to={`/signin?${new URLSearchParams({ return_to: returnTo })}`}>Sign in again</Link>
+        )}
+        {/* On a shared device, the next person can clear the old session. */}
+        <button type="button" onClick={() => void signOut()}>
+          Not you? Sign out
         </button>
-      ) : (
-        <Link to={`/signin?${new URLSearchParams({ return_to: returnTo })}`}>Sign in again</Link>
-      )}
+      </span>
     </div>
   )
 }

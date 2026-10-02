@@ -64,7 +64,7 @@ export const schemaDict = {
           {
             name: 'SessionExpired',
             description:
-              "The session ended (idle, refused renewal, or new sign-in scopes). The body also carries the session's handle, to sign the same person back in.",
+              "The session ended (idle, refused renewal, or new sign-in scopes). The body also carries the session's handle and DID, to sign the same person back in.",
           },
         ],
       },

@@ -8,11 +8,12 @@ export type Session =
   | { kind: 'loading' }
   | { kind: 'signedOut' }
   | { kind: 'signedIn'; user: SessionInfo }
-  | { kind: 'expired'; handle?: string }
+  | { kind: 'expired'; handle?: string; did?: string }
 
 export interface SessionContextValue {
   session: Session
-  signOut(): Promise<void>
+  /** Signs out, resolving to whether it worked. */
+  signOut(): Promise<boolean>
 }
 
 export const SessionContext = createContext<SessionContextValue | null>(null)
@@ -31,7 +32,8 @@ export async function fetchSession(signal?: AbortSignal): Promise<Session> {
   const res = await fetch(GET_SESSION, { signal, credentials: 'same-origin', cache: 'no-store' })
   if (res.ok) return { kind: 'signedIn', user: (await res.json()) as SessionInfo }
   const body = await res.json().catch(() => ({}))
-  if (res.status === 401 && body.error === 'SessionExpired') return { kind: 'expired', handle: body.handle }
+  if (res.status === 401 && body.error === 'SessionExpired')
+    return { kind: 'expired', handle: body.handle, did: body.did }
   return { kind: 'signedOut' }
 }
 
@@ -40,7 +42,12 @@ export function currentPath(): string {
   return window.location.pathname + window.location.search
 }
 
-/** Sends the browser through sign-in, returning it to `returnTo`. */
+/** Who to sign back in after a session expired: the handle, or the DID when the handle didn't verify. */
+export function signInHint(session: { handle?: string; did?: string }): string | undefined {
+  return session.handle && session.handle !== 'handle.invalid' ? session.handle : session.did
+}
+
+/** Sends the browser through sign-in, returning it to `returnTo`. A DID works as well as a handle. */
 export function startSignIn(handle: string, returnTo: string): void {
   const params = new URLSearchParams({ handle, return_to: returnTo })
   window.location.assign(`/oauth/login?${params}`)

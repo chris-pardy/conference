@@ -114,6 +114,11 @@ impl OAuthClient {
     pub async fn discover(&self, pds: &str) -> Result<AuthServer, String> {
         let resource_url = format!("{pds}/.well-known/oauth-protected-resource");
         let resource: Value = self.get_json(&resource_url).await?;
+        let described =
+            resource.get("resource").and_then(Value::as_str).map(|r| r.trim_end_matches('/'));
+        if described != Some(pds.trim_end_matches('/')) {
+            return Err(format!("{resource_url} describes {described:?}, not {pds}"));
+        }
         let issuer = resource
             .get("authorization_servers")
             .and_then(Value::as_array)

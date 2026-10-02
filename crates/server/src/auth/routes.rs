@@ -56,8 +56,14 @@ fn fail(code: &str, return_to: &str, cookies: &[String]) -> Response {
 
 pub async fn login(State(state): State<AppState>, Query(params): Params) -> Response {
     let return_to = sanitize(params.get("return_to").map(String::as_str));
-    let handle = params.get("handle").map(String::as_str).unwrap_or_default();
-    let did = match state.resolver.resolve_handle(handle).await {
+    let handle = params.get("handle").map(String::as_str).unwrap_or_default().trim();
+    // A DID works too: signing someone back in whose handle didn't verify.
+    let resolved = if handle.starts_with("did:") {
+        Ok(handle.to_owned())
+    } else {
+        state.resolver.resolve_handle(handle).await
+    };
+    let did = match resolved {
         Ok(did) => did,
         Err(IdentityError::HandleNotFound) => return fail("handle_not_found", &return_to, &[]),
         Err(IdentityError::Unresolvable(why)) => {
@@ -212,12 +218,13 @@ pub async fn callback(
     if pending.expires_at < now_ms() {
         return fail("request_expired", &return_to, &clear);
     }
+    // RFC 9207: the issuer is checked on errors too.
+    if params.get("iss").map(|i| i.trim_end_matches('/')) != Some(pending.issuer.as_str()) {
+        return fail("issuer_mismatch", &return_to, &clear);
+    }
     if let Some(error) = params.get("error") {
         let code = if error == "access_denied" { "access_denied" } else { "authorization_failed" };
         return fail(code, &return_to, &clear);
-    }
-    if params.get("iss").map(|i| i.trim_end_matches('/')) != Some(pending.issuer.as_str()) {
-        return fail("issuer_mismatch", &return_to, &clear);
     }
     let Some(code) = params.get("code") else { return fail("invalid_request", &return_to, &clear) };
 
@@ -368,22 +375,7 @@ async fn retire(state: &AppState, id_hash: &str) {
         eprintln!("could not delete a session: {err}");
     }
     let state = state.clone();
-    tokio::spawn(async move { revoke_row(&state, &row).await });
-}
-
-async fn revoke_row(state: &AppState, row: &session::SessionRow) {
-    let (Some(issuer), Some(refresh), Some(key)) = (&row.issuer, &row.refresh_token, &row.dpop_key)
-    else {
-        return;
-    };
-    let Ok(key) = EcKey::from_jwk(key) else { return };
-    let result = match state.oauth.cached_auth_server(issuer).await {
-        Ok(server) => state.oauth.revoke(&server, refresh, &key).await.map_err(|e| e.to_string()),
-        Err(why) => Err(why),
-    };
-    if let Err(why) = result {
-        eprintln!("could not revoke {}'s grant: {why}", row.did);
-    }
+    tokio::spawn(async move { session::revoke(&state, &row).await });
 }
 
 /// Signs out: revokes the grant, deletes the session and clears the cookie.
@@ -392,7 +384,7 @@ pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Respon
     let secure = state.secure_cookies();
     match session::lookup(&state, &headers).await {
         Ok(Lookup::Live(row) | Lookup::Expired(row)) => {
-            revoke_row(&state, &row).await;
+            session::revoke(&state, &row).await;
             if let Err(err) = session::delete(&state.db, &row.id_hash).await {
                 eprintln!("sign-out: could not delete the session: {err}");
                 return xrpc_error(
@@ -423,7 +415,7 @@ pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Respon
 pub async fn get_session(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let row = match session::lookup(&state, &headers).await {
         Ok(Lookup::Live(row)) => row,
-        Ok(Lookup::Expired(row)) => return super::expired(&row.handle),
+        Ok(Lookup::Expired(row)) => return super::expired(&row),
         Ok(Lookup::None) => return super::auth_required(),
         Err(err) => {
             eprintln!("getSession: {err}");

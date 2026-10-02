@@ -6,7 +6,7 @@ use axum::http::HeaderMap;
 
 use crate::AppState;
 use crate::db::{Db, ms, now_ms};
-use crate::keys::{random_token, sha256_b64};
+use crate::keys::{EcKey, random_token, sha256_b64};
 
 /// How long an ended session keeps its DID and handle, so the PWA can sign
 /// the same person back in. The cookie lives this long past the idle timeout.
@@ -113,10 +113,9 @@ pub async fn lookup(state: &AppState, headers: &HeaderMap) -> Result<Lookup, sql
     }
     let now = now_ms();
     let idle = now - row.last_seen_at > ms(state.config.session_idle_timeout);
-    let granted = row.scope_list();
-    let missing_scope = state.config.scopes.iter().any(|s| !granted.contains(s));
+    let missing_scope = missing_scope(state, &row.scopes);
     if idle || missing_scope {
-        end(&state.db, &row.id_hash).await?;
+        end(state, &row).await?;
         return Ok(Lookup::Expired(row));
     }
     Ok(Lookup::Live(row))
@@ -138,9 +137,40 @@ pub async fn touch(state: &AppState, row: &SessionRow) -> Result<bool, sqlx::Err
     Ok(true)
 }
 
-/// Ends a session: its tokens and keys are wiped, but the row keeps who it
-/// was until the sweeper removes it.
-pub async fn end(db: &Db, id_hash: &str) -> Result<(), sqlx::Error> {
+/// Whether a session lacks a scope the server now asks for at sign-in.
+pub fn missing_scope(state: &AppState, scopes: &str) -> bool {
+    let granted: Vec<&str> = scopes.split_whitespace().collect();
+    state.config.scopes.iter().any(|s| !granted.contains(&s.as_str()))
+}
+
+/// Ends a session: its grant is revoked in the background, and its tokens and
+/// keys are wiped, but the row keeps who it was until the sweeper removes it.
+pub async fn end(state: &AppState, row: &SessionRow) -> Result<(), sqlx::Error> {
+    let revoking = row.clone();
+    let background = state.clone();
+    tokio::spawn(async move { revoke(&background, &revoking).await });
+    wipe(&state.db, &row.id_hash).await
+}
+
+/// Revokes a session's grant at its authorization server, best effort.
+pub async fn revoke(state: &AppState, row: &SessionRow) {
+    let (Some(issuer), Some(refresh), Some(key)) = (&row.issuer, &row.refresh_token, &row.dpop_key)
+    else {
+        return;
+    };
+    let Ok(key) = EcKey::from_jwk(key) else { return };
+    let result = match state.oauth.cached_auth_server(issuer).await {
+        Ok(server) => state.oauth.revoke(&server, refresh, &key).await.map_err(|e| e.to_string()),
+        Err(why) => Err(why),
+    };
+    if let Err(why) = result {
+        eprintln!("could not revoke {}'s grant: {why}", row.did);
+    }
+}
+
+/// Marks a session ended and wipes its tokens, without revoking them (for a
+/// grant the authorization server has already refused).
+pub async fn wipe(db: &Db, id_hash: &str) -> Result<(), sqlx::Error> {
     sqlx::query(
         "UPDATE sessions SET ended_at = $1, access_token = NULL, refresh_token = NULL, dpop_key = NULL, \
          refresh_lease_until = NULL WHERE id_hash = $2 AND ended_at IS NULL",

@@ -28,11 +28,16 @@ pub fn auth_required() -> Response {
     xrpc_error(StatusCode::UNAUTHORIZED, "AuthRequired", "Sign in to continue.")
 }
 
-/// The session ended; `handle` lets the PWA sign the same person back in.
-pub fn expired(handle: &str) -> Response {
+/// The session ended. Its handle and DID let the PWA sign the same person back in.
+pub fn expired(row: &SessionRow) -> Response {
     (
         StatusCode::UNAUTHORIZED,
-        Json(json!({ "error": "SessionExpired", "message": "Your session has expired.", "handle": handle })),
+        Json(json!({
+            "error": "SessionExpired",
+            "message": "Your session has expired.",
+            "handle": row.handle,
+            "did": row.did,
+        })),
     )
         .into_response()
 }
@@ -72,7 +77,7 @@ impl FromRequestParts<AppState> for CurrentUser {
                     session: row,
                 })
             }
-            Ok(Lookup::Expired(row)) => Err(expired(&row.handle)),
+            Ok(Lookup::Expired(row)) => Err(expired(&row)),
             Ok(Lookup::None) => Err(auth_required()),
             Err(err) => {
                 eprintln!("could not load a session: {err}");
@@ -96,7 +101,9 @@ pub async fn require_csrf(State(state): State<AppState>, req: Request, next: Nex
     }
     let row = match session::lookup(&state, req.headers()).await {
         Ok(Lookup::Live(row)) => row,
-        Ok(Lookup::Expired(row)) => return expired(&row.handle),
+        // An ended session holds no tokens: signing out of it needs no token either.
+        Ok(Lookup::Expired(_)) if path == "/oauth/logout" => return next.run(req).await,
+        Ok(Lookup::Expired(row)) => return expired(&row),
         Ok(Lookup::None) => return auth_required(),
         Err(err) => {
             eprintln!("could not load a session: {err}");

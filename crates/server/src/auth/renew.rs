@@ -7,6 +7,7 @@
 //! instances sharing one database.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
@@ -17,7 +18,11 @@ use crate::db::{ms, now_ms};
 use crate::keys::EcKey;
 use crate::oauth::OAuthError;
 
-const LEASE_MS: i64 = 30_000;
+/// How long a refresh may hold its lease. A refresh is cut off well before:
+/// if a lease lapsed mid-refresh, another instance could spend the same
+/// single-use token, and the refusal would end a healthy session.
+const LEASE_MS: i64 = 90_000;
+const REFRESH_TIMEOUT: Duration = Duration::from_secs(60);
 /// How many refreshes run at once.
 const CONCURRENCY: usize = 8;
 
@@ -50,7 +55,9 @@ pub async fn refresh(state: &AppState, id_hash: &str) -> Renewal {
         Ok(_) => return Renewal::Busy,
         Err(err) => return Renewal::Failed(err.to_string()),
     }
-    let outcome = refresh_leased(state, id_hash).await;
+    let outcome = tokio::time::timeout(REFRESH_TIMEOUT, refresh_leased(state, id_hash))
+        .await
+        .unwrap_or_else(|_| Renewal::Failed("the refresh timed out".into()));
     if !matches!(outcome, Renewal::Renewed | Renewal::Ended) {
         release(state, id_hash).await;
     }
@@ -63,6 +70,14 @@ async fn refresh_leased(state: &AppState, id_hash: &str) -> Renewal {
         Ok(None) => return Renewal::Failed("the session is gone".into()),
         Err(err) => return Renewal::Failed(err.to_string()),
     };
+    // Granted under an older scope list (and client ID): the person signs in
+    // again rather than renewing a grant the server no longer asks for.
+    if session::missing_scope(state, &row.scopes) {
+        return match session::end(state, &row).await {
+            Ok(()) => Renewal::Ended,
+            Err(err) => Renewal::Failed(err.to_string()),
+        };
+    }
     let (Some(issuer), Some(old), Some(key)) = (&row.issuer, &row.refresh_token, &row.dpop_key)
     else {
         return Renewal::Failed("the session has no tokens".into());
@@ -155,7 +170,12 @@ pub async fn run_once(state: &AppState) {
         tasks.spawn(async move {
             let Ok(_permit) = permits.acquire().await else { return };
             if last_seen < idle_before {
-                if let Err(err) = session::end(&state.db, &id_hash).await {
+                let ended = match session::load(&state.db, &id_hash).await {
+                    Ok(Some(row)) => session::end(&state, &row).await,
+                    Ok(None) => Ok(()),
+                    Err(err) => Err(err),
+                };
+                if let Err(err) = ended {
                     eprintln!("renewal: could not end an idle session: {err}");
                 }
                 return;

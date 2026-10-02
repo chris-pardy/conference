@@ -3,10 +3,10 @@
 // SessionProvider so the shell can offer to sign the person back in.
 
 let csrfToken: string | undefined
-let onExpired: ((handle?: string) => void) | undefined
+let onExpired: ((handle?: string, did?: string) => void) | undefined
 
 /** Called by the SessionProvider as the session changes. */
-export function connectSession(token: string | undefined, expired: (handle?: string) => void): void {
+export function connectSession(token: string | undefined, expired: (handle?: string, did?: string) => void): void {
   csrfToken = token
   onExpired = expired
 }
@@ -23,7 +23,7 @@ export async function api(input: string, init: RequestInit = {}): Promise<Respon
       .clone()
       .json()
       .catch(() => ({}))
-    if (body.error === 'SessionExpired') onExpired?.(body.handle)
+    if (body.error === 'SessionExpired') onExpired?.(body.handle, body.did)
   }
   return res
 }

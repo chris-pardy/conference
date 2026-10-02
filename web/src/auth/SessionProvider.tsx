@@ -18,12 +18,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const csrfToken = session.kind === 'signedIn' ? session.user.csrfToken : undefined
   useEffect(() => {
-    connectSession(csrfToken, (handle) => setSession({ kind: 'expired', handle }))
+    connectSession(csrfToken, (handle, did) => setSession({ kind: 'expired', handle, did }))
   }, [csrfToken])
 
   const signOut = useCallback(async () => {
-    const res = await api('/oauth/logout', { method: 'POST' })
-    if (res.ok || res.status === 401) setSession({ kind: 'signedOut' })
+    try {
+      const res = await api('/oauth/logout', { method: 'POST' })
+      if (!res.ok && res.status !== 401) return false
+    } catch {
+      return false
+    }
+    setSession({ kind: 'signedOut' })
+    return true
   }, [])
 
   const value = useMemo(() => ({ session, signOut }), [session, signOut])

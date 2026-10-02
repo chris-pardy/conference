@@ -123,3 +123,16 @@
   text-decoration: none;
   cursor: pointer;
 }
+
+.shell__expired-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--g-space-2);
+}
+
+.shell__error {
+  min-width: 14rem;
+  margin: 0;
+  padding: var(--g-space-2) var(--g-space-3);
+  color: var(--g-color-danger);
+}

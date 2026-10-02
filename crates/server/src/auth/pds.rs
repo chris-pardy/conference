@@ -47,6 +47,13 @@ impl PdsClient {
                 let dpop_key = EcKey::from_jwk(key).map_err(PdsError::Unavailable)?;
                 return Ok(Self { http, pds, access_token: token.clone(), dpop_key });
             }
+            // Nothing to refresh with: the grant is over once its access token is.
+            if row.refresh_token.is_none() {
+                session::end(state, &row)
+                    .await
+                    .map_err(|e| PdsError::Unavailable(e.to_string()))?;
+                return Err(PdsError::SessionExpired);
+            }
             match renew::refresh(state, id_hash).await {
                 Renewal::Renewed => {}
                 Renewal::Ended => return Err(PdsError::SessionExpired),
