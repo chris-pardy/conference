@@ -7,8 +7,8 @@ import { FixtureResolver, SourceResolverContext } from './SourceResolver'
 
 // Cards for the tests, set at AtmosphereConf 2027 in Amsterdam.
 
-export const DEFS = 'app.gather.block.defs'
-export const CARD_REF = { uri: 'at://did:plc:organizer/app.gather.block.card/3lwelkom2027' }
+export const DEFS = 'app.eventside.block.defs'
+export const CARD_REF = { uri: 'at://did:plc:organizer/app.eventside.block.card/3lwelkom2027' }
 
 /** A block of the given vocabulary type, e.g. block('header', { text: 'Hoi' }). */
 export function block(type: string, props: Record<string, unknown> = {}) {
@@ -26,9 +26,9 @@ export function recordSource(name: string) {
     ref: {
       $type: `${DEFS}#recordSource`,
       record: {
-        space: 'ats://did:plc:organizer/app.gather.conference/amsterdam-2027',
+        space: 'ats://did:plc:organizer/app.eventside.conference/amsterdam-2027',
         did: 'did:plc:organizer',
-        collection: 'app.gather.demo.item',
+        collection: 'app.eventside.demo.item',
         rkey: name,
       },
     },
@@ -36,15 +36,15 @@ export function recordSource(name: string) {
 }
 
 export function collectionSource(name: string) {
-  return { name, ref: { $type: `${DEFS}#collectionSource`, collection: 'app.gather.demo.question' } }
+  return { name, ref: { $type: `${DEFS}#collectionSource`, collection: 'app.eventside.demo.question' } }
 }
 
 type CardProp = ComponentProps<typeof BlockCard>['card']
 
-/** An app.gather.block.card record. */
+/** An app.eventside.block.card record. */
 export function card(blocks: unknown[], extra: Record<string, unknown> = {}): CardProp {
   return {
-    $type: 'app.gather.block.card',
+    $type: 'app.eventside.block.card',
     blocks,
     timeZone: 'Europe/Amsterdam',
     createdAt: '2027-04-30T07:00:00.000Z',

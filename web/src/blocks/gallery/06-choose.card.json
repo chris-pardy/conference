@@ -1,14 +1,14 @@
 {
   "title": "Single and multiple select, with a limit",
   "card": {
-    "$type": "app.gather.block.card",
+    "$type": "app.eventside.block.card",
     "blocks": [
       {
-        "$type": "app.gather.block.defs#header",
+        "$type": "app.eventside.block.defs#header",
         "text": "Plan your afternoon"
       },
       {
-        "$type": "app.gather.block.defs#select",
+        "$type": "app.eventside.block.defs#select",
         "id": "track",
         "label": "Which track?",
         "options": [
@@ -27,7 +27,7 @@
         ]
       },
       {
-        "$type": "app.gather.block.defs#select",
+        "$type": "app.eventside.block.defs#select",
         "id": "talks",
         "label": "Talks to save",
         "multiple": true,
@@ -52,7 +52,7 @@
         ]
       },
       {
-        "$type": "app.gather.block.defs#submit",
+        "$type": "app.eventside.block.defs#submit",
         "id": "plan",
         "label": "Save my plan",
         "action": "plan"

@@ -1,14 +1,14 @@
 {
   "title": "Welcome: header, rich text, image, divider, context",
   "card": {
-    "$type": "app.gather.block.card",
+    "$type": "app.eventside.block.card",
     "blocks": [
       {
-        "$type": "app.gather.block.defs#header",
+        "$type": "app.eventside.block.defs#header",
         "text": "Welkom in Amsterdam"
       },
       {
-        "$type": "app.gather.block.defs#image",
+        "$type": "app.eventside.block.defs#image",
         "url": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMjAgMTYwIj48cmVjdCB3aWR0aD0iMzIwIiBoZWlnaHQ9IjE2MCIgZmlsbD0iI2RmZTdmNSIvPjxyZWN0IHk9IjExOCIgd2lkdGg9IjMyMCIgaGVpZ2h0PSI0MiIgZmlsbD0iIzdkOWJkMSIvPjxnIGZpbGw9IiMxZjRlZDgiPjxwYXRoIGQ9Ik0yMCAxMThWNjBsMTgtMTggMTggMTh2NTh6Ii8+PHBhdGggZD0iTTYyIDExOFY1MGwxNC0xNiAxNCAxNnY2OHoiLz48cGF0aCBkPSJNOTYgMTE4VjY2bDIwLTIwIDIwIDIwdjUyeiIvPjxwYXRoIGQ9Ik0xNDIgMTE4VjQ0bDE2LTE4IDE2IDE4djc0eiIvPjxwYXRoIGQ9Ik0xODAgMTE4VjU4bDE4LTIwIDE4IDIwdjYweiIvPjxwYXRoIGQ9Ik0yMjIgMTE4VjQ4bDE0LTE2IDE0IDE2djcweiIvPjxwYXRoIGQ9Ik0yNTYgMTE4VjYybDIyLTIyIDIyIDIydjU2eiIvPjwvZz48ZyBmaWxsPSIjZWVmMWY3Ij48cmVjdCB4PSIzMCIgeT0iNzAiIHdpZHRoPSI2IiBoZWlnaHQ9IjkiLz48cmVjdCB4PSI0MiIgeT0iNzAiIHdpZHRoPSI2IiBoZWlnaHQ9IjkiLz48cmVjdCB4PSI3MiIgeT0iNjAiIHdpZHRoPSI4IiBoZWlnaHQ9IjEwIi8+PHJlY3QgeD0iMTA4IiB5PSI3OCIgd2lkdGg9IjYiIGhlaWdodD0iOSIvPjxyZWN0IHg9IjEyMCIgeT0iNzgiIHdpZHRoPSI2IiBoZWlnaHQ9IjkiLz48cmVjdCB4PSIxNTIiIHk9IjU0IiB3aWR0aD0iOCIgaGVpZ2h0PSIxMCIvPjxyZWN0IHg9IjE5MCIgeT0iNzAiIHdpZHRoPSI2IiBoZWlnaHQ9IjkiLz48cmVjdCB4PSIyMDIiIHk9IjcwIiB3aWR0aD0iNiIgaGVpZ2h0PSI5Ii8+PHJlY3QgeD0iMjMyIiB5PSI1OCIgd2lkdGg9IjgiIGhlaWdodD0iMTAiLz48cmVjdCB4PSIyNjgiIHk9Ijc0IiB3aWR0aD0iNiIgaGVpZ2h0PSI5Ii8+PHJlY3QgeD0iMjgyIiB5PSI3NCIgd2lkdGg9IjYiIGhlaWdodD0iOSIvPjwvZz48L3N2Zz4=",
         "alt": "Canal houses along the Rozengracht",
         "aspectRatio": {
@@ -17,7 +17,7 @@
         }
       },
       {
-        "$type": "app.gather.block.defs#richText",
+        "$type": "app.eventside.block.defs#richText",
         "text": "Goedemorgen! Day 2 starts at 09:00 in the Grote Zaal. Say hi to @alice.test, and read the venue guide before you go. Coffee is free all day.",
         "facets": [
           {
@@ -27,7 +27,7 @@
             },
             "features": [
               {
-                "$type": "app.gather.block.defs#mention",
+                "$type": "app.eventside.block.defs#mention",
                 "did": "did:plc:alice"
               }
             ]
@@ -39,7 +39,7 @@
             },
             "features": [
               {
-                "$type": "app.gather.block.defs#link",
+                "$type": "app.eventside.block.defs#link",
                 "uri": "https://atmosphereconf.org/2027/venue"
               }
             ]
@@ -51,17 +51,17 @@
             },
             "features": [
               {
-                "$type": "app.gather.block.defs#bold"
+                "$type": "app.eventside.block.defs#bold"
               }
             ]
           }
         ]
       },
       {
-        "$type": "app.gather.block.defs#divider"
+        "$type": "app.eventside.block.defs#divider"
       },
       {
-        "$type": "app.gather.block.defs#context",
+        "$type": "app.eventside.block.defs#context",
         "text": "Posted by the organizers · Friday 30 April"
       }
     ],

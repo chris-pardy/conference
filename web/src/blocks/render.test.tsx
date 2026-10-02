@@ -43,15 +43,15 @@ test('TC-5: rich text shows links, mentions and emphasis', () => {
         facets: [
           {
             index: byteSlice(text, '@alice.test'),
-            features: [{ $type: 'app.gather.block.defs#mention', did: 'did:plc:alice' }],
+            features: [{ $type: 'app.eventside.block.defs#mention', did: 'did:plc:alice' }],
           },
           {
             index: byteSlice(text, 'venue page'),
-            features: [{ $type: 'app.gather.block.defs#link', uri: 'https://atmosphereconf.org/venue' }],
+            features: [{ $type: 'app.eventside.block.defs#link', uri: 'https://atmosphereconf.org/venue' }],
           },
           {
             index: byteSlice(text, 'free for speakers'),
-            features: [{ $type: 'app.gather.block.defs#bold' }],
+            features: [{ $type: 'app.eventside.block.defs#bold' }],
           },
         ],
       }),
@@ -90,7 +90,7 @@ test('TC-8: a block type the app does not know is skipped', () => {
   const { container } = renderCard(
     card([
       block('header', { text: 'Welkom in Amsterdam' }),
-      { $type: 'app.gather.block.future#hologram', text: 'Hologram of the keynote', size: 3 },
+      { $type: 'app.eventside.block.future#hologram', text: 'Hologram of the keynote', size: 3 },
       block('section', { blocks: [block('richText', { text: 'Doors open at 09:00.' })] }),
     ]),
   )

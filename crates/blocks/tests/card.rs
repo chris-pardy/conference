@@ -6,14 +6,14 @@ use serde_json::json;
 #[test]
 fn tc_1_a_card_round_trips_with_unknown_fields_and_blocks() {
     let record = json!({
-        "$type": "app.gather.block.card",
+        "$type": "app.eventside.block.card",
         "blocks": [
-            { "$type": "app.gather.block.defs#header", "text": "Welkom" },
-            { "$type": "app.gather.future#hologram", "size": 3 }
+            { "$type": "app.eventside.block.defs#header", "text": "Welkom" },
+            { "$type": "app.eventside.future#hologram", "size": 3 }
         ],
         "sources": [{
             "name": "me",
-            "ref": { "$type": "app.gather.block.defs#profileSource", "did": "did:plc:alice" },
+            "ref": { "$type": "app.eventside.block.defs#profileSource", "did": "did:plc:alice" },
             "futureSourceField": true
         }],
         "timeZone": "Europe/Amsterdam",
@@ -29,8 +29,8 @@ fn tc_1_a_card_round_trips_with_unknown_fields_and_blocks() {
 #[test]
 fn tc_1_a_card_without_optional_fields_round_trips() {
     let record = json!({
-        "$type": "app.gather.block.card",
-        "blocks": [{ "$type": "app.gather.block.defs#divider" }],
+        "$type": "app.eventside.block.card",
+        "blocks": [{ "$type": "app.eventside.block.defs#divider" }],
         "createdAt": "2027-04-30T07:00:00.000Z"
     });
     let written = serde_json::to_value(Card::from_record(&record).unwrap()).unwrap();

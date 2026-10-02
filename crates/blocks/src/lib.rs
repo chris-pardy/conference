@@ -1,4 +1,4 @@
-//! Card records (`app.gather.block.card`): types and lexicon validation.
+//! Card records (`app.eventside.block.card`): types and lexicon validation.
 //!
 //! The appview uses this to check cards it's handed before storing or
 //! serving them. It validates exactly as the PWA does, against the same
@@ -10,7 +10,7 @@ mod lexicon;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub const CARD_NSID: &str = "app.gather.block.card";
+pub const CARD_NSID: &str = "app.eventside.block.card";
 
 /// Why a card failed validation: the JSON pointer of the offending value, and
 /// a reason code shared with the frontend validator (`required`,
@@ -30,7 +30,7 @@ impl std::fmt::Display for CardError {
 
 impl std::error::Error for CardError {}
 
-/// Validates an `app.gather.block.card` record against the lexicons.
+/// Validates an `app.eventside.block.card` record against the lexicons.
 pub fn validate_card(record: &Value) -> Result<(), CardError> {
     let Some(obj) = record.as_object() else {
         return Err(CardError {

@@ -50,7 +50,7 @@ access to spaces they own.
   token.
 - **Scopes:**
   - Attendees get `space:` with `read_self`, plus `create` on the
-    `app.gather.*` collections.
+    `app.eventside.*` collections.
   - Organizers additionally get space `read` and `manage`.
 - **Client metadata and signing keys:** the appview publishes its client
   metadata document and JWKS. The same keys sign the space client
@@ -90,7 +90,7 @@ access to spaces they own.
 - How the test helper signs in: automate vivarium's pick-an-account consent
   page, or have the appview accept a test-only token exchange. Vivarium has
   no OAuth helper in `@vivarium/client`.
-- The exact scope strings for the placeholder `app.gather.*` namespace.
+- The exact scope strings for the `app.eventside.*` namespace.
 
 ## Architecture analysis
 

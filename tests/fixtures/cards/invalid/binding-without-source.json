@@ -1,10 +1,10 @@
 {
   "description": "a binding with no source name",
   "card": {
-    "$type": "app.gather.block.card",
+    "$type": "app.eventside.block.card",
     "blocks": [
-      { "$type": "app.gather.block.defs#header", "text": "Aanwezig" },
-      { "$type": "app.gather.block.defs#stat", "label": "attendees", "bind": { "value": { "path": "/total" } } }
+      { "$type": "app.eventside.block.defs#header", "text": "Aanwezig" },
+      { "$type": "app.eventside.block.defs#stat", "label": "attendees", "bind": { "value": { "path": "/total" } } }
     ],
     "createdAt": "2027-04-30T07:00:00.000Z"
   },

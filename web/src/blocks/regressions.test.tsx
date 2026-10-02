@@ -468,9 +468,9 @@ test('TC-5: a facet with both a mention and a link makes one link, not nested on
           {
             index: { byteStart: 4, byteEnd: 15 },
             features: [
-              { $type: 'app.gather.block.defs#mention', did: 'did:plc:alice' },
-              { $type: 'app.gather.block.defs#link', uri: 'https://example.com/alice' },
-              { $type: 'app.gather.block.defs#bold' },
+              { $type: 'app.eventside.block.defs#mention', did: 'did:plc:alice' },
+              { $type: 'app.eventside.block.defs#link', uri: 'https://example.com/alice' },
+              { $type: 'app.eventside.block.defs#bold' },
             ],
           },
         ],
@@ -1251,10 +1251,10 @@ test('TC-32: Escape in a sheet closes it without reaching the host', async () =>
 
 test('TC-5: a facet with thousands of features nests only once per kind', () => {
   const features = [
-    ...Array.from({ length: 10_000 }, () => ({ $type: 'app.gather.block.defs#bold' })),
-    { $type: 'app.gather.block.defs#italic' },
-    { $type: 'app.gather.block.defs#link', uri: 'https://example.com/a' },
-    { $type: 'app.gather.block.defs#mention', did: 'did:plc:alice' },
+    ...Array.from({ length: 10_000 }, () => ({ $type: 'app.eventside.block.defs#bold' })),
+    { $type: 'app.eventside.block.defs#italic' },
+    { $type: 'app.eventside.block.defs#link', uri: 'https://example.com/a' },
+    { $type: 'app.eventside.block.defs#mention', did: 'did:plc:alice' },
   ]
   const { container } = renderCard(
     card([block('richText', { text: 'hello', facets: [{ index: { byteStart: 0, byteEnd: 5 }, features }] })]),
@@ -1323,8 +1323,8 @@ test('TC-26: a profile lookup never shares a name with a card source', () => {
       </ActionContext>
     </SourceResolverContext>,
   )
-  expect(watched).toContainEqual(['', 'app.gather.block.defs#profileSource'])
-  expect(watched).toContainEqual(['profile:did:plc:alice', 'app.gather.block.defs#collectionSource'])
+  expect(watched).toContainEqual(['', 'app.eventside.block.defs#profileSource'])
+  expect(watched).toContainEqual(['profile:did:plc:alice', 'app.eventside.block.defs#collectionSource'])
 })
 
 test('TC-32: when an edit removes a nested sheet’s opener, focus goes to the outer sheet', async () => {
@@ -1368,8 +1368,8 @@ test('TC-5: an unsafe link does not hide a mention later in the same facet', () 
           {
             index: { byteStart: 0, byteEnd: 11 },
             features: [
-              { $type: 'app.gather.block.defs#link', uri: 'javascript:alert(1)' },
-              { $type: 'app.gather.block.defs#mention', did: 'did:plc:alice' },
+              { $type: 'app.eventside.block.defs#link', uri: 'javascript:alert(1)' },
+              { $type: 'app.eventside.block.defs#mention', did: 'did:plc:alice' },
             ],
           },
         ],

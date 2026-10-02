@@ -419,8 +419,9 @@ features, and moved the auth, sync and action concerns out of this one.
 
 ## Design review
 
-NSIDs use `app.gather.*` as a **placeholder** namespace until the user
-picks the real one.
+NSIDs use `app.eventside.*` (the domain is eventside.app). Until
+2026-10-01 they used the placeholder `app.gather.*`, renamed in its own PR
+after this feature merged.
 
 ### Approach
 
@@ -500,8 +501,8 @@ All times use a 24-hour clock.
 ### Components
 
 ```
-lexicons/app/gather/block/defs.json    block union, binding, sourceRef, moduleRef, variants
-lexicons/app/gather/block/card.json    the card record
+lexicons/app/eventside/block/defs.json    block union, binding, sourceRef, moduleRef, variants
+lexicons/app/eventside/block/card.json    the card record
 crates/blocks/                         serde types + lexicon validation for cards (Rust),
                                        used later by the appview; no runtime yet
 web/src/blocks/
@@ -519,7 +520,7 @@ web/src/blocks/gallery/*.card.json     sample cards (valid against the lexicon) 
 
 ### Data (lexicons)
 
-- **`app.gather.block.defs`:**
+- **`app.eventside.block.defs`:**
   - The **block union**, with each v1 type as a def: `section`, `header`,
     `divider`, `context`, `richText`, `image`, `stack`, `columns`,
     `button`, `buttonGroup`, `textInput`, `select`, `submit`, `list`,
@@ -541,7 +542,7 @@ web/src/blocks/gallery/*.card.json     sample cards (valid against the lexicon) 
     - `exports`
   - `#animate` (reserved): a target property, `from`, `to`, `duration`,
     `easing` and `repeat`.
-- **`app.gather.block.card`** (a record in a space) has these fields:
+- **`app.eventside.block.card`** (a record in a space) has these fields:
   `blocks`, `sources` (a map from name to `#sourceRef`), `middleware`
   (a list of `#moduleRef`, reserved), `fallbackText` (optional), and
   `createdAt`.
@@ -587,6 +588,8 @@ web/src/blocks/gallery/*.card.json     sample cards (valid against the lexicon) 
   `middleware` and `#viewSource` shapes reduce that, but may still change
   before those features ship.
 - **The namespace is a placeholder** and gets baked into records.
+  (Resolved: renamed to `app.eventside.*` on 2026-10-01, before any card
+  was written.)
 - **Vocabulary size:** 24 block types is a lot of components and gallery
   cards for one feature. It's still static UI, so it's low risk.
 
@@ -964,7 +967,7 @@ floats, so:
 - **Values:** option and button values are strings, and progress values
   are integers (`value` of `max`, default 100).
 
-The lexicons are in `lexicons/app/gather/block/{defs,card}.json`.
+The lexicons are in `lexicons/app/eventside/block/{defs,card}.json`.
 
 **Test contract** (what the frozen tests rely on besides the lexicons):
 
@@ -1729,7 +1732,7 @@ one nit is recorded as a decision.
    click inside it keeps focus there. A Playwright test covers it.
 2. **[minor] The default tokens overrode a host's theme**, because they
    load with the lazy blocks CSS, after the host's stylesheet. **Fixed:**
-   the defaults sit in a cascade layer (`gather-theme-defaults`), so any
+   the defaults sit in a cascade layer (`eventside-theme-defaults`), so any
    host rule outside a layer wins whatever the load order. (A host theme
    inside its own layer still loses: see round 15 #3.) A Playwright test
    covers it, and TC-33 still passes.

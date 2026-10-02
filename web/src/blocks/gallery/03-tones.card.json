@@ -1,14 +1,14 @@
 {
   "title": "Data display: progress, stats and badges in every tone",
   "card": {
-    "$type": "app.gather.block.card",
+    "$type": "app.eventside.block.card",
     "blocks": [
       {
-        "$type": "app.gather.block.defs#header",
+        "$type": "app.eventside.block.defs#header",
         "text": "Snack poll results"
       },
       {
-        "$type": "app.gather.block.defs#progress",
+        "$type": "app.eventside.block.defs#progress",
         "label": "Bitterballen",
         "bind": {
           "value": {
@@ -18,7 +18,7 @@
         }
       },
       {
-        "$type": "app.gather.block.defs#progress",
+        "$type": "app.eventside.block.defs#progress",
         "label": "Stroopwafel",
         "bind": {
           "value": {
@@ -28,7 +28,7 @@
         }
       },
       {
-        "$type": "app.gather.block.defs#progress",
+        "$type": "app.eventside.block.defs#progress",
         "label": "Kaas",
         "bind": {
           "value": {
@@ -38,31 +38,31 @@
         }
       },
       {
-        "$type": "app.gather.block.defs#section",
+        "$type": "app.eventside.block.defs#section",
         "title": "Status",
         "blocks": [
           {
-            "$type": "app.gather.block.defs#badge",
+            "$type": "app.eventside.block.defs#badge",
             "text": "Open",
             "tone": "success"
           },
           {
-            "$type": "app.gather.block.defs#badge",
+            "$type": "app.eventside.block.defs#badge",
             "text": "Tip: card only",
             "tone": "info"
           },
           {
-            "$type": "app.gather.block.defs#badge",
+            "$type": "app.eventside.block.defs#badge",
             "text": "Druk bij de koffie",
             "tone": "warning"
           },
           {
-            "$type": "app.gather.block.defs#badge",
+            "$type": "app.eventside.block.defs#badge",
             "text": "Lift out of order",
             "tone": "danger"
           },
           {
-            "$type": "app.gather.block.defs#badge",
+            "$type": "app.eventside.block.defs#badge",
             "text": "Day 2"
           }
         ]
@@ -74,8 +74,8 @@
       {
         "name": "poll",
         "ref": {
-          "$type": "app.gather.block.defs#viewSource",
-          "view": "app.gather.block.view.actionTally"
+          "$type": "app.eventside.block.defs#viewSource",
+          "view": "app.eventside.block.view.actionTally"
         }
       }
     ]

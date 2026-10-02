@@ -55,7 +55,7 @@ space, with demo middleware:
 
 ## Data
 
-- **`app.gather.block.action`** is a record in the attendee's repo in the
+- **`app.eventside.block.action`** is a record in the attendee's repo in the
   space. Fields: `card` (a space record reference), `blockId`, `actionId`,
   `value` and `createdAt`. The record key is a client-generated TID
   (`clientId`). The PDS refuses to create an rkey that already exists, so
@@ -97,9 +97,9 @@ space, with demo middleware:
 - **Parity:** a test runs the same modules on both hosts.
 - **Views** are quasi-records that the appview computes from the index plus
   the accepted-actions table.
-  - `app.gather.block.view.actionTally{card, blockId}` returns
+  - `app.eventside.block.view.actionTally{card, blockId}` returns
     `{total, options: [{value, count, percent}], mine?}`.
-  - `app.gather.block.view.actionList{card, blockId, sort}` returns
+  - `app.eventside.block.view.actionList{card, blockId, sort}` returns
     `{items: [{uri, author, value, score, mine}]}`.
   - `mine` only ever holds the viewer's own data.
   - Each view ships an optimistic reducer, for `block-offline`.

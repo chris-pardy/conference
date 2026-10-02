@@ -27,7 +27,7 @@ export interface SourceResolver {
 
 export const SourceResolverContext = createContext<SourceResolver | null>(null)
 
-export const PROFILE_SOURCE = 'app.gather.block.defs#profileSource'
+export const PROFILE_SOURCE = 'app.eventside.block.defs#profileSource'
 
 /** A source that never answers, is forbidden, or fails. The last two show as unavailable. */
 export type FixtureMarker = { readonly fixture: 'loading' | 'forbidden' | 'failing' }

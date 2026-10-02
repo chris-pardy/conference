@@ -7,7 +7,7 @@ import { Columns, Context, Divider, Header, Image, RichTextBlock, Section, Stack
 
 /**
  * The component for each block type this version renders, by the name after
- * `app.gather.block.defs#`. Anything else, including the reserved `custom`
+ * `app.eventside.block.defs#`. Anything else, including the reserved `custom`
  * and `canvas` until block-sandbox, is skipped. Adding a block type means a
  * lexicon def, a component here, and a gallery card.
  */

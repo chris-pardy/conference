@@ -2,18 +2,18 @@
   "title": "Ephemeral surface: only you see it, and you can dismiss it",
   "surface": "ephemeral",
   "card": {
-    "$type": "app.gather.block.card",
+    "$type": "app.eventside.block.card",
     "blocks": [
       {
-        "$type": "app.gather.block.defs#header",
+        "$type": "app.eventside.block.defs#header",
         "text": "Je vraag is ontvangen"
       },
       {
-        "$type": "app.gather.block.defs#richText",
+        "$type": "app.eventside.block.defs#richText",
         "text": "We read questions out after the keynote. You can ask another any time."
       },
       {
-        "$type": "app.gather.block.defs#badge",
+        "$type": "app.eventside.block.defs#badge",
         "text": "Received",
         "tone": "success"
       }

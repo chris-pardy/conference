@@ -16,8 +16,8 @@ use serde_json::{Map, Value};
 use crate::CardError;
 
 const LEXICONS: &[&str] = &[
-    include_str!("../../../lexicons/app/gather/block/card.json"),
-    include_str!("../../../lexicons/app/gather/block/defs.json"),
+    include_str!("../../../lexicons/app/eventside/block/card.json"),
+    include_str!("../../../lexicons/app/eventside/block/defs.json"),
 ];
 
 /// Every def by its full URI, `nsid#name` (`nsid#main` for the main def).
@@ -414,7 +414,7 @@ fn is_cid(s: &str) -> bool {
     }
 }
 
-const DEFS_PREFIX: &str = "app.gather.block.defs#";
+const DEFS_PREFIX: &str = "app.eventside.block.defs#";
 
 /// How deeply blocks may nest (mirrors `MAX_DEPTH` in web/src/blocks/limits.ts).
 pub(crate) const MAX_DEPTH: usize = 10;
@@ -512,7 +512,7 @@ pub(crate) fn check_cids(card: &Value) -> Result {
     }
     for (i, source) in card["sources"].as_array().into_iter().flatten().enumerate() {
         let r = &source["ref"];
-        if r["$type"].as_str() == Some("app.gather.block.defs#recordSource") {
+        if r["$type"].as_str() == Some("app.eventside.block.defs#recordSource") {
             bad(&r["record"]["cid"], format!("/sources/{i}/ref/record/cid"))?;
         }
     }
