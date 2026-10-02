@@ -2,7 +2,7 @@
 status: ready
 impact: cross-cutting
 depends-on: [ci-pipeline]
-branch:
+branch: feature/attendee-sign-in
 tests-commit:
 ---
 
