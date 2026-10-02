@@ -1,9 +1,9 @@
 ---
-status: ready
+status: implementing
 impact: cross-cutting
 depends-on: [ci-pipeline]
 branch: feature/attendee-sign-in
-tests-commit:
+tests-commit: 24a32a9cafbe056c159318ef49b0c4542a640736
 ---
 
 # Attendee sign-in
