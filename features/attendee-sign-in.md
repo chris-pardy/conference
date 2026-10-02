@@ -1059,3 +1059,45 @@ one suggestion within finding 1 (per-IP rate limiting) was declined.
      load.
 9. **[nit] `PdsClient` didn't share DPoP nonces.**
    - Fixed: it reads and updates the OAuth client's per-origin nonce cache.
+
+### Round 3
+
+The reviewer found 0 blocking, 0 major, 3 minor and 4 nits. `pnpm check`
+was green. The reviewer confirmed the earlier fixes, and two suspected
+races turned out not to happen. Every finding was fixed.
+
+1. **[minor] The issuer backoff also blocked revocation, and every other
+   session on the same issuer.**
+   - Fixed: `cached_auth_server` no longer checks the backoff. Only the
+     renewer does: it skips sessions on a backing-off issuer.
+   - Revocation, the callback and `pds_client()` always try.
+   - Failed metadata fetches and `Unavailable` refreshes still mark the
+     issuer down.
+2. **[minor] Temporary resolver failures were treated as final.**
+   - Fixed: only a 400 or 404 from `resolveHandle` means "no such handle",
+     so a 429 or 5xx is `Unresolvable`.
+   - `resolve_did` uses `handle.invalid` only when the handle definitely
+     doesn't point back. A resolver that can't answer fails the
+     resolution, so the callback reports `resolution_failed` and stores
+     nothing.
+3. **[minor] The PWA showed the person as signed out whenever `getSession`
+   failed.**
+   - Fixed: network errors and 5xx answers read as a new `unavailable`
+     state. The header shows neither control, and an already-known state is
+     kept.
+   - The provider asks again on `online` and when the app becomes visible.
+   - The "never throws" comment now matches what the code does.
+4. **[nit] Token responses weren't checked for `token_type` or `sub`.**
+   - Fixed: every token response must be `DPoP` and carry `sub`. A refresh
+     must come back for the session's own DID, and a missing `sub` counts
+     as a mismatch.
+5. **[nit] Issuers were normalized inconsistently.**
+   - Fixed: an issuer is compared exactly everywhere: metadata `issuer`,
+     the stored issuer, and the callback's `iss`. A trailing slash is
+     refused rather than trimmed, since an atproto issuer is a bare origin.
+6. **[nit] State-changing routes looked the session up twice.**
+   - Fixed: the CSRF layer passes the session it checked to `CurrentUser`
+     through request extensions.
+7. **[nit] `serde_json` was listed under both dependencies and
+   dev-dependencies.**
+   - Fixed: the dev-dependency entry is gone.

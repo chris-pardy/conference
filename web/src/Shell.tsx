@@ -30,7 +30,8 @@ function useReturnTo(): string {
 function AccountControl() {
   const { session } = useSession()
   const returnTo = useReturnTo()
-  if (session.kind === 'loading') return null
+  // Neither control until the appview has said who's signed in.
+  if (session.kind === 'loading' || session.kind === 'unavailable') return null
   if (session.kind === 'signedIn') return <AccountMenu user={session.user} />
   return (
     <Link className="shell__signin" to={`/signin?${new URLSearchParams({ return_to: returnTo })}`}>

@@ -65,7 +65,12 @@ impl FromRequestParts<AppState> for CurrentUser {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
-        match session::lookup(state, &parts.headers).await {
+        // The CSRF layer already loaded the session for state-changing requests.
+        let lookup = match parts.extensions.remove::<CheckedSession>() {
+            Some(CheckedSession(row)) => Ok(Lookup::Live(row)),
+            None => session::lookup(state, &parts.headers).await,
+        };
+        match lookup {
             Ok(Lookup::Live(row)) => {
                 if let Err(err) = session::touch(state, &row).await {
                     eprintln!("could not record session use: {err}");
@@ -93,7 +98,11 @@ impl FromRequestParts<AppState> for CurrentUser {
 
 /// Every state-changing request (non-GET XRPC, and sign-out) must carry the
 /// session's CSRF token in `X-CSRF-Token`.
-pub async fn require_csrf(State(state): State<AppState>, req: Request, next: Next) -> Response {
+/// A live session the CSRF layer has already checked, for `CurrentUser`.
+#[derive(Clone)]
+struct CheckedSession(SessionRow);
+
+pub async fn require_csrf(State(state): State<AppState>, mut req: Request, next: Next) -> Response {
     let path = req.uri().path();
     let changes_state = !matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS);
     if !(changes_state && (path.starts_with("/xrpc/") || path == "/oauth/logout")) {
@@ -122,6 +131,7 @@ pub async fn require_csrf(State(state): State<AppState>, req: Request, next: Nex
             "This request needs the session's CSRF token.",
         );
     }
+    req.extensions_mut().insert(CheckedSession(row));
     next.run(req).await
 }
 

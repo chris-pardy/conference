@@ -40,7 +40,8 @@ impl Resolver {
             .send()
             .await
             .map_err(|e| IdentityError::Unresolvable(format!("resolveHandle failed: {e}")))?;
-        if res.status().is_client_error() {
+        // Only "no such handle" is final; rate limits and the like aren't.
+        if matches!(res.status().as_u16(), 400 | 404) {
             return Err(IdentityError::HandleNotFound);
         }
         if !res.status().is_success() {
@@ -75,9 +76,15 @@ impl Resolver {
         let pds = pds_endpoint(&doc)
             .ok_or_else(|| IdentityError::Unresolvable(format!("{did} names no PDS")))?;
         let claimed = claimed_handle(&doc);
+        // `handle.invalid` only when the handle definitely doesn't point back;
+        // a resolver that can't answer right now fails the whole resolution.
         let handle = match claimed {
-            Some(h) if self.resolve_handle(&h).await.as_deref() == Ok(did) => h,
-            _ => "handle.invalid".to_owned(),
+            Some(h) => match self.resolve_handle(&h).await {
+                Ok(back) if back == did => h,
+                Ok(_) | Err(IdentityError::HandleNotFound) => "handle.invalid".to_owned(),
+                Err(err) => return Err(err),
+            },
+            None => "handle.invalid".to_owned(),
         };
         Ok(Identity { did: did.to_owned(), handle, pds })
     }

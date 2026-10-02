@@ -223,7 +223,7 @@ pub async fn callback(
         return fail("request_expired", &return_to, &clear);
     }
     // RFC 9207: the issuer is checked on errors too.
-    if params.get("iss").map(|i| i.trim_end_matches('/')) != Some(pending.issuer.as_str()) {
+    if params.get("iss").map(String::as_str) != Some(pending.issuer.as_str()) {
         return fail("issuer_mismatch", &return_to, &clear);
     }
     if let Some(error) = params.get("error") {

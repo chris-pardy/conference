@@ -91,7 +91,7 @@ async fn refresh_leased(state: &AppState, id_hash: &str) -> Renewal {
     };
     match state.oauth.refresh(&server, old, &key).await {
         // Tokens for someone else are a refused grant, not a renewal.
-        Ok(tokens) if tokens.sub.as_deref().is_some_and(|sub| sub != row.did) => {
+        Ok(tokens) if tokens.sub.as_deref() != Some(row.did.as_str()) => {
             eprintln!("renewal: a refresh for {} came back for {:?}", row.did, tokens.sub);
             revoke_unsaved(state, &server, &tokens, &key).await;
             match session::wipe(&state.db, id_hash).await {
@@ -178,8 +178,8 @@ pub async fn run_once(state: &AppState) {
     let config = &state.config;
     let due = now + ms(config.token_renew_interval) + ms(config.token_refresh_skew);
     let idle_before = now - ms(config.session_idle_timeout);
-    let rows = sqlx::query_as::<_, (String, i64)>(
-        "SELECT id_hash, last_seen_at FROM sessions WHERE ended_at IS NULL \
+    let rows = sqlx::query_as::<_, (String, i64, Option<String>)>(
+        "SELECT id_hash, last_seen_at, issuer FROM sessions WHERE ended_at IS NULL \
          AND (last_seen_at < $1 OR (refresh_token IS NOT NULL AND token_expires_at <= $2))",
     )
     .bind(idle_before)
@@ -195,7 +195,13 @@ pub async fn run_once(state: &AppState) {
     };
     let permits = Arc::new(Semaphore::new(CONCURRENCY));
     let mut tasks = JoinSet::new();
-    for (id_hash, last_seen) in rows {
+    for (id_hash, last_seen, issuer) in rows {
+        // Leave an unreachable issuer alone for a while, rather than timing
+        // out once per session on it every run.
+        let backing_off = issuer.is_some_and(|i| state.oauth.backing_off(&i));
+        if backing_off && last_seen >= idle_before {
+            continue;
+        }
         let state = state.clone();
         let permits = permits.clone();
         tasks.spawn(async move {

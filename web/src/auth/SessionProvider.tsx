@@ -8,12 +8,24 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const controller = new AbortController()
-    fetchSession(controller.signal)
-      .then(setSession)
-      .catch(() => {
-        if (!controller.signal.aborted) setSession({ kind: 'signedOut' })
-      })
-    return () => controller.abort()
+    const load = () => {
+      fetchSession(controller.signal)
+        // Keep what's known if the appview can't be asked right now.
+        .then((next) => setSession((prev) => (next.kind === 'unavailable' && prev.kind !== 'loading' ? prev : next)))
+        .catch(() => {})
+    }
+    load()
+    // Ask again when the connection, or the app, comes back.
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') load()
+    }
+    window.addEventListener('online', load)
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      controller.abort()
+      window.removeEventListener('online', load)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
   }, [])
 
   const csrfToken = session.kind === 'signedIn' ? session.user.csrfToken : undefined

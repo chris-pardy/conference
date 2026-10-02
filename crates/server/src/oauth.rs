@@ -25,6 +25,7 @@ pub struct AuthServer {
 #[derive(Debug, Clone, Deserialize)]
 pub struct TokenSet {
     pub access_token: String,
+    pub token_type: String,
     pub refresh_token: Option<String>,
     pub expires_in: Option<i64>,
     pub scope: Option<String>,
@@ -137,13 +138,10 @@ impl OAuthClient {
     }
 
     /// An issuer's metadata, reused for a while: refreshes and revocations
-    /// for sessions whose issuer was checked when they were created.
-    /// Fails fast while the issuer is backing off.
+    /// for sessions whose issuer was checked when they were created. A failed
+    /// fetch marks the issuer down, which only the renewer heeds.
     pub async fn cached_auth_server(&self, issuer: &str) -> Result<AuthServer, String> {
         let now = now_ms();
-        if self.backing_off(issuer) {
-            return Err(format!("{issuer} was unreachable moments ago; backing off"));
-        }
         let cached =
             self.servers.lock().expect("the metadata cache isn't poisoned").get(issuer).cloned();
         if let Some((server, at)) = cached
@@ -164,7 +162,9 @@ impl OAuthClient {
         let metadata_url = format!("{issuer}/.well-known/oauth-authorization-server");
         let server: AuthServer = serde_json::from_value(self.get_json(&metadata_url).await?)
             .map_err(|e| format!("{metadata_url}: {e}"))?;
-        if server.issuer.trim_end_matches('/') != issuer {
+        // An atproto issuer is a bare origin; the same string is stored and
+        // compared everywhere, so a trailing slash is refused, not trimmed.
+        if server.issuer != issuer {
             return Err(format!("{metadata_url} claims to be {}", server.issuer));
         }
         for endpoint in [
@@ -311,8 +311,19 @@ impl OAuthClient {
         dpop_key: &EcKey,
     ) -> Result<TokenSet, OAuthError> {
         let body = self.post_form(&server.token_endpoint, form, dpop_key).await?;
-        serde_json::from_value(body)
-            .map_err(|e| OAuthError::Rejected(format!("bad token response: {e}")))
+        let tokens: TokenSet = serde_json::from_value(body)
+            .map_err(|e| OAuthError::Rejected(format!("bad token response: {e}")))?;
+        // atproto tokens are DPoP-bound, and always say whose they are.
+        if !tokens.token_type.eq_ignore_ascii_case("DPoP") {
+            return Err(OAuthError::Rejected(format!(
+                "token_type {:?}, not DPoP",
+                tokens.token_type
+            )));
+        }
+        if tokens.sub.is_none() {
+            return Err(OAuthError::Rejected("the token response has no sub".into()));
+        }
+        Ok(tokens)
     }
 
     /// POSTs a form with a DPoP proof, retrying once with the server's nonce.

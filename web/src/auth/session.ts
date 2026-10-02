@@ -9,6 +9,8 @@ export type Session =
   | { kind: 'signedOut' }
   | { kind: 'signedIn'; user: SessionInfo }
   | { kind: 'expired'; handle?: string; did?: string }
+  /** The appview couldn't be asked (offline, or a 5xx): not the same as signed out. */
+  | { kind: 'unavailable' }
 
 export interface SessionContextValue {
   session: Session
@@ -27,10 +29,27 @@ export function useSession(): SessionContextValue {
 
 export const GET_SESSION = '/xrpc/app.eventside.auth.getSession'
 
-/** Reads who's signed in. Never throws: a failure reads as signed out. */
+/**
+ * Reads who's signed in. Only the appview's own answer decides: a network
+ * error or a 5xx reads as `unavailable`, never as signed out. Throws only
+ * when aborted.
+ */
 export async function fetchSession(signal?: AbortSignal): Promise<Session> {
-  const res = await fetch(GET_SESSION, { signal, credentials: 'same-origin', cache: 'no-store' })
-  if (res.ok) return { kind: 'signedIn', user: (await res.json()) as SessionInfo }
+  let res: Response
+  try {
+    res = await fetch(GET_SESSION, { signal, credentials: 'same-origin', cache: 'no-store' })
+  } catch (err) {
+    if (signal?.aborted) throw err
+    return { kind: 'unavailable' }
+  }
+  if (res.ok) {
+    try {
+      return { kind: 'signedIn', user: (await res.json()) as SessionInfo }
+    } catch {
+      return { kind: 'unavailable' }
+    }
+  }
+  if (res.status >= 500) return { kind: 'unavailable' }
   const body = await res.json().catch(() => ({}))
   if (res.status === 401 && body.error === 'SessionExpired')
     return { kind: 'expired', handle: body.handle, did: body.did }
