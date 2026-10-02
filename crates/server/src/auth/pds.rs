@@ -10,6 +10,7 @@ use super::session;
 use crate::AppState;
 use crate::db::{ms, now_ms};
 use crate::keys::{EcKey, dpop_proof};
+use crate::oauth::OAuthClient;
 
 #[derive(Debug)]
 pub enum PdsError {
@@ -21,6 +22,8 @@ pub enum PdsError {
 
 pub struct PdsClient {
     http: reqwest::Client,
+    /// For the DPoP nonces each server last handed out.
+    oauth: OAuthClient,
     pds: String,
     access_token: String,
     dpop_key: EcKey,
@@ -45,7 +48,8 @@ impl PdsClient {
                 let pds = pds.clone();
                 let http = state.http.guarded(&pds).map_err(PdsError::Unavailable)?.clone();
                 let dpop_key = EcKey::from_jwk(key).map_err(PdsError::Unavailable)?;
-                return Ok(Self { http, pds, access_token: token.clone(), dpop_key });
+                let oauth = state.oauth.clone();
+                return Ok(Self { http, oauth, pds, access_token: token.clone(), dpop_key });
             }
             // Nothing to refresh with: the grant is over once its access token is.
             if row.refresh_token.is_none() {
@@ -74,7 +78,7 @@ impl PdsClient {
         body: Option<&serde_json::Value>,
     ) -> Result<Response, PdsError> {
         let url = format!("{}{path}", self.pds);
-        let mut nonce: Option<String> = None;
+        let mut nonce = self.oauth.nonce(&url);
         for _ in 0..2 {
             let proof = dpop_proof(
                 &self.dpop_key,
@@ -100,6 +104,9 @@ impl PdsClient {
                     .is_some_and(|v| v.contains("use_dpop_nonce"));
             let offered =
                 res.headers().get("dpop-nonce").and_then(|v| v.to_str().ok()).map(str::to_owned);
+            if let Some(new) = &offered {
+                self.oauth.remember_nonce(&url, new);
+            }
             match (wants_nonce, offered) {
                 (true, Some(new)) if nonce.as_deref() != Some(new.as_str()) => nonce = Some(new),
                 _ => return Ok(res),

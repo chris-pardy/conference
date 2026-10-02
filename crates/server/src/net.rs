@@ -13,6 +13,35 @@ use reqwest::dns::{Addrs, Name, Resolve, Resolving};
 
 const TIMEOUT: Duration = Duration::from_secs(10);
 
+/// The most the appview reads of any response from another service: DID
+/// documents, metadata and token responses are all far smaller.
+pub const BODY_CAP: usize = 64 * 1024;
+
+/// A response body, refusing anything over `BODY_CAP` without reading past it.
+pub async fn read_capped(mut res: reqwest::Response) -> Result<Vec<u8>, String> {
+    let url = res.url().to_string();
+    if res.content_length().is_some_and(|len| len > BODY_CAP as u64) {
+        return Err(format!("{url} sent more than {BODY_CAP} bytes"));
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = res.chunk().await.map_err(|e| format!("{url}: {e}"))? {
+        if body.len() + chunk.len() > BODY_CAP {
+            return Err(format!("{url} sent more than {BODY_CAP} bytes"));
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
+}
+
+/// A JSON response body, capped like `read_capped`.
+pub async fn read_json<T: serde::de::DeserializeOwned>(
+    res: reqwest::Response,
+) -> Result<T, String> {
+    let url = res.url().to_string();
+    let body = read_capped(res).await?;
+    serde_json::from_slice(&body).map_err(|e| format!("{url}: {e}"))
+}
+
 /// Whether an address is on the public internet.
 pub fn is_public(ip: IpAddr) -> bool {
     match ip {

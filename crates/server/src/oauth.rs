@@ -64,7 +64,12 @@ pub struct OAuthClient {
     nonces: Arc<Mutex<HashMap<String, String>>>,
     /// Authorization-server metadata by issuer, with when it was fetched.
     servers: Arc<Mutex<HashMap<String, (AuthServer, i64)>>>,
+    /// Issuers that recently couldn't be reached, and until when to leave them be.
+    down: Arc<Mutex<HashMap<String, i64>>>,
 }
+
+/// How long an unreachable authorization server is left alone.
+const BACKOFF_MS: i64 = 30_000;
 
 /// How long fetched authorization-server metadata is reused.
 const METADATA_TTL_MS: i64 = 10 * 60 * 1000;
@@ -81,6 +86,7 @@ impl OAuthClient {
             http,
             nonces: Arc::default(),
             servers: Arc::default(),
+            down: Arc::default(),
         }
     }
 
@@ -132,8 +138,12 @@ impl OAuthClient {
 
     /// An issuer's metadata, reused for a while: refreshes and revocations
     /// for sessions whose issuer was checked when they were created.
+    /// Fails fast while the issuer is backing off.
     pub async fn cached_auth_server(&self, issuer: &str) -> Result<AuthServer, String> {
         let now = now_ms();
+        if self.backing_off(issuer) {
+            return Err(format!("{issuer} was unreachable moments ago; backing off"));
+        }
         let cached =
             self.servers.lock().expect("the metadata cache isn't poisoned").get(issuer).cloned();
         if let Some((server, at)) = cached
@@ -141,7 +151,7 @@ impl OAuthClient {
         {
             return Ok(server);
         }
-        let server = self.auth_server(issuer).await?;
+        let server = self.auth_server(issuer).await.inspect_err(|_| self.mark_down(issuer))?;
         self.servers
             .lock()
             .expect("the metadata cache isn't poisoned")
@@ -167,13 +177,35 @@ impl OAuthClient {
         Ok(server)
     }
 
+    /// Whether an issuer recently couldn't be reached.
+    pub fn backing_off(&self, issuer: &str) -> bool {
+        let down = self.down.lock().expect("the backoff table isn't poisoned");
+        down.get(issuer).is_some_and(|until| *until > now_ms())
+    }
+
+    /// Leaves an unreachable issuer alone for a while.
+    pub fn mark_down(&self, issuer: &str) {
+        let mut down = self.down.lock().expect("the backoff table isn't poisoned");
+        down.insert(issuer.to_owned(), now_ms() + BACKOFF_MS);
+    }
+
+    /// The latest DPoP nonce a server (by any URL on it) handed out.
+    pub fn nonce(&self, url: &str) -> Option<String> {
+        self.nonces.lock().expect("the nonce cache isn't poisoned").get(&origin(url)).cloned()
+    }
+
+    pub fn remember_nonce(&self, url: &str, nonce: &str) {
+        let mut nonces = self.nonces.lock().expect("the nonce cache isn't poisoned");
+        nonces.insert(origin(url), nonce.to_owned());
+    }
+
     async fn get_json(&self, url: &str) -> Result<Value, String> {
         let res =
             self.http.guarded(url)?.get(url).send().await.map_err(|e| format!("{url}: {e}"))?;
         if !res.status().is_success() {
             return Err(format!("{url} answered {}", res.status()));
         }
-        res.json().await.map_err(|e| format!("{url}: {e}"))
+        crate::net::read_json(res).await
     }
 
     /// Pushes an authorization request, returning the URL to send the browser to.
@@ -291,10 +323,8 @@ impl OAuthClient {
         dpop_key: &EcKey,
     ) -> Result<Value, OAuthError> {
         let client = self.http.guarded(url).map_err(OAuthError::Rejected)?;
-        let origin = origin(url);
         for attempt in 0..2 {
-            let nonce =
-                self.nonces.lock().expect("the nonce cache isn't poisoned").get(&origin).cloned();
+            let nonce = self.nonce(url);
             let proof = dpop_proof(dpop_key, "POST", url, nonce.as_deref(), None);
             let res = client
                 .post(url)
@@ -305,13 +335,10 @@ impl OAuthClient {
                 .map_err(|e| OAuthError::Unavailable(format!("{url}: {e}")))?;
             let status = res.status();
             if let Some(new) = res.headers().get("dpop-nonce").and_then(|v| v.to_str().ok()) {
-                self.nonces
-                    .lock()
-                    .expect("the nonce cache isn't poisoned")
-                    .insert(origin.clone(), new.to_owned());
+                self.remember_nonce(url, new);
             }
-            let text =
-                res.text().await.map_err(|e| OAuthError::Unavailable(format!("{url}: {e}")))?;
+            let body = crate::net::read_capped(res).await.map_err(OAuthError::Unavailable)?;
+            let text = String::from_utf8_lossy(&body);
             let body: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
             if status.is_success() {
                 return Ok(body);

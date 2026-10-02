@@ -1009,3 +1009,53 @@ was green and the frozen files unchanged. Every finding was fixed.
    unhandled.**
    - Fixed: `signOut` catches errors and reports whether it worked, and the
      account menu shows a message when it didn't.
+
+### Round 2
+
+The reviewer found 0 blocking, 1 major, 5 minor and 3 nits. `pnpm check`
+was green, and every round 1 fix was confirmed. All findings were fixed;
+one suggestion within finding 1 (per-IP rate limiting) was declined.
+
+1. **[major] Unbounded response bodies from attacker-chosen hosts.**
+   - Fixed: `net::read_capped` and `net::read_json` cap every body read
+     from another service at 64 KiB. They check `Content-Length` first,
+     then stop reading in chunks once past the cap. They cover DID
+     documents, `resolveHandle`, PDS and authorization-server metadata,
+     profiles, and PAR, token and revocation responses.
+   - Declined: per-IP rate limiting on `/oauth/login` and `/oauth/signup`.
+     The appview binds 127.0.0.1 and runs behind whatever serves its
+     public origin, so the peer address is the proxy's. A per-IP limit
+     belongs at that edge, which the production topology (an open risk in
+     the design) will decide. Pending requests are swept on every renewal
+     run.
+2. **[minor] A sign-out during a refresh left the new grant unrevoked.**
+   - Fixed: when the save after a refresh matches no row, the new grant is
+     revoked. That covers a session signed out, ended or replaced
+     mid-refresh. A failed save revokes it too.
+3. **[minor] No backoff for unreachable authorization servers.**
+   - Fixed: an issuer whose metadata fetch fails, or whose refresh is
+     `Unavailable`, is left alone for 30 s. `cached_auth_server` fails fast
+     until then, so one run costs at most one timeout per issuer, not one
+     per session.
+4. **[minor] DIDs typed at `/oauth/login` went into the PLC URL
+   unvalidated.**
+   - Fixed: `identity::is_valid_did` requires `did:plc:` with 24 base32
+     characters, or a host-level `did:web:`.
+   - It's checked at login (a bad DID is `handle_not_found`), in
+     `resolve_did`, and on `resolveHandle` results and callback `sub`
+     values.
+5. **[minor] Most error codes had no message.**
+   - Fixed: the sign-in page now has a message for each of the 11 codes.
+     The generic fallback covers only codes it doesn't know.
+6. **[minor] A refresh's `sub` wasn't checked.**
+   - Fixed: a refresh that comes back for a different DID revokes the new
+     grant, wipes the session, and ends it.
+7. **[nit] `displayName` wasn't limited.**
+   - Fixed: it's truncated to 64 characters and 640 bytes on a character
+     boundary, inside the lexicon's limits.
+8. **[nit] `touch`'s comment promised cookie renewal that only `getSession`
+   does.**
+   - Fixed: the comment now says so. The PWA calls `getSession` on every
+     load.
+9. **[nit] `PdsClient` didn't share DPoP nonces.**
+   - Fixed: it reads and updates the OAuth client's per-origin nonce cache.

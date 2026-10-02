@@ -10,6 +10,12 @@ const MESSAGES: Record<string, string> = {
   account_mismatch: 'That account didn’t match the handle you entered. Sign in with the same account.',
   request_expired: 'That sign-in took too long. Please try again.',
   server_unavailable: 'Your account’s server couldn’t be reached. Please try again in a moment.',
+  resolution_failed: 'We found that handle, but couldn’t look up its account. Please try again in a moment.',
+  issuer_mismatch: 'Your account’s server didn’t check out, so we stopped. Please try again.',
+  scope_missing: 'Sign-in needs every permission it asks for. Please try again and allow them all.',
+  invalid_request: 'That sign-in link isn’t valid any more. Start again from this page.',
+  authorization_failed: 'Your account’s server didn’t complete the sign-in. Please try again.',
+  server_error: 'Something went wrong on our side. Please try again.',
 }
 const FALLBACK = 'Sign-in didn’t work. Please try again.'
 

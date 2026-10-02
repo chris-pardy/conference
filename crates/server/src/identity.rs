@@ -53,11 +53,9 @@ impl Resolver {
         struct Resolved {
             did: String,
         }
-        let resolved: Resolved = res
-            .json()
-            .await
-            .map_err(|e| IdentityError::Unresolvable(format!("resolveHandle: {e}")))?;
-        if !resolved.did.starts_with("did:") {
+        let resolved: Resolved =
+            crate::net::read_json(res).await.map_err(IdentityError::Unresolvable)?;
+        if !is_valid_did(&resolved.did) {
             return Err(IdentityError::HandleNotFound);
         }
         Ok(resolved.did)
@@ -65,6 +63,9 @@ impl Resolver {
 
     /// The DID's document, its PDS, and its handle if the handle points back.
     pub async fn resolve_did(&self, did: &str) -> Result<Identity, IdentityError> {
+        if !is_valid_did(did) {
+            return Err(IdentityError::Unresolvable(format!("{did:?} is not a supported DID")));
+        }
         let doc = self.did_document(did).await?;
         if doc.get("id").and_then(Value::as_str) != Some(did) {
             return Err(IdentityError::Unresolvable(format!(
@@ -98,7 +99,7 @@ impl Resolver {
         if !res.status().is_success() {
             return Err(unresolvable(format!("document answered {}", res.status())));
         }
-        res.json().await.map_err(|e| unresolvable(e.to_string()))
+        crate::net::read_json(res).await.map_err(unresolvable)
     }
 }
 
@@ -114,6 +115,18 @@ pub fn normalize_handle(input: &str) -> Option<String> {
                 && label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
         });
     valid.then_some(handle)
+}
+
+/// Whether a DID is one the appview resolves: `did:plc:` with its 24 base32
+/// characters, or a host-level `did:web:`. Checked before a DID goes into a URL.
+pub fn is_valid_did(did: &str) -> bool {
+    if let Some(id) = did.strip_prefix("did:plc:") {
+        return id.len() == 24 && id.bytes().all(|b| matches!(b, b'a'..=b'z' | b'2'..=b'7'));
+    }
+    if let Some(host) = did.strip_prefix("did:web:") {
+        return normalize_handle(host).as_deref() == Some(host);
+    }
+    false
 }
 
 fn pds_endpoint(doc: &Value) -> Option<String> {
@@ -143,6 +156,17 @@ mod tests {
         assert_eq!(normalize_handle("ana"), None);
         assert_eq!(normalize_handle("ana..example"), None);
         assert_eq!(normalize_handle("ana/../x.com"), None);
+    }
+
+    #[test]
+    fn only_well_formed_dids_are_resolved() {
+        assert!(is_valid_did("did:plc:abcdefghijklmnopqrstuvwx"));
+        assert!(is_valid_did("did:web:pds.example.com"));
+        assert!(!is_valid_did("did:plc:x/../../export"));
+        assert!(!is_valid_did("did:plc:abcdefghijklmnopqrstuvw1"));
+        assert!(!is_valid_did("did:plc:abcdefghijklmnopqrstuvwx?a=b"));
+        assert!(!is_valid_did("did:web:example.com:8080"));
+        assert!(!is_valid_did("did:key:z6Mk"));
     }
 
     #[test]

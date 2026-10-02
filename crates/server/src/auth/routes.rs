@@ -15,7 +15,7 @@ use super::session::{self, Lookup, NewSession, TOMBSTONE};
 use super::{cookies, return_to::sanitize, xrpc_error};
 use crate::AppState;
 use crate::db::now_ms;
-use crate::identity::{IdentityError, normalize_handle};
+use crate::identity::{IdentityError, is_valid_did, normalize_handle};
 use crate::keys::{EcKey, random_token, sha256_b64};
 use crate::oauth::{AuthServer, OAuthError, ParRequest};
 
@@ -59,7 +59,11 @@ pub async fn login(State(state): State<AppState>, Query(params): Params) -> Resp
     let handle = params.get("handle").map(String::as_str).unwrap_or_default().trim();
     // A DID works too: signing someone back in whose handle didn't verify.
     let resolved = if handle.starts_with("did:") {
-        Ok(handle.to_owned())
+        if is_valid_did(handle) {
+            Ok(handle.to_owned())
+        } else {
+            Err(IdentityError::HandleNotFound)
+        }
     } else {
         state.resolver.resolve_handle(handle).await
     };
@@ -270,7 +274,7 @@ async fn complete(
             eprintln!("callback: could not revoke an unused grant: {err}");
         }
     };
-    let Some(did) = tokens.sub.clone().filter(|sub| sub.starts_with("did:")) else {
+    let Some(did) = tokens.sub.clone().filter(|sub| is_valid_did(sub)) else {
         revoke().await;
         return Err("authorization_failed");
     };
@@ -355,10 +359,13 @@ async fn profile(state: &AppState, pds: &str, did: &str) -> Profile {
     if !res.status().is_success() {
         return Profile::default();
     }
-    let Ok(record) = res.json::<Value>().await else { return Profile::default() };
+    let Ok(record) = crate::net::read_json::<Value>(res).await else { return Profile::default() };
     let value = &record["value"];
-    let display_name =
-        value["displayName"].as_str().map(str::trim).filter(|n| !n.is_empty()).map(str::to_owned);
+    let display_name = value["displayName"]
+        .as_str()
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+        .map(|n| truncate(n, MAX_DISPLAY_NAME_CHARS, MAX_DISPLAY_NAME_BYTES));
     let avatar = value["avatar"]["ref"]["$link"].as_str().map(|cid| {
         let mut url = url::Url::parse(&format!("{pds}/xrpc/com.atproto.sync.getBlob"))
             .expect("the PDS URL was fetched");
@@ -366,6 +373,23 @@ async fn profile(state: &AppState, pds: &str, did: &str) -> Profile {
         url.to_string()
     });
     Profile { display_name, avatar }
+}
+
+/// The lexicon's limits on `displayName`. Characters stand in for graphemes:
+/// never more graphemes than characters.
+const MAX_DISPLAY_NAME_CHARS: usize = 64;
+const MAX_DISPLAY_NAME_BYTES: usize = 640;
+
+/// At most `chars` characters and `bytes` bytes of `s`, cut on a character boundary.
+fn truncate(s: &str, chars: usize, bytes: usize) -> String {
+    let mut out = String::new();
+    for c in s.chars().take(chars) {
+        if out.len() + c.len_utf8() > bytes {
+            break;
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// Deletes a session, revoking its grant in the background.

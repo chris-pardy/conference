@@ -121,8 +121,9 @@ pub async fn lookup(state: &AppState, headers: &HeaderMap) -> Result<Lookup, sql
     Ok(Lookup::Live(row))
 }
 
-/// Records use of a session, at most every so often. Returns whether it did,
-/// so the caller can renew the cookie too.
+/// Records use of a session, at most every so often. Returns whether it did.
+/// `getSession`, which the PWA calls on every load, renews the cookie then;
+/// other routes only move `last_seen_at`.
 pub async fn touch(state: &AppState, row: &SessionRow) -> Result<bool, sqlx::Error> {
     let every = (ms(state.config.session_idle_timeout) / 10).clamp(100, 5 * 60 * 1000);
     let now = now_ms();
