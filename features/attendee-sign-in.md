@@ -580,9 +580,10 @@ For later features:
   `prompt=create`.
 - **sqlx `Any` is the lowest common denominator.** It decodes a smaller set
   of types than the native drivers do, and portable SQL takes discipline in
-  every later feature. A test suite that only runs on SQLite would let
-  Postgres-breaking SQL through, so how Postgres gets tested matters (see
-  the round 1 questions).
+  every later feature. **Postgres isn't tested yet** (decided in round 2).
+  The suite runs on SQLite only, so SQL that breaks on Postgres can slip
+  through until a Postgres CI job is added, which should happen before
+  anyone deploys on Postgres.
 - **Tokens at rest.** The database holds refresh tokens and DPoP keys.
   It's exactly as sensitive as `OAUTH_SIGNING_KEY`, and production has to
   protect it the same way. There's no field encryption in v1.
@@ -637,6 +638,18 @@ For later features:
   databases in every test server.
 - **Simplifications:** dropped `OptionalUser`. The PWA's `ScopeRequired`
   handling moved to `block-actions`.
+
+### Round 2
+
+**User feedback:**
+
+- Asked whether a Rust adapter covers both SQLite and Postgres. The
+  options were sqlx `Any`, SeaORM/sea-query, and Diesel's
+  `MultiConnection`. The user chose **sqlx `Any`** with portable SQL, as
+  drafted.
+- **No Postgres CI job for now.** Recorded as an accepted risk under Risks.
+
+**What changed:** only the Risks entry on sqlx `Any`.
 
 ## Test cases
 
