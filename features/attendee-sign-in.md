@@ -19,11 +19,14 @@ access.
 
 **Identity only.** The session asks for the `atproto` scope and nothing
 else: it proves who the person is (their DID and handle) and grants no
-repo, blob or space access. Features that need more, such as writing into a
-space in [`block-actions`](block-actions.md) or an organizer's `read` grant
-in [`space-sync`](space-sync.md), add their scopes themselves and send the
-person back through consent when they first need it (decided after the
-brainstorm, when the build was picked up).
+repo, blob or space access. The scopes asked for at sign-in are one list
+in code. When a later feature needs more, such as writing into a space in
+[`block-actions`](block-actions.md), it adds its scopes to that list, and
+everyone signing in from then on grants them. People whose sessions
+predate the change are asked to sign in again. There's no step-up (asking
+for more scopes mid-session) for now. That comes later, for conferences
+with write-heavy plugins. (Decided after the brainstorm, when the build was
+picked up, and in design review round 3.)
 
 This feature also ships a test helper, so every later feature's tests can
 sign in a vivarium account without driving the consent screen.
@@ -135,9 +138,9 @@ feature's to ask for.
   plain HTML form (pick an account, or type a handle and it's created on
   the fly), with no JavaScript, so the helper can run the real flow over
   HTTP.
-- How a later feature asks for more scopes: a step-up sign-in that keeps
-  the page, and what the PWA shows while it happens. This feature should
-  provide the mechanism even though nothing uses it yet.
+- How a later feature asks for more scopes. Settled in design review
+  round 3: it adds them to the sign-in scope list, and there's no step-up
+  for now.
 
 ## Architecture analysis
 
@@ -166,14 +169,13 @@ feature's to ask for.
 **Features affected:**
 
 - [`space-sync`](space-sync.md): it planned to get the organizer's space
-  `read` grant from this feature's session. Now it has to ask for that
-  scope itself, using the step-up mechanism this feature provides. It still
-  reuses the client keys this feature publishes for its client
-  attestations.
+  `read` grant from this feature's session. Now it has to add that scope
+  to the sign-in list itself. It still reuses the client keys this feature
+  publishes for its client attestations.
 - [`block-actions`](block-actions.md): its `submitAction` relies on this
   feature's session cookie and CSRF token, unchanged. It planned to write
-  into the space with scopes this feature granted, and now has to step up
-  to `space:` `create` on `app.eventside.*` itself.
+  into the space with scopes this feature granted, and now has to add
+  `space:` `create` on `app.eventside.*` to the sign-in list itself.
 - [`block-offline`](block-offline.md): it re-asks for sign-in when a session
   expires with actions queued, so it depends on how expiry is reported to
   the PWA.
@@ -191,8 +193,10 @@ feature's to ask for.
 - The session: a cookie, a CSRF token, a server-side extractor giving the
   signed-in DID to any route, and an authenticated client that makes
   DPoP-bound calls to the person's PDS.
-- A step-up: a way for a feature to require more scopes, and to send the
-  person back through consent without losing their page.
+- The sign-in scope list, which later features extend, and the re-sign-in
+  that follows when it grows.
+- Background token renewal, which keeps every live session's tokens fresh
+  for whatever later features do with them.
 - The appview's client metadata and JWKS, whose keys `space-sync` reuses.
 - The PWA's signed-in state (who's signed in, sign in, sign out, expired).
 - The test helper that signs in a vivarium account without the consent
@@ -202,8 +206,8 @@ feature's to ask for.
 real configuration of the server, and every later feature builds on its
 session, its test helper or both. Narrowing the scopes to `atproto` also
 moves work into `space-sync` and `block-actions`, which planned on
-inheriting space grants from here and will now need the step-up mechanism
-this feature has to design.
+inheriting space grants from here and will now add their own scopes to the
+sign-in list.
 
 ## Design review
 
@@ -216,9 +220,13 @@ public half it serves at `<PUBLIC_URL>/oauth/jwks.json`. `PUBLIC_URL` is the
 origin the browser uses: the PWA and the appview share it, so the session
 cookie is first-party and the callback lands on the same origin. In dev and
 tests the Vite server proxies the OAuth paths to the appview, as it already
-does for `/xrpc/`. The metadata's `scope` is `atproto` plus
-`OAUTH_EXTRA_SCOPES`, the scopes later features may step up to. It's empty
-today, and tests set `transition:generic`.
+does for `/xrpc/`.
+
+**Scopes.** `LOGIN_SCOPES` in `oauth/scopes.rs` is the one list of scopes
+asked for at sign-in. Today it's just `atproto`, and later features add
+theirs to it. The client metadata's `scope` and every PAR use it.
+`OAUTH_SCOPES` overrides it from the environment, which tests use to
+simulate a feature adding a scope.
 
 **Signing in** is a top-level navigation, not a fetch:
 
@@ -229,7 +237,7 @@ today, and tests set `transition:generic`.
    `issuer` is the URL it was fetched from, and the PDS lists that server.
 3. It makes a PKCE verifier, a `state`, a fresh DPoP key and a random
    **pre-auth cookie** (`HttpOnly`, ten minutes, `SameSite=Lax`). It sends
-   a pushed authorization request (PAR) with `scope=atproto` and the handle
+   a pushed authorization request (PAR) with `LOGIN_SCOPES` and the handle
    as `login_hint`. It then stores the pending request: state, verifier,
    DPoP key, issuer, expected DID, `return_to`, and the pre-auth cookie's
    hash.
@@ -242,7 +250,7 @@ today, and tests set `transition:generic`.
    - checks `iss`
    - exchanges the code for DPoP-bound tokens
    - checks that `sub` is the expected DID and the granted scope includes
-     `atproto`
+     every scope in `LOGIN_SCOPES`
    - resolves that DID's PDS again and checks that its authorization server
      is the issuer that answered
 6. It deletes any session the browser already had and creates a new one
@@ -290,7 +298,8 @@ it without doing anything.
 |---|---|---|
 | Signing out | The row is deleted and the cookie cleared | `401 AuthRequired`. The PWA shows the signed-out state, not "expired". |
 | Idle past `SESSION_IDLE_TIMEOUT` | The session is marked ended | `401 SessionExpired` |
-| The authorization server answers a refresh with `invalid_grant` | The session is marked ended | `401 SessionExpired` |
+| The authorization server answers a refresh with `invalid_grant` (found by the renewer or on demand) | The session is marked ended | `401 SessionExpired` |
+| `LOGIN_SCOPES` has grown since the session was granted | The session is marked ended the next time it's used | `401 SessionExpired`. The banner signs them in again, now with the new scopes. |
 
 An ended session isn't deleted straight away. Its tokens and keys are
 wiped, but the row keeps the DID and handle until the cookie's own
@@ -301,38 +310,38 @@ were on. A sweeper deletes these rows and stale pending requests later.
 Network errors and `5xx` from the authorization server never end a
 session. They surface as `503` to the feature that asked.
 
-**Tokens** are refreshed lazily, only when a feature asks for an
-authenticated PDS client and the access token is within
-`TOKEN_REFRESH_SKEW` (default 60 s) of expiring. `getSession` reads the row
-and never calls the authorization server. That keeps the AS out of every
-app open, so an AS-side revocation is only noticed at the next refresh.
-Refresh tokens are single-use, so refreshes are serialized by a
-compare-and-swap (`UPDATE … WHERE refresh_token = <old>`). That works the
-same on SQLite and on several Postgres-backed instances: the loser re-reads
-the row and uses the winner's tokens. DPoP nonces are cached per server in
-memory.
+**Tokens are renewed in the background.** A renewer task runs every
+`TOKEN_RENEW_INTERVAL` (default 5 minutes). It refreshes every live session
+whose access token expires before the next run plus `TOKEN_REFRESH_SKEW`
+(default 60 s). That means:
 
-**Step-up.** `GET /oauth/login?scope=<extra scopes>&return_to=…` while signed
-in runs the same flow with `login_hint` set to the session's DID and
-`scope=atproto <extra>`. The extra scopes must be in
-`OAUTH_EXTRA_SCOPES`, so a cross-site link can't start consent for
-anything else. The pending request records the session it belongs to. The
-callback applies the new grant only if:
+- tokens are fresh whenever a feature needs them
+- a live session's refresh token never lapses at the authorization server
+  for lack of use
+- a revoked grant or a deleted account is noticed within one interval, and
+  the session ends
 
-- that session still exists, isn't ended, and is the browser's current
-  session
-- the DID matches the session's
+Sessions past their idle timeout aren't renewed: the renewer ends them.
+`pds_client()` still refreshes on demand as a fallback, for example right
+after a restart. `getSession` only reads the row, so opening the app never
+calls the authorization server. The renewer works in batches with bounded
+concurrency (8 at a time), and backs off on network errors and `5xx`.
 
-Otherwise it fails with an error, and the existing session is untouched.
-On success the session keeps its ID and CSRF token, and takes the new
-tokens, scopes and DPoP key. If two step-ups race, the last one to finish
-wins.
+**One refresh at a time.** Refresh tokens are single-use. A second refresh
+with the same token gets `invalid_grant`, which would wrongly end the
+session. So every refresh, whether from the renewer or on demand, first
+takes a 30-second lease on the row:
 
-In Rust, a route asks `user.require_scopes(&[…])?`, which fails with
-`403 ScopeRequired {scopes}`. Nothing calls it in this feature. Turning
-`ScopeRequired` into a step-up navigation in the PWA is left to
-[`block-actions`](block-actions.md), its first real user, so that
-behaviour gets tested where it's used.
+```sql
+UPDATE sessions SET refresh_lease_until = $now + 30000
+WHERE id_hash = $1 AND (refresh_lease_until IS NULL OR refresh_lease_until < $now)
+```
+
+Only the caller that wins the lease talks to the authorization server.
+Others wait and re-read the row. An `invalid_grant` ends the session only
+if the row still holds the refresh token that was sent. This works the same
+on SQLite and on several Postgres-backed instances. DPoP nonces are cached
+per server in memory.
 
 **Sign out** is `POST /oauth/logout`, with CSRF. It revokes the refresh
 token at the authorization server (best effort, logged on failure), deletes
@@ -362,11 +371,11 @@ that keeps working.
   | `PUBLIC_URL` | Default `http://127.0.0.1:<bound port>` |
   | `DATABASE_URL` | `sqlite://…` or `postgres://…` (see Data). Default `sqlite://<data dir>/eventside.db?mode=rwc` |
   | `OAUTH_SIGNING_KEY` | An ES256 private JWK. Production sets it. Without it, the server generates a key once and keeps it in the database (insert-if-absent, so several instances agree), so local sessions survive restarts. |
-  | `OAUTH_EXTRA_SCOPES` | Scopes later features may step up to |
+  | `OAUTH_SCOPES` | Overrides `LOGIN_SCOPES`. Tests and operations only. |
   | `SIGNUP_PDS_URL` | Where "Create account" sends people |
   | `PLC_URL`, `HANDLE_RESOLVER_URL` | Identity. Both default to `ATPROTO_URL`, so dev and tests point everything at vivarium. |
   | `ALLOW_PRIVATE_NETWORK` | On in dev and tests |
-  | `SESSION_IDLE_TIMEOUT`, `TOKEN_REFRESH_SKEW` | Session timing |
+  | `SESSION_IDLE_TIMEOUT`, `TOKEN_RENEW_INTERVAL`, `TOKEN_REFRESH_SKEW` | Session and renewal timing |
 
 - `db.rs` and `migrations/`: the database pool and embedded migrations,
   for either backend (see Data).
@@ -375,10 +384,11 @@ that keeps working.
   from the document, with the bidirectional handle check and the
   private-network guard.
 - `oauth/`: client metadata and JWKS, discovery, PAR, the callback, refresh
-  and revocation, DPoP (including the nonce retry), and client assertions.
-  Built on `atproto-oauth` (see Alternatives).
+  and revocation, DPoP (including the nonce retry), client assertions,
+  `LOGIN_SCOPES`, and the background renewer. Built on `atproto-oauth` (see
+  Alternatives).
 - `auth/`: the session store, the cookies, the CSRF middleware, the
-  `CurrentUser` extractor, `require_scopes`, and the login, signup,
+  `CurrentUser` extractor, and the login, signup,
   callback and logout routes.
 - `xrpc/auth.rs`: `app.eventside.auth.getSession`.
 
@@ -412,8 +422,8 @@ generated into `web/src/lexicon` like the block lexicons.
   `{databaseUrl?, port?, publicUrl?, env?}`. It makes a temp SQLite file
   when no `databaseUrl` is given. A test restarts a server by stopping it
   and spawning again with the same database and port, so the client ID
-  stays the same. It always sets `ALLOW_PRIVATE_NETWORK` and
-  `OAUTH_EXTRA_SCOPES=transition:generic`.
+  stays the same. It always sets `ALLOW_PRIVATE_NETWORK`, plus a short
+  `TOKEN_RENEW_INTERVAL` (1 s) for the tests that need it.
 - `tests/support/auth.ts`:
   - `signIn(serverUrl, handle, {scope?})` returns
     `{cookie, csrfToken, did, handle}`. It runs the real flow over HTTP with
@@ -437,8 +447,15 @@ generated into `web/src/lexicon` like the block lexicons.
 
 **How the hard cases get tested:**
 
-- **Refresh refused:** delete the account in vivarium (`viv.deleteAccount`)
-  with a short `TOKEN_REFRESH_SKEW`. The next refresh gets `invalid_grant`.
+- **Background renewal:** with a 1 s interval and a large skew, a
+  session's access token changes in the test's database with no request
+  made.
+- **Refresh refused:** delete the account in vivarium (`viv.deleteAccount`).
+  The renewer gets `invalid_grant`, and `getSession` then answers
+  `SessionExpired` without the person doing anything.
+- **Scopes grew:** sign in, restart on the same database and port with
+  `OAUTH_SCOPES="atproto transition:generic"`, and see `SessionExpired`.
+  Signing in again grants both.
 - **Idle expiry:** `SESSION_IDLE_TIMEOUT=2s`.
 - **Restart survival:** stop and respawn on the same database and port,
   with the same cookie.
@@ -472,8 +489,8 @@ per-backend migration directory then, not now.
 
 | Table | Columns | Written by | Read by |
 |---|---|---|---|
-| `oauth_requests` | `state` (key), `kind` (login, signup, step-up), PKCE verifier, DPoP private key, issuer, expected DID, step-up session ID, scopes, `return_to`, `expires_at` | `/oauth/login` and `/oauth/signup` | `/oauth/callback`, which deletes the row |
-| `sessions` | `id_hash` (key), DID, handle, display name, avatar URL, DPoP private key, issuer, access and refresh tokens, `token_expires_at`, scopes, CSRF token, `created_at`, `last_seen_at` | callback, refresh, step-up | every authenticated request |
+| `oauth_requests` | `state` (key), `kind` (login, signup), PKCE verifier, DPoP private key, issuer, expected DID, pre-auth cookie hash, `return_to`, `expires_at` | `/oauth/login` and `/oauth/signup` | `/oauth/callback`, which deletes the row |
+| `sessions` | `id_hash` (key), DID, handle, display name, avatar URL, DPoP private key, issuer, access and refresh tokens, `token_expires_at`, `refresh_lease_until`, scopes, CSRF token, `created_at`, `last_seen_at`, `ended_at` | callback, renewer, on-demand refresh | every authenticated request |
 | `client_keys` | `kid`, private JWK, `created_at` | startup, only when `OAUTH_SIGNING_KEY` is unset | client assertions, JWKS, and later `space-sync` |
 
 Expired rows in `oauth_requests` and idle `sessions` are swept on a timer.
@@ -487,7 +504,7 @@ For later features:
 - **Rust:**
   - `CurrentUser`: an axum extractor with `did`, `handle` and `scopes`.
     It rejects with `AuthRequired` or `SessionExpired`.
-  - `user.require_scopes(&[...]) -> Result<(), ScopeRequired>`.
+  - `LOGIN_SCOPES`: a feature that needs a scope adds it here.
   - `user.pds_client().await?`: an HTTP client for the person's PDS that
     adds DPoP-bound auth and refreshes as it goes. `block-actions` writes
     through it.
@@ -515,15 +532,16 @@ For later features:
 - [`ui-blocks`](ui-blocks.md) (complete): no behavior change. The
   `/dev/blocks` gallery stays public, and it now sits inside the `Shell`
   layout with the header.
-- [`space-sync`](space-sync.md): it asks for the organizer's space `read`
-  grant with `require_scopes` and a step-up, not at sign-in. It reuses
-  `ClientKeys` for attestation. Its spec needs one line updated when it's
-  analyzed.
+- [`space-sync`](space-sync.md): it needs an organizer's space `read`
+  grant. Adding that to `LOGIN_SCOPES` would ask every attendee for it, so
+  space-sync has to choose between that and bringing step-up forward for
+  organizers. It reuses `ClientKeys` for attestation. Its spec needs
+  updating when it's analyzed.
 - [`block-actions`](block-actions.md): its `submitAction` uses `CurrentUser`
-  and the CSRF middleware as planned. Before its first write it steps up to
-  `space:` `create` on `app.eventside.*`, which it adds to
-  `OAUTH_EXTRA_SCOPES`. It owns the PWA's `ScopeRequired` → step-up
-  handling, and writes with `pds_client()`.
+  and the CSRF middleware as planned. It adds `space:` `create` on
+  `app.eventside.*` to `LOGIN_SCOPES`, so existing sessions sign in again
+  once when it ships. It writes with `pds_client()`, whose tokens the
+  renewer keeps fresh.
 - [`block-offline`](block-offline.md): `SessionExpired` and the expired
   state in `useSession()` are what it reacts to when the queue can't be
   sent.
@@ -546,12 +564,19 @@ For later features:
 - **Discovering the sign-up PDS per conference, or letting people choose:**
   rejected in the feature description. One configured PDS for now.
 - **A separate auth service:** another deployable for a single client.
+- **Step-up (asking for more scopes mid-session):** drafted in round 1 and
+  removed in round 3. Nothing needs it yet. It returns later, for
+  conferences with write-heavy plugins.
+- **Refreshing only on demand:** dropped in round 3. Refresh tokens could
+  lapse unused, and a revoked grant wasn't noticed until a feature next
+  wrote something.
 
 **The OAuth library.** We read the source of each candidate:
 
 - **`atproto-oauth` 0.14, used as a toolkit** (chosen):
   - `oauth_init_with_prompt` takes authorization-server metadata directly,
-    with `prompt` and `login_hint`. That covers sign-up and step-up.
+    with `prompt` and `login_hint`. That covers sign-up, and a later
+    step-up.
   - It signs `private_key_jwt` client assertions for PAR, token and
     refresh, and has DPoP nonce-retry middleware.
   - It doesn't enforce https, and it's on rustls.
@@ -584,6 +609,13 @@ For later features:
   The suite runs on SQLite only, so SQL that breaks on Postgres can slip
   through until a Postgres CI job is added, which should happen before
   anyone deploys on Postgres.
+- **Renewal load grows with live sessions.** Every live session refreshes
+  about once per access-token lifetime. That's trivial for one conference,
+  but a large multi-conference appview would want a cap or a longer
+  interval. Both are configuration.
+- **Growing `LOGIN_SCOPES` signs everyone out once**, and puts the new
+  scopes on everyone's consent screen, organizer-only ones included. That's
+  accepted until step-up exists.
 - **Tokens at rest.** The database holds refresh tokens and DPoP keys.
   It's exactly as sensitive as `OAUTH_SIGNING_KEY`, and production has to
   protect it the same way. There's no field encryption in v1.
@@ -650,6 +682,28 @@ For later features:
 - **No Postgres CI job for now.** Recorded as an accepted risk under Risks.
 
 **What changed:** only the Risks entry on sqlx `Any`.
+
+### Round 3
+
+**User feedback:**
+
+- No step-up. Scopes are added to the sign-in scope list when the features
+  that need them ship. Step-up will come later, for conferences with
+  write-heavy plugins.
+- Renew tokens regularly on the backend, not only when the person does
+  something.
+
+**What changed:**
+
+- Step-up, `OAUTH_EXTRA_SCOPES`, `require_scopes` and `ScopeRequired` are
+  gone.
+- Added `LOGIN_SCOPES` (overridable with `OAUTH_SCOPES`). A session missing
+  a scope that's now in the list ends with `SessionExpired`, and the person
+  signs in again.
+- Added the background renewer, with a per-row refresh lease so that two
+  refreshes never spend the same single-use token, even across instances.
+- Updated the tests for renewal, refresh refused and scopes grown, and the
+  impact on `space-sync` (organizer scopes) and `block-actions`.
 
 ## Test cases
 
