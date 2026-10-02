@@ -19,6 +19,9 @@ use crate::identity::{IdentityError, is_valid_did, normalize_handle};
 use crate::keys::{EcKey, random_token, sha256_b64};
 use crate::oauth::{AuthServer, OAuthError, ParRequest};
 
+/// How long sign-out waits for revocation before answering.
+const REVOKE_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
+
 /// How long a pending sign-in can wait for its callback.
 const PENDING_MS: i64 = 10 * 60 * 1000;
 
@@ -171,7 +174,7 @@ async fn start(
         eprintln!("{flow}: could not store the pending request: {err}");
         return fail("server_error", return_to, &[]);
     }
-    redirect(&authorize_url, &[cookies::set_preauth(&preauth, secure)])
+    redirect(&authorize_url, &[cookies::set_preauth(&request_state, &preauth, secure)])
 }
 
 #[derive(sqlx::FromRow)]
@@ -191,10 +194,12 @@ pub async fn callback(
     Query(params): Params,
 ) -> Response {
     let secure = state.secure_cookies();
-    let clear = [cookies::clear_preauth(secure)];
     let Some(request_state) = params.get("state") else {
-        return fail("invalid_request", "/", &clear);
+        return fail("invalid_request", "/", &[]);
     };
+    // Each sign-in has its own pre-auth cookie, so one tab's sign-in (or a
+    // stray callback link) never disturbs another's.
+    let clear = [cookies::clear_preauth(request_state, secure)];
 
     // Consume the pending request: whoever deletes it is the only one to use it.
     let pending = sqlx::query_as::<_, Pending>(
@@ -215,7 +220,7 @@ pub async fn callback(
     let return_to = sanitize(Some(&pending.return_to));
 
     // Only the browser that started the sign-in may finish it.
-    let preauth = cookies::preauth(&headers, secure).map(|p| sha256_b64(&p));
+    let preauth = cookies::preauth(&headers, request_state, secure).map(|p| sha256_b64(&p));
     if preauth.as_deref() != Some(pending.preauth_hash.as_str()) {
         return fail("invalid_request", &return_to, &clear);
     }
@@ -408,7 +413,7 @@ pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Respon
     let secure = state.secure_cookies();
     match session::lookup(&state, &headers).await {
         Ok(Lookup::Live(row) | Lookup::Expired(row)) => {
-            session::revoke(&state, &row).await;
+            // Signed out first, whatever the authorization server does.
             if let Err(err) = session::delete(&state.db, &row.id_hash).await {
                 eprintln!("sign-out: could not delete the session: {err}");
                 return xrpc_error(
@@ -417,6 +422,11 @@ pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Respon
                     "could not sign out",
                 );
             }
+            // Then revoke, waiting briefly so the grant is usually gone by the
+            // time sign-out returns; a slow server finishes in the background.
+            let background = state.clone();
+            let revoking = tokio::spawn(async move { session::revoke(&background, &row).await });
+            let _ = tokio::time::timeout(REVOKE_WAIT, revoking).await;
         }
         Ok(Lookup::None) => {}
         Err(err) => {

@@ -1101,3 +1101,34 @@ races turned out not to happen. Every finding was fixed.
 7. **[nit] `serde_json` was listed under both dependencies and
    dev-dependencies.**
    - Fixed: the dev-dependency entry is gone.
+
+### Round 4
+
+The reviewer found 0 blocking, 0 major, 3 minor and 2 nits. `pnpm check`
+was green. The reviewer confirmed the earlier fixes, and a scratch test
+showed that grants ended by grown scopes are revoked. Every finding was
+fixed.
+
+1. **[minor] Sign-out waited on the authorization server before deleting
+   the session.**
+   - Fixed: `logout` deletes the row (and so clears the cookie) first.
+   - It then revokes in a spawned task, and waits at most 3 s so the grant
+     is usually gone by the time sign-out returns.
+   - Dropping the request can no longer leave the person signed in.
+2. **[minor] `pds_client()` re-refreshed whenever the server's tokens
+   didn't outlive the skew.**
+   - Fixed: the skew now only decides when to start a refresh. After a
+     refresh, its own or another instance's, the client uses the token as
+     long as it hasn't expired.
+3. **[minor] One shared pre-auth cookie broke concurrent sign-ins.**
+   - Fixed: each sign-in's cookie is named after the start of its `state`
+     (`oauth_preauth_<id>`).
+   - A callback reads and clears only its own, so two tabs, or a stray
+     callback link, can't disturb another sign-in.
+4. **[nit] The renewer loaded every due session at once.**
+   - Fixed: it pages through due sessions 500 at a time (keyset on
+     `id_hash`), finishing each batch before loading the next.
+5. **[nit] `touch` ran more often than the design's "at most once an
+   hour".**
+   - Fixed: it's capped at once an hour. Only idle timeouts shorter than
+     10 hours (as in tests) touch more often, every tenth of the timeout.

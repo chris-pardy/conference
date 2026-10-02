@@ -34,8 +34,18 @@ pub fn session(headers: &HeaderMap, secure: bool) -> Option<String> {
     read(headers, &name(SESSION, secure))
 }
 
-pub fn preauth(headers: &HeaderMap, secure: bool) -> Option<String> {
-    read(headers, &name(PREAUTH, secure))
+/// The pre-auth cookie is named per sign-in, after the start of its `state`.
+fn preauth_name(state: &str, secure: bool) -> String {
+    let id: String = state
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+        .take(16)
+        .collect();
+    name(&format!("{PREAUTH}_{id}"), secure)
+}
+
+pub fn preauth(headers: &HeaderMap, state: &str, secure: bool) -> Option<String> {
+    read(headers, &preauth_name(state, secure))
 }
 
 pub fn set_session(value: &str, max_age: Duration, secure: bool) -> String {
@@ -46,12 +56,12 @@ pub fn clear_session(secure: bool) -> String {
     set(&name(SESSION, secure), "", Duration::ZERO, secure)
 }
 
-pub fn set_preauth(value: &str, secure: bool) -> String {
-    set(&name(PREAUTH, secure), value, Duration::from_secs(10 * 60), secure)
+pub fn set_preauth(state: &str, value: &str, secure: bool) -> String {
+    set(&preauth_name(state, secure), value, Duration::from_secs(10 * 60), secure)
 }
 
-pub fn clear_preauth(secure: bool) -> String {
-    set(&name(PREAUTH, secure), "", Duration::ZERO, secure)
+pub fn clear_preauth(state: &str, secure: bool) -> String {
+    set(&preauth_name(state, secure), "", Duration::ZERO, secure)
 }
 
 #[cfg(test)]
@@ -62,9 +72,10 @@ mod tests {
     #[test]
     fn cookies_are_read_by_name() {
         let mut headers = HeaderMap::new();
-        headers.insert(COOKIE, HeaderValue::from_static("a=1; session=abc; oauth_preauth=xyz"));
+        headers.insert(COOKIE, HeaderValue::from_static("a=1; session=abc; oauth_preauth_st8=xyz"));
         assert_eq!(session(&headers, false).as_deref(), Some("abc"));
-        assert_eq!(preauth(&headers, false).as_deref(), Some("xyz"));
+        assert_eq!(preauth(&headers, "st8", false).as_deref(), Some("xyz"));
+        assert_eq!(preauth(&headers, "other", false), None);
         assert_eq!(session(&headers, true), None);
     }
 

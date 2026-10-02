@@ -33,6 +33,10 @@ impl PdsClient {
     /// A client for a session, refreshing its tokens first if they're about to expire.
     pub async fn for_session(state: &AppState, id_hash: &str) -> Result<Self, PdsError> {
         let skew = ms(state.config.token_refresh_skew);
+        // The skew decides when to start a refresh. Once one has happened,
+        // its token is used as long as it hasn't expired, even when the
+        // server's tokens don't outlive the skew.
+        let mut renewed = false;
         for _ in 0..40 {
             let row = session::load(&state.db, id_hash)
                 .await
@@ -41,7 +45,8 @@ impl PdsClient {
             if row.ended_at.is_some() {
                 return Err(PdsError::SessionExpired);
             }
-            let fresh = row.token_expires_at.is_some_and(|at| at > now_ms() + skew);
+            let margin = if renewed { 0 } else { skew };
+            let fresh = row.token_expires_at.is_some_and(|at| at > now_ms() + margin);
             if let (true, Some(pds), Some(token), Some(key)) =
                 (fresh, &row.pds, &row.access_token, &row.dpop_key)
             {
@@ -59,10 +64,13 @@ impl PdsClient {
                 return Err(PdsError::SessionExpired);
             }
             match renew::refresh(state, id_hash).await {
-                Renewal::Renewed => {}
+                Renewal::Renewed => renewed = true,
                 Renewal::Ended => return Err(PdsError::SessionExpired),
                 // Someone else is refreshing: wait for their tokens.
-                Renewal::Busy => tokio::time::sleep(Duration::from_millis(250)).await,
+                Renewal::Busy => {
+                    renewed = true;
+                    tokio::time::sleep(Duration::from_millis(250)).await;
+                }
                 Renewal::Failed(why) => return Err(PdsError::Unavailable(why)),
             }
         }
