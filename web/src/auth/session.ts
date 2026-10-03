@@ -56,11 +56,6 @@ export async function fetchSession(signal?: AbortSignal): Promise<Session> {
   return { kind: 'signedOut' }
 }
 
-/** Where to come back to after signing in: the page the person is on. */
-export function currentPath(): string {
-  return window.location.pathname + window.location.search
-}
-
 /** Who to sign back in after a session expired: the handle, or the DID when the handle didn't verify. */
 export function signInHint(session: { handle?: string; did?: string }): string | undefined {
   return session.handle && session.handle !== 'handle.invalid' ? session.handle : session.did

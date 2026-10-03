@@ -32,6 +32,15 @@ pub struct TokenSet {
     pub sub: Option<String>,
 }
 
+impl TokenSet {
+    /// When the access token expires, in epoch milliseconds. `expires_in`
+    /// comes from whatever server the account's DID document names, so it's
+    /// kept between 30 seconds and a day (5 minutes when it's missing).
+    pub fn expires_at(&self, now: i64) -> i64 {
+        now.saturating_add(self.expires_in.unwrap_or(300).clamp(30, 24 * 60 * 60) * 1000)
+    }
+}
+
 /// How a call to an authorization server failed.
 #[derive(Debug)]
 pub enum OAuthError {
@@ -457,5 +466,23 @@ mod tests {
             client_id("https://app.example", "atproto transition:generic"),
             "https://app.example/oauth-client-metadata.json?scope=atproto%20transition%3Ageneric"
         );
+    }
+
+    #[test]
+    fn token_lifetimes_are_bounded() {
+        let tokens = |expires_in| TokenSet {
+            access_token: "access".into(),
+            token_type: "DPoP".into(),
+            refresh_token: None,
+            expires_in,
+            scope: None,
+            sub: None,
+        };
+        assert_eq!(tokens(Some(3600)).expires_at(1_000), 3_601_000);
+        assert_eq!(tokens(None).expires_at(1_000), 301_000);
+        assert_eq!(tokens(Some(0)).expires_at(1_000), 31_000);
+        assert_eq!(tokens(Some(-5)).expires_at(1_000), 31_000);
+        assert_eq!(tokens(Some(i64::MAX)).expires_at(1_000), 86_401_000);
+        assert_eq!(tokens(Some(60)).expires_at(i64::MAX), i64::MAX);
     }
 }

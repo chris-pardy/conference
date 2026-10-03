@@ -2,28 +2,58 @@
 // CSRF token on state-changing requests, and reports an ended session to the
 // SessionProvider so the shell can offer to sign the person back in.
 
-let csrfToken: string | undefined
-let onExpired: ((handle?: string, did?: string) => void) | undefined
+import { fetchSession, type Session } from './auth/session'
+
+interface Connection {
+  /** The signed-in session's CSRF token and account, if there is one. */
+  csrfToken?: string
+  did?: string
+  /** The session has expired. */
+  expired(handle?: string, did?: string): void
+  /** The session changed elsewhere, e.g. a sign-in in another window. */
+  changed(session: Session): void
+}
+
+let connection: Connection | undefined
 
 /** Called by the SessionProvider as the session changes. */
-export function connectSession(token: string | undefined, expired: (handle?: string, did?: string) => void): void {
-  csrfToken = token
-  onExpired = expired
+export function connectSession(next: Connection): void {
+  connection = next
 }
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
 
+async function errorOf(res: Response): Promise<{ error?: string; handle?: string; did?: string }> {
+  return res
+    .clone()
+    .json()
+    .catch(() => ({}))
+}
+
 export async function api(input: string, init: RequestInit = {}): Promise<Response> {
   const method = (init.method ?? 'GET').toUpperCase()
-  const headers = new Headers(init.headers)
-  if (!SAFE_METHODS.has(method) && csrfToken) headers.set('X-CSRF-Token', csrfToken)
-  const res = await fetch(input, { ...init, headers, credentials: 'same-origin' })
+  const send = (token: string | undefined) => {
+    const headers = new Headers(init.headers)
+    if (!SAFE_METHODS.has(method) && token) headers.set('X-CSRF-Token', token)
+    return fetch(input, { ...init, headers, credentials: 'same-origin' })
+  }
+  const sent = connection?.csrfToken
+  let res = await send(sent)
+  // A missing token, or one from before a sign-out and sign-in in another
+  // window: learn the current session, and try once more if it's still the
+  // same account.
+  if (res.status === 403 && (await errorOf(res)).error === 'InvalidCsrfToken') {
+    const sentFor = connection?.did
+    const current = await fetchSession().catch(() => undefined)
+    if (current && current.kind !== 'unavailable') connection?.changed(current)
+    if (current?.kind === 'signedIn' && sentFor && current.user.did === sentFor && current.user.csrfToken !== sent) {
+      if (connection) connection.csrfToken = current.user.csrfToken
+      res = await send(current.user.csrfToken)
+    }
+  }
   if (res.status === 401) {
-    const body = await res
-      .clone()
-      .json()
-      .catch(() => ({}))
-    if (body.error === 'SessionExpired') onExpired?.(body.handle, body.did)
+    const body = await errorOf(res)
+    if (body.error === 'SessionExpired') connection?.expired(body.handle, body.did)
   }
   return res
 }

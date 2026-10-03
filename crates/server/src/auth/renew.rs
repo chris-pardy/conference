@@ -6,6 +6,7 @@
 //! caller holding it talks to the authorization server. That holds across
 //! instances sharing one database.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -73,7 +74,7 @@ async fn refresh_leased(state: &AppState, id_hash: &str) -> Renewal {
     // Granted under an older scope list (and client ID): the person signs in
     // again rather than renewing a grant the server no longer asks for.
     if session::missing_scope(state, &row.scopes) {
-        return match session::end(state, &row).await {
+        return match session::end_revoking(state, &row).await {
             Ok(()) => Renewal::Ended,
             Err(err) => Renewal::Failed(err.to_string()),
         };
@@ -107,7 +108,7 @@ async fn refresh_leased(state: &AppState, id_hash: &str) -> Renewal {
             )
             .bind(&tokens.access_token)
             .bind(tokens.refresh_token.as_deref().unwrap_or(old))
-            .bind(now_ms() + tokens.expires_in.unwrap_or(300) * 1000)
+            .bind(tokens.expires_at(now_ms()))
             .bind(scopes)
             .bind(id_hash)
             .bind(old)
@@ -209,6 +210,9 @@ async fn run_job(state: &AppState, job: Job, bound: i64) {
     };
     let permits = Arc::new(Semaphore::new(CONCURRENCY));
     let mut after = (i64::MIN, String::new());
+    // A refresh moves its row's expiry later, possibly to another place still
+    // ahead of the cursor and due: never pick the same session twice in a run.
+    let mut handled = HashSet::new();
     loop {
         let rows = sqlx::query_as::<_, (String, i64, Option<String>)>(sql)
             .bind(bound)
@@ -228,6 +232,9 @@ async fn run_job(state: &AppState, job: Job, bound: i64) {
         let mut tasks = JoinSet::new();
         for (id_hash, key, issuer) in rows {
             after = (key, id_hash.clone());
+            if !handled.insert(id_hash.clone()) {
+                continue;
+            }
             // Leave an unreachable issuer alone for a while, rather than timing
             // out once per session on it every run.
             if matches!(job, Job::Refresh) && issuer.is_some_and(|i| state.oauth.backing_off(&i)) {
@@ -240,7 +247,7 @@ async fn run_job(state: &AppState, job: Job, bound: i64) {
                 match job {
                     Job::EndIdle => {
                         let ended = match session::load(&state.db, &id_hash).await {
-                            Ok(Some(row)) => session::end(&state, &row).await,
+                            Ok(Some(row)) => session::end_revoking(&state, &row).await,
                             Ok(None) => Ok(()),
                             Err(err) => Err(err),
                         };

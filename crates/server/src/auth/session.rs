@@ -154,6 +154,20 @@ pub async fn end(state: &AppState, row: &SessionRow) -> Result<(), sqlx::Error> 
     wipe(&state.db, &row.id_hash).await
 }
 
+/// How long `end_revoking` waits on the authorization server.
+const REVOKE_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// Ends a session like `end`, but revokes its grant in the caller's task (for
+/// at most `REVOKE_TIMEOUT`), so a caller that limits its own concurrency,
+/// like the renewer, limits its revocations too.
+pub async fn end_revoking(state: &AppState, row: &SessionRow) -> Result<(), sqlx::Error> {
+    let wiped = wipe(&state.db, &row.id_hash).await;
+    if tokio::time::timeout(REVOKE_TIMEOUT, revoke(state, row)).await.is_err() {
+        eprintln!("could not revoke {}'s grant: timed out", row.did);
+    }
+    wiped
+}
+
 /// Revokes a session's grant at its authorization server, best effort.
 pub async fn revoke(state: &AppState, row: &SessionRow) {
     let (Some(issuer), Some(refresh), Some(key)) = (&row.issuer, &row.refresh_token, &row.dpop_key)

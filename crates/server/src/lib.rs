@@ -139,11 +139,40 @@ mod tests {
     use super::*;
     use auth::session::{self, NewSession};
 
-    async fn state() -> AppState {
-        let dir = std::env::temp_dir().join(format!("eventside-csrf-{}", keys::random_token(8)));
-        let mut config = Config::from_env().expect("the default configuration is valid");
-        config.database_url = format!("sqlite://{}/eventside.db?mode=rwc", dir.display());
-        AppState::build(config, "http://127.0.0.1:3100".into()).await.expect("the app state builds")
+    /// A directory removed when the test ends, pass or fail.
+    struct TempDir(std::path::PathBuf);
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// App state on a database of its own, configured explicitly so the
+    /// developer's environment can't change the outcome.
+    async fn state() -> (AppState, TempDir) {
+        let dir =
+            TempDir(std::env::temp_dir().join(format!("eventside-csrf-{}", keys::random_token(8))));
+        let local = "http://127.0.0.1:1".to_owned();
+        let config = Config {
+            port: 0,
+            atproto_url: local.clone(),
+            public_url: None,
+            database_url: format!("sqlite://{}/eventside.db?mode=rwc", dir.0.display()),
+            signing_key: None,
+            scopes: vec!["atproto".into()],
+            signup_pds_url: local.clone(),
+            plc_url: local.clone(),
+            handle_resolver_url: local,
+            allow_private_network: true,
+            session_idle_timeout: std::time::Duration::from_secs(30 * 24 * 60 * 60),
+            token_renew_interval: std::time::Duration::from_secs(5 * 60),
+            token_refresh_skew: std::time::Duration::from_secs(60),
+        };
+        let state = AppState::build(config, "http://127.0.0.1:3100".into())
+            .await
+            .expect("the app state builds");
+        (state, dir)
     }
 
     async fn post_to(app: Router, cookie: Option<&str>, csrf: Option<&str>) -> u16 {
@@ -163,7 +192,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_route_added_by_a_feature_gets_the_csrf_check() {
-        let state = state().await;
+        let (state, _dir) = state().await;
         let cookie = session::create(
             &state.db,
             NewSession {

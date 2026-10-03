@@ -155,6 +155,8 @@ async fn start(
             return fail("server_unavailable", return_to, &[]);
         }
     };
+    // `kind` (login or signup) is diagnostic only, for reading the table:
+    // the callback treats both flows alike.
     let stored = sqlx::query(
         "INSERT INTO oauth_requests (state, kind, pkce_verifier, dpop_key, issuer, expected_did, preauth_hash, \
          return_to, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
@@ -329,7 +331,7 @@ async fn complete(
             issuer: &server.issuer,
             access_token: &tokens.access_token,
             refresh_token: tokens.refresh_token.as_deref(),
-            token_expires_at: now_ms() + tokens.expires_in.unwrap_or(300) * 1000,
+            token_expires_at: tokens.expires_at(now_ms()),
             scopes: &scopes,
         },
     )

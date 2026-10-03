@@ -29,13 +29,23 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const csrfToken = session.kind === 'signedIn' ? session.user.csrfToken : undefined
+  const did = session.kind === 'signedIn' ? session.user.did : undefined
   useEffect(() => {
-    connectSession(csrfToken, (handle, did) => setSession({ kind: 'expired', handle, did }))
-  }, [csrfToken])
+    connectSession({
+      csrfToken,
+      did,
+      expired: (handle, did) => setSession({ kind: 'expired', handle, did }),
+      changed: setSession,
+    })
+  }, [csrfToken, did])
 
   const signOut = useCallback(async () => {
     try {
       const res = await api('/oauth/logout', { method: 'POST' })
+      // Still refused after api() caught up with the session: another
+      // account signed in elsewhere, and the shell now shows it. The session
+      // this window meant to end is already over.
+      if (res.status === 403) return true
       if (!res.ok && res.status !== 401) return false
     } catch {
       return false

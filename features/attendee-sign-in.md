@@ -1229,3 +1229,43 @@ green again. No reviewer has seen these fixes yet.
    - The indexes are a new migration, `0002_renewal_indexes.sql`, rather
      than an edit to `0001_auth.sql`: a database that already ran 0001 (a
      local run of this branch) would refuse its changed checksum.
+
+### Round 7
+
+The reviewer found 0 blocking, 0 major, 3 minor and 4 nits. `pnpm check`
+was green. Every finding was fixed after the review, and `pnpm check` is
+green again. No reviewer has seen these fixes yet.
+
+1. **[minor] One renewal run could refresh the same session twice.**
+   - Fixed: a refresh moves the row's `token_expires_at`, possibly to a key
+     still ahead of the cursor and due. The run keeps the `id_hash` of every
+     session it has handled and skips one it meets again; the cursor still
+     moves past it, so the run ends.
+2. **[minor] Revocations from the renewer escaped its concurrency limit.**
+   - Fixed: the renewer (idle expiry, and a grant missing a scope) uses a
+     new `session::end_revoking`, which wipes the session and then awaits
+     the revocation, for at most 15 seconds, while holding its permit.
+   - Request-path callers keep `session::end`'s background revocation.
+3. **[minor] A stale CSRF token, after a sign-out and sign-in in another
+   window, failed every write until a reload.**
+   - Fixed: on `403 InvalidCsrfToken`, `api()` fetches the session again
+     and hands it to the `SessionProvider`, so the shell shows who is
+     signed in now. It retries once with the new token if it's the same
+     account, and doesn't for a different one.
+   - Sign-out still refused after that means another account signed in
+     elsewhere and the shell now shows it, so it's not reported as a
+     connection problem.
+   - Two unit tests cover the retry and the different-account case.
+4. **[nit] `expires_in` from the authorization server was unbounded.**
+   - Fixed: `TokenSet::expires_at` clamps it to 30 seconds–1 day (5
+     minutes when missing) with saturating addition. Sign-in and renewal
+     both use it, and a unit test covers the bounds.
+5. **[nit] `currentPath()` was dead code.**
+   - Fixed: deleted.
+6. **[nit] The Rust CSRF test read the environment and left its temp
+   directory behind.**
+   - Fixed: it builds `Config` explicitly, and a guard removes the
+     directory when the test ends, pass or fail.
+7. **[nit] `oauth_requests.kind` was written but never read.**
+   - Fixed: a comment where it's written says it's diagnostic only; the
+     callback treats both flows alike.
