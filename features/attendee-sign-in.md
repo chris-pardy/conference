@@ -1,5 +1,5 @@
 ---
-status: blocked
+status: implementing
 impact: cross-cutting
 depends-on: [ci-pipeline]
 branch: feature/attendee-sign-in
@@ -1186,3 +1186,6 @@ and `pnpm check` is green with the round 5 fixes.
 **The choices:**
 - Accept the branch as it stands and ship it.
 - Run a sixth round to review the round 5 fixes.
+
+**Decision (2026-10-02):** the user raised the review limit to 10 rounds
+(PR #5), so the review loop resumes at round 6.
