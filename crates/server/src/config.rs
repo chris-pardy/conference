@@ -59,22 +59,33 @@ impl Config {
             ),
             allow_private_network: var("ALLOW_PRIVATE_NETWORK")
                 .is_some_and(|v| v == "true" || v == "1"),
-            session_idle_timeout: duration(
+            session_idle_timeout: nonzero(
                 "SESSION_IDLE_TIMEOUT",
-                Duration::from_secs(30 * 24 * 60 * 60),
+                duration("SESSION_IDLE_TIMEOUT", Duration::from_secs(30 * 24 * 60 * 60))?,
             )?,
-            token_renew_interval: duration("TOKEN_RENEW_INTERVAL", Duration::from_secs(5 * 60))?,
+            token_renew_interval: nonzero(
+                "TOKEN_RENEW_INTERVAL",
+                duration("TOKEN_RENEW_INTERVAL", Duration::from_secs(5 * 60))?,
+            )?,
             token_refresh_skew: duration("TOKEN_REFRESH_SKEW", Duration::from_secs(60))?,
             atproto_url,
         })
     }
 }
 
+fn nonzero(name: &str, value: Duration) -> Result<Duration, String> {
+    if value.is_zero() { Err(format!("{name} must be longer than zero")) } else { Ok(value) }
+}
+
 fn trim_url(url: &str) -> String {
     url.trim().trim_end_matches('/').to_owned()
 }
 
-/// Parses `90`, `90s`, `5m`, `2h` or `30d`. A bare number is seconds.
+/// The longest duration a setting takes. It keeps timestamps, and cookie
+/// lifetimes built from them, far from overflowing.
+const MAX_DURATION: Duration = Duration::from_secs(3650 * 24 * 60 * 60);
+
+/// Parses `90`, `90s`, `5m`, `2h` or `30d`, up to ten years. A bare number is seconds.
 pub fn parse_duration(value: &str) -> Result<Duration, String> {
     let value = value.trim();
     let split = value.find(|c: char| !c.is_ascii_digit()).unwrap_or(value.len());
@@ -89,7 +100,10 @@ pub fn parse_duration(value: &str) -> Result<Duration, String> {
         "d" => 24 * 60 * 60,
         _ => return Err(format!("{value:?} has an unknown unit; use s, m, h or d")),
     };
-    Ok(Duration::from_secs(number * seconds))
+    match number.checked_mul(seconds).map(Duration::from_secs) {
+        Some(duration) if duration <= MAX_DURATION => Ok(duration),
+        _ => Err(format!("{value:?} is too long; the most is 3650d")),
+    }
 }
 
 #[cfg(test)]
@@ -105,5 +119,14 @@ mod tests {
         assert_eq!(parse_duration("30d"), Ok(Duration::from_secs(2_592_000)));
         assert!(parse_duration("soon").is_err());
         assert!(parse_duration("5w").is_err());
+    }
+
+    #[test]
+    fn durations_are_bounded() {
+        assert_eq!(parse_duration("3650d"), Ok(MAX_DURATION));
+        assert!(parse_duration("3651d").is_err());
+        assert!(parse_duration("18446744073709551615d").is_err());
+        assert!(nonzero("TOKEN_RENEW_INTERVAL", parse_duration("0").unwrap()).is_err());
+        assert!(nonzero("TOKEN_RENEW_INTERVAL", parse_duration("1s").unwrap()).is_ok());
     }
 }

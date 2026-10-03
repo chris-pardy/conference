@@ -102,7 +102,14 @@ impl AppState {
     }
 }
 
+/// The app: every route, inside the checks every route gets.
 pub fn router(state: AppState) -> Router {
+    secure(routes(), state)
+}
+
+/// Every route the server answers. A feature adds its routes here, and
+/// `router` puts all of them behind the CSRF check.
+fn routes() -> Router<AppState> {
     use auth::routes;
     Router::new()
         .route("/health", get(health))
@@ -113,10 +120,77 @@ pub fn router(state: AppState) -> Router {
         .route("/oauth/callback", get(routes::callback))
         .route("/oauth/logout", post(routes::logout))
         .route("/xrpc/app.eventside.auth.getSession", get(routes::get_session))
+}
+
+/// Wraps a finished set of routes in the CSRF check. `Router::layer` covers
+/// only the routes that exist when it's called, so this runs last, on all of them.
+fn secure(routes: Router<AppState>, state: AppState) -> Router {
+    routes
         .layer(middleware::from_fn_with_state(state.clone(), auth::require_csrf))
         .with_state(state)
 }
 
 async fn health(State(state): State<AppState>) -> Json<HealthReport> {
     Json(health_report(state.atproto_status().await))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use auth::session::{self, NewSession};
+
+    async fn state() -> AppState {
+        let dir = std::env::temp_dir().join(format!("eventside-csrf-{}", keys::random_token(8)));
+        let mut config = Config::from_env().expect("the default configuration is valid");
+        config.database_url = format!("sqlite://{}/eventside.db?mode=rwc", dir.display());
+        AppState::build(config, "http://127.0.0.1:3100".into()).await.expect("the app state builds")
+    }
+
+    async fn post_to(app: Router, cookie: Option<&str>, csrf: Option<&str>) -> u16 {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let mut req =
+            reqwest::Client::new().post(format!("http://{addr}/xrpc/test.changeSomething"));
+        if let Some(cookie) = cookie {
+            req = req.header("cookie", format!("session={cookie}"));
+        }
+        if let Some(csrf) = csrf {
+            req = req.header("x-csrf-token", csrf);
+        }
+        req.send().await.unwrap().status().as_u16()
+    }
+
+    #[tokio::test]
+    async fn a_route_added_by_a_feature_gets_the_csrf_check() {
+        let state = state().await;
+        let cookie = session::create(
+            &state.db,
+            NewSession {
+                did: "did:plc:test",
+                handle: "test.example",
+                display_name: None,
+                avatar: None,
+                pds: "http://127.0.0.1:1",
+                dpop_key: "{}",
+                issuer: "http://127.0.0.1:1",
+                access_token: "access",
+                refresh_token: None,
+                token_expires_at: i64::MAX,
+                scopes: "atproto",
+            },
+        )
+        .await
+        .unwrap();
+        let row = session::load(&state.db, &keys::sha256_b64(&cookie)).await.unwrap().unwrap();
+        let app = || {
+            let feature =
+                routes().route("/xrpc/test.changeSomething", post(|| async { "changed" }));
+            secure(feature, state.clone())
+        };
+        assert_eq!(post_to(app(), None, None).await, 401);
+        assert_eq!(post_to(app(), Some(&cookie), None).await, 403);
+        assert_eq!(post_to(app(), Some(&cookie), Some("wrong")).await, 403);
+        assert_eq!(post_to(app(), Some(&cookie), Some(&row.csrf_token)).await, 200);
+    }
 }

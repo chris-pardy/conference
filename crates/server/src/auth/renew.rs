@@ -171,31 +171,52 @@ async fn release(state: &AppState, id_hash: &str) {
     }
 }
 
-/// How many due sessions one batch of a run loads.
+/// How many sessions one batch of a run loads.
 const BATCH: i64 = 500;
 
-/// One renewal run: ends idle sessions, and refreshes every live session
-/// whose access token expires before the next run. It pages through due
-/// sessions a batch at a time, finishing each batch before loading the next.
+/// What a run does to the sessions one of its queries finds.
+#[derive(Clone, Copy)]
+enum Job {
+    EndIdle,
+    Refresh,
+}
+
+/// One renewal run: ends idle sessions, then refreshes every live session
+/// whose access token expires before the next run. Each is its own indexed
+/// query, paged by its own column, a batch at a time.
 pub async fn run_once(state: &AppState) {
     let now = now_ms();
     let config = &state.config;
-    let due = now + ms(config.token_renew_interval) + ms(config.token_refresh_skew);
     let idle_before = now - ms(config.session_idle_timeout);
-    let permits = Arc::new(Semaphore::new(CONCURRENCY));
-    let mut after = String::new();
-    loop {
-        let rows = sqlx::query_as::<_, (String, i64, Option<String>)>(
+    let due = now + ms(config.token_renew_interval) + ms(config.token_refresh_skew);
+    // Idle sessions first, so none is renewed only to be ended.
+    run_job(state, Job::EndIdle, idle_before).await;
+    run_job(state, Job::Refresh, due).await;
+}
+
+async fn run_job(state: &AppState, job: Job, bound: i64) {
+    let sql = match job {
+        Job::EndIdle => {
             "SELECT id_hash, last_seen_at, issuer FROM sessions WHERE ended_at IS NULL \
-             AND (last_seen_at < $1 OR (refresh_token IS NOT NULL AND token_expires_at <= $2)) \
-             AND id_hash > $3 ORDER BY id_hash LIMIT $4",
-        )
-        .bind(idle_before)
-        .bind(due)
-        .bind(&after)
-        .bind(BATCH)
-        .fetch_all(&state.db)
-        .await;
+             AND last_seen_at < $1 AND last_seen_at >= $2 AND (last_seen_at, id_hash) > ($2, $3) \
+             ORDER BY last_seen_at, id_hash LIMIT $4"
+        }
+        Job::Refresh => {
+            "SELECT id_hash, token_expires_at, issuer FROM sessions WHERE ended_at IS NULL \
+             AND token_expires_at <= $1 AND token_expires_at >= $2 AND (token_expires_at, id_hash) > ($2, $3) \
+             AND refresh_token IS NOT NULL ORDER BY token_expires_at, id_hash LIMIT $4"
+        }
+    };
+    let permits = Arc::new(Semaphore::new(CONCURRENCY));
+    let mut after = (i64::MIN, String::new());
+    loop {
+        let rows = sqlx::query_as::<_, (String, i64, Option<String>)>(sql)
+            .bind(bound)
+            .bind(after.0)
+            .bind(&after.1)
+            .bind(BATCH)
+            .fetch_all(&state.db)
+            .await;
         let rows = match rows {
             Ok(rows) => rows,
             Err(err) => {
@@ -205,31 +226,33 @@ pub async fn run_once(state: &AppState) {
         };
         let full = rows.len() as i64 == BATCH;
         let mut tasks = JoinSet::new();
-        for (id_hash, last_seen, issuer) in rows {
-            after.clone_from(&id_hash);
+        for (id_hash, key, issuer) in rows {
+            after = (key, id_hash.clone());
             // Leave an unreachable issuer alone for a while, rather than timing
             // out once per session on it every run.
-            let backing_off = issuer.is_some_and(|i| state.oauth.backing_off(&i));
-            if backing_off && last_seen >= idle_before {
+            if matches!(job, Job::Refresh) && issuer.is_some_and(|i| state.oauth.backing_off(&i)) {
                 continue;
             }
             let state = state.clone();
             let permits = permits.clone();
             tasks.spawn(async move {
                 let Ok(_permit) = permits.acquire().await else { return };
-                if last_seen < idle_before {
-                    let ended = match session::load(&state.db, &id_hash).await {
-                        Ok(Some(row)) => session::end(&state, &row).await,
-                        Ok(None) => Ok(()),
-                        Err(err) => Err(err),
-                    };
-                    if let Err(err) = ended {
-                        eprintln!("renewal: could not end an idle session: {err}");
+                match job {
+                    Job::EndIdle => {
+                        let ended = match session::load(&state.db, &id_hash).await {
+                            Ok(Some(row)) => session::end(&state, &row).await,
+                            Ok(None) => Ok(()),
+                            Err(err) => Err(err),
+                        };
+                        if let Err(err) = ended {
+                            eprintln!("renewal: could not end an idle session: {err}");
+                        }
                     }
-                    return;
-                }
-                if let Renewal::Failed(why) = refresh(&state, &id_hash).await {
-                    eprintln!("renewal: {why}");
+                    Job::Refresh => {
+                        if let Renewal::Failed(why) = refresh(&state, &id_hash).await {
+                            eprintln!("renewal: {why}");
+                        }
+                    }
                 }
             });
         }

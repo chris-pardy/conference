@@ -96,12 +96,13 @@ impl FromRequestParts<AppState> for CurrentUser {
     }
 }
 
+/// A live session the CSRF layer has already checked, for `CurrentUser` and
+/// sign-out.
+#[derive(Clone)]
+pub struct CheckedSession(SessionRow);
+
 /// Every state-changing request (non-GET XRPC, and sign-out) must carry the
 /// session's CSRF token in `X-CSRF-Token`.
-/// A live session the CSRF layer has already checked, for `CurrentUser`.
-#[derive(Clone)]
-struct CheckedSession(SessionRow);
-
 pub async fn require_csrf(State(state): State<AppState>, mut req: Request, next: Next) -> Response {
     let path = req.uri().path();
     let changes_state = !matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS);

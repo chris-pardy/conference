@@ -45,6 +45,9 @@ export default defineConfig({
       },
     }),
   ],
-  server: { proxy },
+  // The dev origin is fixed, because the backend's PUBLIC_URL (its OAuth client
+  // ID and cookie origin) must name it: run `pnpm dev:server` and `pnpm dev:web`.
+  // 127.0.0.1, not localhost, as in the e2e setup: vivarium accepts client IDs there.
+  server: { proxy, host: '127.0.0.1', port: 5173, strictPort: true },
   preview: { proxy },
 })

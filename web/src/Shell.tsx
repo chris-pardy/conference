@@ -109,9 +109,8 @@ function AccountMenu({ user }: { user: SessionInfo }) {
 
 function ExpiredBanner() {
   const { session, signOut } = useSession()
-  const location = useLocation()
+  const returnTo = useReturnTo()
   if (session.kind !== 'expired') return null
-  const returnTo = location.pathname + location.search
   const hint = signInHint(session)
   return (
     <div className="shell__expired" role="alert">

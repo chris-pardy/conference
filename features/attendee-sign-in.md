@@ -1189,3 +1189,43 @@ and `pnpm check` is green with the round 5 fixes.
 
 **Decision (2026-10-02):** the user raised the review limit to 10 rounds
 (PR #5), so the review loop resumes at round 6.
+
+### Round 6
+
+The reviewer found 0 blocking, 0 major, 4 minor and 2 nits. `pnpm check`
+was green. Every finding was fixed after the review, and `pnpm check` is
+green again. No reviewer has seen these fixes yet.
+
+1. **[minor] `TOKEN_RENEW_INTERVAL=0` panicked the renewal task, and huge
+   durations could overflow.**
+   - Fixed: a zero `TOKEN_RENEW_INTERVAL` or `SESSION_IDLE_TIMEOUT` is a
+     startup error (exit 2).
+   - `parse_duration` uses `checked_mul` and refuses anything over ten
+     years, so the idle timeout plus the tombstone period can't overflow.
+2. **[minor] The expired banner on `/signin` sent people back to the
+   sign-in page.**
+   - Fixed: the banner uses `useReturnTo()`, like the account control, so
+     on `/signin` it keeps the page's own `return_to`.
+3. **[minor] Sign-in through `vite dev` failed, because `PUBLIC_URL`
+   defaulted to the backend's own address.**
+   - Fixed: `pnpm dev:server` starts the backend with
+     `PUBLIC_URL=http://127.0.0.1:5173`, and `pnpm dev:web` starts Vite.
+   - Vite's dev server is pinned to `127.0.0.1:5173` (`strictPort`), with
+     a comment saying why.
+4. **[minor] The CSRF layer covered only routes registered before it.**
+   - Fixed: `routes()` holds every route, and `router()` wraps the finished
+     set in the CSRF check, so a feature adding a route there gets it.
+   - A Rust test adds a dummy non-GET `/xrpc/` route and checks it
+     returns 401 without a session, 403 without the right token, and 200
+     with it.
+5. **[nit] Sign-out looked the session up again.**
+   - Fixed: it uses the session the CSRF layer checked, and looks up only
+     for an ended session, which the layer lets through.
+6. **[nit] The renewal query scanned every live session.**
+   - Fixed: idle sessions and due tokens are now two queries, each paged
+     by its own column on its own index, `(ended_at, last_seen_at, id_hash)`
+     and `(ended_at, token_expires_at, id_hash)`.
+   - SQLite plans both as index range searches with no temp B-tree.
+   - The indexes are a new migration, `0002_renewal_indexes.sql`, rather
+     than an edit to `0001_auth.sql`: a database that already ran 0001 (a
+     local run of this branch) would refuse its changed checksum.

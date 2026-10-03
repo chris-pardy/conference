@@ -3,16 +3,16 @@
 
 use std::collections::HashMap;
 
-use axum::Json;
 use axum::extract::{Query, State};
 use axum::http::header::{CACHE_CONTROL, LOCATION, SET_COOKIE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
+use axum::{Extension, Json};
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use serde_json::{Value, json};
 
 use super::session::{self, Lookup, NewSession, TOMBSTONE};
-use super::{cookies, return_to::sanitize, xrpc_error};
+use super::{CheckedSession, cookies, return_to::sanitize, xrpc_error};
 use crate::AppState;
 use crate::db::now_ms;
 use crate::identity::{IdentityError, is_valid_did, normalize_handle};
@@ -414,34 +414,45 @@ async fn retire(state: &AppState, id_hash: &str) {
 
 /// Signs out: revokes the grant, deletes the session and clears the cookie.
 /// The CSRF layer has already checked the token.
-pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Response {
+pub async fn logout(
+    State(state): State<AppState>,
+    checked: Option<Extension<CheckedSession>>,
+    headers: HeaderMap,
+) -> Response {
     let secure = state.secure_cookies();
-    match session::lookup(&state, &headers).await {
-        Ok(Lookup::Live(row) | Lookup::Expired(row)) => {
-            // Signed out first, whatever the authorization server does.
-            if let Err(err) = session::delete(&state.db, &row.id_hash).await {
-                eprintln!("sign-out: could not delete the session: {err}");
+    let row = match checked {
+        // A live session, whose CSRF token the layer has checked.
+        Some(Extension(CheckedSession(row))) => Some(row),
+        // The layer lets an ended session through without a token.
+        None => match session::lookup(&state, &headers).await {
+            Ok(Lookup::Expired(row)) => Some(row),
+            // Already gone (another sign-out); never a live session unchecked.
+            Ok(Lookup::Live(_) | Lookup::None) => None,
+            Err(err) => {
+                eprintln!("sign-out: {err}");
                 return xrpc_error(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "InternalServerError",
                     "could not sign out",
                 );
             }
-            // Then revoke, waiting briefly so the grant is usually gone by the
-            // time sign-out returns; a slow server finishes in the background.
-            let background = state.clone();
-            let revoking = tokio::spawn(async move { session::revoke(&background, &row).await });
-            let _ = tokio::time::timeout(REVOKE_WAIT, revoking).await;
-        }
-        Ok(Lookup::None) => {}
-        Err(err) => {
-            eprintln!("sign-out: {err}");
+        },
+    };
+    if let Some(row) = row {
+        // Signed out first, whatever the authorization server does.
+        if let Err(err) = session::delete(&state.db, &row.id_hash).await {
+            eprintln!("sign-out: could not delete the session: {err}");
             return xrpc_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "InternalServerError",
                 "could not sign out",
             );
         }
+        // Then revoke, waiting briefly so the grant is usually gone by the
+        // time sign-out returns; a slow server finishes in the background.
+        let background = state.clone();
+        let revoking = tokio::spawn(async move { session::revoke(&background, &row).await });
+        let _ = tokio::time::timeout(REVOKE_WAIT, revoking).await;
     }
     let mut res = Json(json!({})).into_response();
     if let Ok(value) = HeaderValue::from_str(&cookies::clear_session(secure)) {
