@@ -41,12 +41,20 @@ export async function api(input: string, init: RequestInit = {}): Promise<Respon
   let res = await send(sent)
   // A missing token, or one from before a sign-out and sign-in in another
   // window: learn the current session, and try once more if it's still the
-  // same account.
+  // same account. A stream body is spent by the first send, so it can't be
+  // retried.
   if (res.status === 403 && (await errorOf(res)).error === 'InvalidCsrfToken') {
     const sentFor = connection?.did
     const current = await fetchSession().catch(() => undefined)
     if (current && current.kind !== 'unavailable') connection?.changed(current)
-    if (current?.kind === 'signedIn' && sentFor && current.user.did === sentFor && current.user.csrfToken !== sent) {
+    const replayable = !(init.body instanceof ReadableStream)
+    if (
+      replayable &&
+      current?.kind === 'signedIn' &&
+      sentFor &&
+      current.user.did === sentFor &&
+      current.user.csrfToken !== sent
+    ) {
       if (connection) connection.csrfToken = current.user.csrfToken
       res = await send(current.user.csrfToken)
     }

@@ -207,6 +207,7 @@ mod tests {
                 refresh_token: None,
                 token_expires_at: i64::MAX,
                 scopes: "atproto",
+                client_id: &state.oauth.client_id,
             },
         )
         .await
@@ -221,5 +222,62 @@ mod tests {
         assert_eq!(post_to(app(), Some(&cookie), None).await, 403);
         assert_eq!(post_to(app(), Some(&cookie), Some("wrong")).await, 403);
         assert_eq!(post_to(app(), Some(&cookie), Some(&row.csrf_token)).await, 200);
+    }
+
+    async fn ended_session(state: &AppState, ended_at: i64) -> String {
+        let cookie = session::create(
+            &state.db,
+            NewSession {
+                did: "did:plc:test",
+                handle: "test.example",
+                display_name: None,
+                avatar: None,
+                pds: "http://127.0.0.1:1",
+                dpop_key: "{}",
+                issuer: "http://127.0.0.1:1",
+                access_token: "access",
+                refresh_token: None,
+                token_expires_at: i64::MAX,
+                scopes: "atproto",
+                client_id: &state.oauth.client_id,
+            },
+        )
+        .await
+        .unwrap();
+        let id_hash = keys::sha256_b64(&cookie);
+        sqlx::query("UPDATE sessions SET ended_at = $1, last_seen_at = $1 WHERE id_hash = $2")
+            .bind(ended_at)
+            .bind(&id_hash)
+            .execute(&state.db)
+            .await
+            .unwrap();
+        id_hash
+    }
+
+    #[tokio::test]
+    async fn an_ended_session_is_kept_as_long_as_its_cookie_could_live() {
+        let (state, _dir) = state().await;
+        let day = 24 * 60 * 60 * 1000;
+        let now = db::now_ms();
+        // Ended 40 days ago: past the tombstone, but a cookie last renewed
+        // then lives the 30-day idle timeout plus the tombstone.
+        let kept = ended_session(&state, now - 40 * day).await;
+        let gone = ended_session(&state, now - 61 * day).await;
+        session::sweep(&state).await.unwrap();
+        assert!(session::load(&state.db, &kept).await.unwrap().is_some());
+        assert!(session::load(&state.db, &gone).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn a_grant_for_another_client_id_is_outdated() {
+        let (state, _dir) = state().await;
+        let id_hash = ended_session(&state, db::now_ms()).await;
+        let mut row = session::load(&state.db, &id_hash).await.unwrap().unwrap();
+        assert!(!session::outdated(&state, &row));
+        row.client_id = None;
+        assert!(!session::outdated(&state, &row));
+        // Same scopes, reordered or shrunk: still another client ID.
+        row.client_id = Some(format!("{}?scope=atproto", state.oauth.client_id));
+        assert!(session::outdated(&state, &row));
     }
 }

@@ -721,10 +721,17 @@ Where the build refined the approved design:
   and production servers cache too. Without a new client ID, a server keeps
   refusing scopes that the cached metadata doesn't list. With `atproto`
   alone, the ID is the plain metadata URL.
+- **A session remembers the client ID its grant was issued to**
+  (`sessions.client_id`, migration `0003`). Any change to the scope list
+  changes the client ID, and a grant can't be refreshed or revoked as
+  another client. So a session issued to an earlier client ID is ended like
+  one whose scopes grew, and the person signs in again; its grant isn't
+  revoked (the server would refuse) and is left to expire.
 - **The session cookie lives for the idle timeout plus 30 days** (the
   tombstone), not just the idle timeout. An idle session has to still send
-  its cookie for the PWA to hear `SessionExpired`, and the ended row is
-  kept for those same 30 days.
+  its cookie for the PWA to hear `SessionExpired`. An ended row is kept for
+  the idle timeout plus 30 days after it ended, which is never before its
+  cookie runs out.
 - **The default database** is `sqlite://data/eventside.db?mode=rwc`,
   relative to the working directory. `data/` is git-ignored.
 
@@ -1269,3 +1276,51 @@ green again. No reviewer has seen these fixes yet.
 7. **[nit] `oauth_requests.kind` was written but never read.**
    - Fixed: a comment where it's written says it's diagnostic only; the
      callback treats both flows alike.
+
+### Round 8
+
+The reviewer found 0 blocking, 0 major, 4 minor and 3 nits. `pnpm check`
+was green. Every finding was fixed after the review, and `pnpm check` is
+green again. No reviewer has seen these fixes yet.
+
+1. **[minor] Sign-out reported success on any 403, even when the appview
+   couldn't be asked.**
+   - Fixed: on a 403 that `api()` couldn't resolve, `signOut` asks for the
+     session itself. It succeeds only if that shows the session over
+     (signed out, expired, or another account), and fails if the appview
+     can't be asked or the same account is still signed in.
+   - Three unit tests in `SessionProvider.test.tsx` cover the cases.
+2. **[minor] Refresh and revocation used the current client ID, not the
+   one the grant was issued to.**
+   - Fixed: a session stores its client ID (new migration
+     `0003_session_client_id.sql`; NULL means the current one).
+     `session::outdated` ends a session issued to another client ID, as it
+     does one whose scopes grew, so a shrunk or reordered scope list no
+     longer leads to a refresh as the wrong client. Revocation is skipped
+     for such a grant, since the server would refuse it. Recorded in the
+     build notes.
+   - A Rust test covers the check.
+3. **[minor] Ended rows were swept 30 days after ending, while their
+   cookie could live the idle timeout plus 30 days.**
+   - Fixed: the sweeper keeps both ended and idle rows until the idle
+     timeout plus the tombstone has passed since `ended_at` or
+     `last_seen_at`, never before the cookie runs out. A Rust test covers
+     a row ended 40 days ago (kept) and 61 days ago (gone).
+4. **[minor] Ending idle sessions ignored the issuer backoff, and a
+   hanging revocation endpoint could stall renewal.**
+   - Fixed: `end_revoking` wipes without revoking when the issuer is
+     backing off, and marks the issuer down when a revocation times out.
+     `session::revoke` marks it down when the revocation POST is
+     unavailable. A hanging issuer now costs one timeout per backoff
+     period, not one per session.
+5. **[nit] The CSRF retry would re-send a spent stream body.**
+   - Fixed: `api()` doesn't retry when the body is a `ReadableStream`.
+6. **[nit] The run's `handled` set grew with every session it touched.**
+   - Fixed in part: only the refresh job remembers sessions, since an
+     ended session can't come back into the idle query. The refresh set
+     stays: it lasts one run, at roughly 100 bytes per due session, which
+     at conference scale is well under a megabyte.
+7. **[nit] An issuer with a path was accepted.**
+   - Fixed: `auth_server` refuses an issuer that isn't a bare origin
+     (its URL's origin must serialize to the issuer exactly), with a unit
+     test.

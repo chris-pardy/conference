@@ -171,6 +171,9 @@ impl OAuthClient {
 
     /// An authorization server's metadata, checked against its issuer.
     pub async fn auth_server(&self, issuer: &str) -> Result<AuthServer, String> {
+        if !bare_origin(issuer) {
+            return Err(format!("the issuer {issuer:?} isn't a bare origin"));
+        }
         let metadata_url = format!("{issuer}/.well-known/oauth-authorization-server");
         let server: AuthServer = serde_json::from_value(self.get_json(&metadata_url).await?)
             .map_err(|e| format!("{metadata_url}: {e}"))?;
@@ -416,6 +419,12 @@ fn client_id(public_url: &str, scope: &str) -> String {
     }
 }
 
+/// Whether an issuer is a bare origin, as atproto requires: no path, query,
+/// fragment, trailing slash or default port.
+fn bare_origin(issuer: &str) -> bool {
+    url::Url::parse(issuer).is_ok_and(|u| u.origin().ascii_serialization() == issuer)
+}
+
 const ASSERTION_TYPE: &str = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer";
 
 fn origin(url: &str) -> String {
@@ -466,6 +475,17 @@ mod tests {
             client_id("https://app.example", "atproto transition:generic"),
             "https://app.example/oauth-client-metadata.json?scope=atproto%20transition%3Ageneric"
         );
+    }
+
+    #[test]
+    fn an_issuer_must_be_a_bare_origin() {
+        assert!(bare_origin("https://as.example"));
+        assert!(bare_origin("http://127.0.0.1:2583"));
+        assert!(!bare_origin("https://as.example/tenant"));
+        assert!(!bare_origin("https://as.example/"));
+        assert!(!bare_origin("https://as.example?x=1"));
+        assert!(!bare_origin("https://as.example:443"));
+        assert!(!bare_origin("not a url"));
     }
 
     #[test]

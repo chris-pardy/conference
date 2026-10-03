@@ -9,7 +9,9 @@ use crate::db::{Db, ms, now_ms};
 use crate::keys::{EcKey, random_token, sha256_b64};
 
 /// How long an ended session keeps its DID and handle, so the PWA can sign
-/// the same person back in. The cookie lives this long past the idle timeout.
+/// the same person back in. The cookie lives this long past the idle timeout,
+/// counted from its last renewal; the sweeper keeps a row that long after it
+/// ended, which is never sooner.
 pub const TOMBSTONE: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -26,6 +28,8 @@ pub struct SessionRow {
     pub refresh_token: Option<String>,
     pub token_expires_at: Option<i64>,
     pub scopes: String,
+    /// The client the grant was issued to; `None` for the current one.
+    pub client_id: Option<String>,
     pub csrf_token: String,
     pub last_seen_at: i64,
     pub ended_at: Option<i64>,
@@ -38,7 +42,7 @@ impl SessionRow {
 }
 
 const COLUMNS: &str = "id_hash, did, handle, display_name, avatar, pds, dpop_key, issuer, access_token, \
-    refresh_token, token_expires_at, scopes, csrf_token, last_seen_at, ended_at";
+    refresh_token, token_expires_at, scopes, client_id, csrf_token, last_seen_at, ended_at";
 
 /// Where a browser's session stands.
 pub enum Lookup {
@@ -61,6 +65,7 @@ pub struct NewSession<'a> {
     pub refresh_token: Option<&'a str>,
     pub token_expires_at: i64,
     pub scopes: &'a str,
+    pub client_id: &'a str,
 }
 
 /// Stores a new session, returning the cookie value that names it.
@@ -69,8 +74,8 @@ pub async fn create(db: &Db, s: NewSession<'_>) -> Result<String, sqlx::Error> {
     let now = now_ms();
     sqlx::query(
         "INSERT INTO sessions (id_hash, did, handle, display_name, avatar, pds, dpop_key, issuer, access_token, \
-         refresh_token, token_expires_at, scopes, csrf_token, created_at, last_seen_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
+         refresh_token, token_expires_at, scopes, client_id, csrf_token, created_at, last_seen_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)",
     )
     .bind(sha256_b64(&id))
     .bind(s.did)
@@ -84,6 +89,7 @@ pub async fn create(db: &Db, s: NewSession<'_>) -> Result<String, sqlx::Error> {
     .bind(s.refresh_token)
     .bind(s.token_expires_at)
     .bind(s.scopes)
+    .bind(s.client_id)
     .bind(random_token(24))
     .bind(now)
     .bind(now)
@@ -99,8 +105,8 @@ pub async fn load(db: &Db, id_hash: &str) -> Result<Option<SessionRow>, sqlx::Er
         .await
 }
 
-/// The browser's session, ending it first if it has gone idle or no longer
-/// carries every sign-in scope.
+/// The browser's session, ending it first if it has gone idle or its grant
+/// is outdated.
 pub async fn lookup(state: &AppState, headers: &HeaderMap) -> Result<Lookup, sqlx::Error> {
     let Some(cookie) = super::cookies::session(headers, state.secure_cookies()) else {
         return Ok(Lookup::None);
@@ -113,8 +119,7 @@ pub async fn lookup(state: &AppState, headers: &HeaderMap) -> Result<Lookup, sql
     }
     let now = now_ms();
     let idle = now - row.last_seen_at > ms(state.config.session_idle_timeout);
-    let missing_scope = missing_scope(state, &row.scopes);
-    if idle || missing_scope {
+    if idle || outdated(state, &row) {
         end(state, &row).await?;
         return Ok(Lookup::Expired(row));
     }
@@ -139,10 +144,17 @@ pub async fn touch(state: &AppState, row: &SessionRow) -> Result<bool, sqlx::Err
     Ok(true)
 }
 
-/// Whether a session lacks a scope the server now asks for at sign-in.
-pub fn missing_scope(state: &AppState, scopes: &str) -> bool {
-    let granted: Vec<&str> = scopes.split_whitespace().collect();
-    state.config.scopes.iter().any(|s| !granted.contains(&s.as_str()))
+/// Whether a session's grant is outdated, so the person signs in again: it
+/// lacks a scope the server now asks for at sign-in, or it was issued to an
+/// earlier client ID (the scope list changed in any way). An earlier client's
+/// grant can't be refreshed, or revoked, as the current client.
+pub fn outdated(state: &AppState, row: &SessionRow) -> bool {
+    let granted: Vec<&str> = row.scopes.split_whitespace().collect();
+    state.config.scopes.iter().any(|s| !granted.contains(&s.as_str())) || another_client(state, row)
+}
+
+fn another_client(state: &AppState, row: &SessionRow) -> bool {
+    row.client_id.as_deref().is_some_and(|id| id != state.oauth.client_id)
 }
 
 /// Ends a session: its grant is revoked in the background, and its tokens and
@@ -159,24 +171,47 @@ const REVOKE_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Ends a session like `end`, but revokes its grant in the caller's task (for
 /// at most `REVOKE_TIMEOUT`), so a caller that limits its own concurrency,
-/// like the renewer, limits its revocations too.
+/// like the renewer, limits its revocations too. An issuer that recently
+/// couldn't be reached isn't waited on: the session is only wiped.
 pub async fn end_revoking(state: &AppState, row: &SessionRow) -> Result<(), sqlx::Error> {
     let wiped = wipe(&state.db, &row.id_hash).await;
-    if tokio::time::timeout(REVOKE_TIMEOUT, revoke(state, row)).await.is_err() {
-        eprintln!("could not revoke {}'s grant: timed out", row.did);
+    match &row.issuer {
+        Some(issuer) if state.oauth.backing_off(issuer) => {
+            eprintln!("could not revoke {}'s grant: {issuer} is backing off", row.did);
+        }
+        issuer => {
+            if tokio::time::timeout(REVOKE_TIMEOUT, revoke(state, row)).await.is_err() {
+                eprintln!("could not revoke {}'s grant: timed out", row.did);
+                if let Some(issuer) = issuer {
+                    state.oauth.mark_down(issuer);
+                }
+            }
+        }
     }
     wiped
 }
 
-/// Revokes a session's grant at its authorization server, best effort.
+/// Revokes a session's grant at its authorization server, best effort. A
+/// grant issued to an earlier client ID is left to expire: the server would
+/// refuse to revoke it for another client. An unreachable server is marked
+/// down, which the renewer heeds.
 pub async fn revoke(state: &AppState, row: &SessionRow) {
     let (Some(issuer), Some(refresh), Some(key)) = (&row.issuer, &row.refresh_token, &row.dpop_key)
     else {
         return;
     };
+    if another_client(state, row) {
+        eprintln!("not revoking {}'s grant: it was issued to an earlier client ID", row.did);
+        return;
+    }
     let Ok(key) = EcKey::from_jwk(key) else { return };
     let result = match state.oauth.cached_auth_server(issuer).await {
-        Ok(server) => state.oauth.revoke(&server, refresh, &key).await.map_err(|e| e.to_string()),
+        Ok(server) => state.oauth.revoke(&server, refresh, &key).await.map_err(|e| {
+            if matches!(e, crate::oauth::OAuthError::Unavailable(_)) {
+                state.oauth.mark_down(issuer);
+            }
+            e.to_string()
+        }),
         Err(why) => Err(why),
     };
     if let Err(why) = result {
@@ -203,21 +238,22 @@ pub async fn delete(db: &Db, id_hash: &str) -> Result<(), sqlx::Error> {
     Ok(())
 }
 
-/// Removes stale pending requests, and ended or long-idle sessions past
-/// their tombstone.
+/// Removes stale pending requests, and sessions whose cookie has run out:
+/// it lives the idle timeout plus the tombstone from its last renewal, which
+/// is no later than `last_seen_at`, or `ended_at` for an ended session.
 pub async fn sweep(state: &AppState) -> Result<(), sqlx::Error> {
     let now = now_ms();
     sqlx::query("DELETE FROM oauth_requests WHERE expires_at < $1")
         .bind(now)
         .execute(&state.db)
         .await?;
-    let cutoff = now - ms(TOMBSTONE);
+    let cutoff = now - ms(TOMBSTONE) - ms(state.config.session_idle_timeout);
     sqlx::query("DELETE FROM sessions WHERE ended_at IS NOT NULL AND ended_at < $1")
         .bind(cutoff)
         .execute(&state.db)
         .await?;
     sqlx::query("DELETE FROM sessions WHERE ended_at IS NULL AND last_seen_at < $1")
-        .bind(cutoff - ms(state.config.session_idle_timeout))
+        .bind(cutoff)
         .execute(&state.db)
         .await?;
     Ok(())

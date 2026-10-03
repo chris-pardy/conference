@@ -333,6 +333,7 @@ async fn complete(
             refresh_token: tokens.refresh_token.as_deref(),
             token_expires_at: tokens.expires_at(now_ms()),
             scopes: &scopes,
+            client_id: &state.oauth.client_id,
         },
     )
     .await;

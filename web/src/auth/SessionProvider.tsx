@@ -42,17 +42,24 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(async () => {
     try {
       const res = await api('/oauth/logout', { method: 'POST' })
-      // Still refused after api() caught up with the session: another
-      // account signed in elsewhere, and the shell now shows it. The session
-      // this window meant to end is already over.
-      if (res.status === 403) return true
+      // Still refused after api() tried to catch up with the session. It
+      // worked only if the session this window meant to end is seen to be
+      // over: signed out, expired, or another account signed in elsewhere.
+      // If the appview can't be asked, or it's still the same account, it
+      // didn't.
+      if (res.status === 403) {
+        const now = await fetchSession().catch((): Session => ({ kind: 'unavailable' }))
+        if (now.kind === 'unavailable' || (now.kind === 'signedIn' && now.user.did === did)) return false
+        setSession(now)
+        return true
+      }
       if (!res.ok && res.status !== 401) return false
     } catch {
       return false
     }
     setSession({ kind: 'signedOut' })
     return true
-  }, [])
+  }, [did])
 
   const value = useMemo(() => ({ session, signOut }), [session, signOut])
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>
