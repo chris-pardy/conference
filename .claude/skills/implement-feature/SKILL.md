@@ -59,7 +59,7 @@ Go back to step 8. The review is **clean** when a round finds nothing above
 nit. The next reviewer sees the log, so it won't re-raise findings you
 declined unless it can show the reason is wrong.
 
-If round 5 still isn't clean, set `status: blocked`, summarize what keeps
+If round 10 still isn't clean, set `status: blocked`, summarize what keeps
 coming back, and stop.
 
 When the review is clean, go on to `ship-feature`.
