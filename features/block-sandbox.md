@@ -8,6 +8,10 @@ tests-commit:
 
 # Block sandbox
 
+> **Deferred until after the MVP** (decided 2026-10-02). It serves none of
+> the November 1 demo items, so it waits at `analysis` and gets picked up
+> once the MVP ships. It isn't cancelled.
+
 ## Summary
 
 This covers the two uses of sandboxed code in cards beyond middleware:

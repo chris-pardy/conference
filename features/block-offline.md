@@ -8,6 +8,10 @@ tests-commit:
 
 # Block offline
 
+> **Deferred until after the MVP** (decided 2026-10-02). It serves none of
+> the November 1 demo items, so it waits at `analysis` and gets picked up
+> once the MVP ships. It isn't cancelled.
+
 ## Summary
 
 This keeps cards usable when the conference wifi isn't. Interactions made
