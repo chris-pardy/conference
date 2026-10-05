@@ -33,11 +33,11 @@ importers:
         specifier: 6.1.1
         version: 6.1.1(vite@8.3.1(@types/node@26.6.3)(terser@5.51.2)(yaml@2.9.1))
       '@vivarium-dev/cli':
-        specifier: 0.0.1
-        version: 0.0.1
+        specifier: 0.0.2
+        version: 0.0.2
       '@vivarium-dev/client':
-        specifier: 0.0.1
-        version: 0.0.1(@vivarium-dev/cli@0.0.1)(vitest@5.0.3(@types/node@26.6.3)(jsdom@30.1.1)(vite@8.3.1(@types/node@26.6.3)(terser@5.51.2)(yaml@2.9.1)))
+        specifier: 0.0.2
+        version: 0.0.2(@vivarium-dev/cli@0.0.2)(vitest@5.0.3(@types/node@26.6.3)(jsdom@30.1.1)(vite@8.3.1(@types/node@26.6.3)(terser@5.51.2)(yaml@2.9.1)))
       jsdom:
         specifier: 30.1.1
         version: 30.1.1
@@ -1262,51 +1262,51 @@ packages:
   '@vitest/spy@5.0.3':
     resolution: {integrity: sha512-XhFysQTB8AZ+P4gMi+Lpo99vg2AZi0qKpaB9yXQl37+CaMEAPO3iH/wGVnSyL5MPERiLezpqTVtrR6UZH5GCXg==}
 
-  '@vivarium-dev/cli-darwin-arm64@0.0.1':
-    resolution: {integrity: sha512-IXjPvHRVaF6G9EHpSkdSciE8M15ggzrth3QcPjGgk18RCP/fYfIYX2kX8SsFLKCJ8roDqVpJC/Zg086UHqy0aQ==}
+  '@vivarium-dev/cli-darwin-arm64@0.0.2':
+    resolution: {integrity: sha512-oaQoEo3OhPeqngZMZ8Y693nGw0kDpqrc4zp8GRLBvFK3xoAYTmJFsfahpf3OO9Vb0XsDvNY+UwMgl/bYL5NNiw==}
     cpu: [arm64]
     os: [darwin]
 
-  '@vivarium-dev/cli-darwin-x64@0.0.1':
-    resolution: {integrity: sha512-akDV/VqYOfdltKV1Tg3ygUldmRyze7ZG0g+WmJAmYGnVpLrEIvDqhr03YAL/NEeNZikI9dwf6HuemEHF1+zFFQ==}
+  '@vivarium-dev/cli-darwin-x64@0.0.2':
+    resolution: {integrity: sha512-07gXOF4R0cg+KGwXd22dedkQBjdAj30PKUYktB8A6mfH75NDylMGSbw/T4chcp2jRHm3bIjGgsuxP1x3d1Sb0Q==}
     cpu: [x64]
     os: [darwin]
 
-  '@vivarium-dev/cli-linux-arm64-musl@0.0.1':
-    resolution: {integrity: sha512-U99vhG/7XKDNh44nwcolEts6XuHPa23uVzKxkaPGkzkI0wslV19VwcEgJLB4g824XUoevyjCwrMMRbOEdjFU0w==}
+  '@vivarium-dev/cli-linux-arm64-musl@0.0.2':
+    resolution: {integrity: sha512-m/cIRlU8DuGzujx1pev+SHx39yjvnLycjjFCcwFs5hsoBnHBt0FHDQqibABmOlfdRN4kMMuYeGtsI6j5NLvWAQ==}
     cpu: [arm64]
     os: [linux]
 
-  '@vivarium-dev/cli-linux-arm64@0.0.1':
-    resolution: {integrity: sha512-chhZ14HTotUteZm7CpLJdWJ4pxRR65HqJyW2Kf6szljeLpwHfX5MjX+Z5WBDGjH/OJiv0VfNNWDolPY9OuNRhw==}
+  '@vivarium-dev/cli-linux-arm64@0.0.2':
+    resolution: {integrity: sha512-mc/qjajrS8XpZNP8iMLEmRPx6vBaE61djoYOKirsbi873jLkN/DTPFBbkWi1IfIO85QCS6MoGeWXVpJ4UrrAVQ==}
     cpu: [arm64]
     os: [linux]
 
-  '@vivarium-dev/cli-linux-x64-musl@0.0.1':
-    resolution: {integrity: sha512-+sK4hZQytn8N5iBZXh3mfEOdfdm3CHe82zMwGTzogIfJB4u4GQomUNAqtVlUDr5AvLkKJ6Orwla5uZl3EfbRGg==}
+  '@vivarium-dev/cli-linux-x64-musl@0.0.2':
+    resolution: {integrity: sha512-UsjmsnRiuHXsahGr7OerKbJFpVla/7rUDpA7na3FM/VopbGMWlh276RR5KO2opifTkms/6C25L+PXNBfSvnfwA==}
     cpu: [x64]
     os: [linux]
 
-  '@vivarium-dev/cli-linux-x64@0.0.1':
-    resolution: {integrity: sha512-IIr7O3YR8cb/yjhCBJS8Zp11j+7CaLyOQX9MWSNsutBdFRk1E/+uiAnyFenWm0jy4xec1K4g3vw16MouMPFvTQ==}
+  '@vivarium-dev/cli-linux-x64@0.0.2':
+    resolution: {integrity: sha512-nX3wPnQx8HaCURkclgsZsoS4njLw919u9bFDf6tb+VIG0qlrtg4iXj55v/lvRAFWmjrDiQdx6ROH47fOAkzIaA==}
     cpu: [x64]
     os: [linux]
 
-  '@vivarium-dev/cli-win32-x64@0.0.1':
-    resolution: {integrity: sha512-okpb38165q2bqrIIednLu9OJZ4/9DeiTJ0o20Y78tROjSorlENM+x4PZrodfnIdi427/7usTSZDvbF5xyCnakQ==}
+  '@vivarium-dev/cli-win32-x64@0.0.2':
+    resolution: {integrity: sha512-VxUNT+Mupl8RAFK6CkrimFMq3rlvb1J7SJtaf9rKgkHqLB36QrtLCaui9Br+tzhzZdi3yenknKpUKrPdkp9/aQ==}
     cpu: [x64]
     os: [win32]
 
-  '@vivarium-dev/cli@0.0.1':
-    resolution: {integrity: sha512-uOpOW49Q5V7OeBMXyhyJZ+N9L8XI4sw2WVHuShB1iDvuBdAgLgAXrTNxQnyTFC7aFMc+BKqXNugz7NTGm3QSzQ==}
+  '@vivarium-dev/cli@0.0.2':
+    resolution: {integrity: sha512-AQ/h92cKvfjLY1lNCxKW4kJIvVRI8iu4AqQFs0n69LoLQuhz9BdkfQ0FmDqPufptwBReZ+aS2kL8sZBIdwzIew==}
     engines: {node: '>=18'}
     hasBin: true
 
-  '@vivarium-dev/client@0.0.1':
-    resolution: {integrity: sha512-BjbldwTJTYmSmm2aBMZGkIKDUTBtIJFavB6Dzvqbq04hqxWYVFJ2Qc/fHvmCuu9zq1C9/L+cOujaoK4bgpPzWA==}
+  '@vivarium-dev/client@0.0.2':
+    resolution: {integrity: sha512-hwZ2nE9oSA2W39NgGtOEXvMUx6dKFd+CPwUt5l+6yF10hm6F3ekzppBU8sHGbwkLSSVDcqg+krBN0zx80VRxxA==}
     peerDependencies:
-      '@vivarium-dev/cli': 0.0.1
-      '@vivarium-dev/core': 0.0.1
+      '@vivarium-dev/cli': 0.0.2
+      '@vivarium-dev/core': 0.0.2
       vitest: '>=1.0.0'
     peerDependenciesMeta:
       '@vivarium-dev/cli':
@@ -1316,8 +1316,8 @@ packages:
       vitest:
         optional: true
 
-  '@vivarium-dev/lexicons@0.0.1':
-    resolution: {integrity: sha512-PqTWnGbnR7eOa/6unMbidRJxqdlky41OyTK/qjHQk4IKzwffAkTHMgWonG7oficTplN1XrlbelUYDEHPvIvmtg==}
+  '@vivarium-dev/lexicons@0.0.2':
+    resolution: {integrity: sha512-7UwtJ4tiloNZ4+f+EZLRgNmhZC3NZ6dCV7NTCWDFmk53OYOlelrwOYHXa7qyFWYda1N4CSKDg5cmDnooG0fXHg==}
 
   acorn@8.18.0:
     resolution: {integrity: sha512-lGq+9yr1/GuAWaVYIHRjvvySG5/4VfKIvC8EWxStPdcDh/Ka7FG3twP6v4d5BkravUilhIAsG4Qj83t02LWUPQ==}
@@ -3779,45 +3779,45 @@ snapshots:
 
   '@vitest/spy@5.0.3': {}
 
-  '@vivarium-dev/cli-darwin-arm64@0.0.1':
+  '@vivarium-dev/cli-darwin-arm64@0.0.2':
     optional: true
 
-  '@vivarium-dev/cli-darwin-x64@0.0.1':
+  '@vivarium-dev/cli-darwin-x64@0.0.2':
     optional: true
 
-  '@vivarium-dev/cli-linux-arm64-musl@0.0.1':
+  '@vivarium-dev/cli-linux-arm64-musl@0.0.2':
     optional: true
 
-  '@vivarium-dev/cli-linux-arm64@0.0.1':
+  '@vivarium-dev/cli-linux-arm64@0.0.2':
     optional: true
 
-  '@vivarium-dev/cli-linux-x64-musl@0.0.1':
+  '@vivarium-dev/cli-linux-x64-musl@0.0.2':
     optional: true
 
-  '@vivarium-dev/cli-linux-x64@0.0.1':
+  '@vivarium-dev/cli-linux-x64@0.0.2':
     optional: true
 
-  '@vivarium-dev/cli-win32-x64@0.0.1':
+  '@vivarium-dev/cli-win32-x64@0.0.2':
     optional: true
 
-  '@vivarium-dev/cli@0.0.1':
+  '@vivarium-dev/cli@0.0.2':
     optionalDependencies:
-      '@vivarium-dev/cli-darwin-arm64': 0.0.1
-      '@vivarium-dev/cli-darwin-x64': 0.0.1
-      '@vivarium-dev/cli-linux-arm64': 0.0.1
-      '@vivarium-dev/cli-linux-arm64-musl': 0.0.1
-      '@vivarium-dev/cli-linux-x64': 0.0.1
-      '@vivarium-dev/cli-linux-x64-musl': 0.0.1
-      '@vivarium-dev/cli-win32-x64': 0.0.1
+      '@vivarium-dev/cli-darwin-arm64': 0.0.2
+      '@vivarium-dev/cli-darwin-x64': 0.0.2
+      '@vivarium-dev/cli-linux-arm64': 0.0.2
+      '@vivarium-dev/cli-linux-arm64-musl': 0.0.2
+      '@vivarium-dev/cli-linux-x64': 0.0.2
+      '@vivarium-dev/cli-linux-x64-musl': 0.0.2
+      '@vivarium-dev/cli-win32-x64': 0.0.2
 
-  '@vivarium-dev/client@0.0.1(@vivarium-dev/cli@0.0.1)(vitest@5.0.3(@types/node@26.6.3)(jsdom@30.1.1)(vite@8.3.1(@types/node@26.6.3)(terser@5.51.2)(yaml@2.9.1)))':
+  '@vivarium-dev/client@0.0.2(@vivarium-dev/cli@0.0.2)(vitest@5.0.3(@types/node@26.6.3)(jsdom@30.1.1)(vite@8.3.1(@types/node@26.6.3)(terser@5.51.2)(yaml@2.9.1)))':
     dependencies:
-      '@vivarium-dev/lexicons': 0.0.1
+      '@vivarium-dev/lexicons': 0.0.2
     optionalDependencies:
-      '@vivarium-dev/cli': 0.0.1
+      '@vivarium-dev/cli': 0.0.2
       vitest: 5.0.3(@types/node@26.6.3)(jsdom@30.1.1)(vite@8.3.1(@types/node@26.6.3)(terser@5.51.2)(yaml@2.9.1))
 
-  '@vivarium-dev/lexicons@0.0.1': {}
+  '@vivarium-dev/lexicons@0.0.2': {}
 
   acorn@8.18.0: {}
 
