@@ -24,7 +24,7 @@ export default function Shell() {
 function useReturnTo(): string {
   const location = useLocation()
   if (location.pathname === '/signin') return new URLSearchParams(location.search).get('return_to') ?? '/'
-  return location.pathname + location.search
+  return location.pathname + location.search + location.hash
 }
 
 function AccountControl() {
@@ -81,7 +81,8 @@ function AccountMenu({ user }: { user: SessionInfo }) {
     }
   }, [open])
 
-  const initial = (user.displayName || user.handle).charAt(0).toUpperCase()
+  // The first code point, not UTF-16 unit, so an emoji isn't split in half.
+  const initial = [...(user.displayName || user.handle)][0]?.toUpperCase()
   return (
     <div className="shell__account" ref={menu}>
       <button

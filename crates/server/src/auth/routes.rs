@@ -95,7 +95,7 @@ pub async fn login(State(state): State<AppState>, Query(params): Params) -> Resp
         Ok(server) => server,
         Err(why) => {
             eprintln!("sign-in: {why}");
-            return fail("server_unavailable", &return_to, &[]);
+            return fail(why.code(), &return_to, &[]);
         }
     };
     // The handle as typed, normalized; it resolved, so it's a valid handle.
@@ -109,7 +109,7 @@ pub async fn signup(State(state): State<AppState>, Query(params): Params) -> Res
         Ok(server) => server,
         Err(why) => {
             eprintln!("sign-up: {why}");
-            return fail("server_unavailable", &return_to, &[]);
+            return fail(why.code(), &return_to, &[]);
         }
     };
     start(&state, &server, Kind::Signup, None, None, Some("create"), &return_to).await
@@ -221,23 +221,39 @@ pub async fn callback(
     .bind(request_state)
     .fetch_optional(&state.db)
     .await;
-    let Ok(Some(pending)) = pending else { return fail("invalid_request", "/", &clear) };
+    let pending = match pending {
+        Ok(Some(pending)) => pending,
+        Ok(None) => return fail("invalid_request", "/", &clear),
+        Err(err) => {
+            eprintln!("callback: could not load the pending request: {err}");
+            return fail("server_error", "/", &clear);
+        }
+    };
+    let return_to = sanitize(Some(&pending.return_to));
     let consumed = sqlx::query("DELETE FROM oauth_requests WHERE state = $1")
         .bind(request_state)
         .execute(&state.db)
         .await;
-    if !matches!(consumed, Ok(done) if done.rows_affected() == 1) {
-        return fail("invalid_request", "/", &clear);
+    match consumed {
+        Ok(done) if done.rows_affected() == 1 => {}
+        // Another request consumed it first.
+        Ok(_) => return fail("invalid_request", "/", &clear),
+        Err(err) => {
+            eprintln!("callback: could not consume the pending request: {err}");
+            return fail("server_error", &return_to, &clear);
+        }
     }
-    let return_to = sanitize(Some(&pending.return_to));
 
+    // Checked before the browser is: the pre-auth cookie lives exactly as
+    // long as the request, so a late callback has lost it by now. The
+    // request is consumed either way.
+    if pending.expires_at < now_ms() {
+        return fail("request_expired", &return_to, &clear);
+    }
     // Only the browser that started the sign-in may finish it.
     let preauth = cookies::preauth(&headers, request_state, secure).map(|p| sha256_b64(&p));
     if preauth.as_deref() != Some(pending.preauth_hash.as_str()) {
         return fail("invalid_request", &return_to, &clear);
-    }
-    if pending.expires_at < now_ms() {
-        return fail("request_expired", &return_to, &clear);
     }
     // RFC 9207: the issuer is checked on errors too.
     if params.get("iss").map(String::as_str) != Some(pending.issuer.as_str()) {
@@ -272,7 +288,7 @@ async fn complete(
     let dpop_key = EcKey::from_jwk(&pending.dpop_key).map_err(|_| "server_error")?;
     let server = state.oauth.auth_server(&pending.issuer).await.map_err(|why| {
         eprintln!("callback: {why}");
-        "server_unavailable"
+        why.code()
     })?;
     let client_id = pending.client_id.as_str();
     let tokens = state
@@ -428,12 +444,16 @@ fn truncate(s: &str, chars: usize, bytes: usize) -> String {
     out
 }
 
-/// Deletes a session, revoking its grant in the background.
+/// Deletes a session, revoking the grant it held in the background.
 async fn retire(state: &AppState, id_hash: &str) {
-    let Ok(Some(row)) = session::load(&state.db, id_hash).await else { return };
-    if let Err(err) = session::delete(&state.db, id_hash).await {
-        eprintln!("could not delete a session: {err}");
-    }
+    let row = match session::delete(&state.db, id_hash).await {
+        Ok(Some(row)) => row,
+        Ok(None) => return,
+        Err(err) => {
+            eprintln!("could not delete a session: {err}");
+            return;
+        }
+    };
     let state = state.clone();
     tokio::spawn(async move { session::revoke(&state, &row).await });
 }
@@ -466,20 +486,28 @@ pub async fn logout(
         },
     };
     if let Some(row) = row {
-        // Signed out first, whatever the authorization server does.
-        if let Err(err) = session::delete(&state.db, &row.id_hash).await {
-            eprintln!("sign-out: could not delete the session: {err}");
-            return xrpc_error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "InternalServerError",
-                "could not sign out",
-            );
-        }
+        // Signed out first, whatever the authorization server does. The
+        // tokens revoked are the ones deleted: a renewal may have replaced
+        // them since `row` was read.
+        let row = match session::delete(&state.db, &row.id_hash).await {
+            Ok(deleted) => deleted,
+            Err(err) => {
+                eprintln!("sign-out: could not delete the session: {err}");
+                return xrpc_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "InternalServerError",
+                    "could not sign out",
+                );
+            }
+        };
         // Then revoke, waiting briefly so the grant is usually gone by the
         // time sign-out returns; a slow server finishes in the background.
-        let background = state.clone();
-        let revoking = tokio::spawn(async move { session::revoke(&background, &row).await });
-        let _ = tokio::time::timeout(REVOKE_WAIT, revoking).await;
+        // Already gone means another request deleted it, and revokes it.
+        if let Some(row) = row {
+            let background = state.clone();
+            let revoking = tokio::spawn(async move { session::revoke(&background, &row).await });
+            let _ = tokio::time::timeout(REVOKE_WAIT, revoking).await;
+        }
     }
     let mut res = Json(json!({})).into_response();
     // Only a cookie the request carried is cleared. A cross-site form POST

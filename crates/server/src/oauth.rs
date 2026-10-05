@@ -20,6 +20,80 @@ pub struct AuthServer {
     pub token_endpoint: String,
     pub pushed_authorization_request_endpoint: String,
     pub revocation_endpoint: Option<String>,
+    /// The capabilities atproto requires of an authorization server, which
+    /// this client relies on. Missing ones read as unsupported.
+    #[serde(default)]
+    pub authorization_response_iss_parameter_supported: bool,
+    #[serde(default)]
+    pub require_pushed_authorization_requests: bool,
+    #[serde(default)]
+    pub client_id_metadata_document_supported: bool,
+    #[serde(default)]
+    pub token_endpoint_auth_methods_supported: Vec<String>,
+    #[serde(default)]
+    pub token_endpoint_auth_signing_alg_values_supported: Vec<String>,
+    #[serde(default)]
+    pub dpop_signing_alg_values_supported: Vec<String>,
+    #[serde(default)]
+    pub scopes_supported: Vec<String>,
+}
+
+impl AuthServer {
+    /// The first capability atproto requires (and this client uses) that the
+    /// server doesn't advertise, if any.
+    pub fn missing_capability(&self) -> Option<&'static str> {
+        let has = |list: &[String], value: &str| list.iter().any(|v| v == value);
+        if !self.authorization_response_iss_parameter_supported {
+            Some("authorization_response_iss_parameter_supported")
+        } else if !self.require_pushed_authorization_requests {
+            Some("require_pushed_authorization_requests")
+        } else if !self.client_id_metadata_document_supported {
+            Some("client_id_metadata_document_supported")
+        } else if !has(&self.token_endpoint_auth_methods_supported, "private_key_jwt") {
+            Some("private_key_jwt in token_endpoint_auth_methods_supported")
+        } else if !has(&self.token_endpoint_auth_signing_alg_values_supported, "ES256") {
+            Some("ES256 in token_endpoint_auth_signing_alg_values_supported")
+        } else if !has(&self.dpop_signing_alg_values_supported, "ES256") {
+            Some("ES256 in dpop_signing_alg_values_supported")
+        } else if !has(&self.scopes_supported, "atproto") {
+            Some("atproto in scopes_supported")
+        } else {
+            None
+        }
+    }
+}
+
+/// Why an authorization server can't be used.
+#[derive(Debug)]
+pub enum ServerError {
+    /// It couldn't be reached, or its metadata didn't check out.
+    Unavailable(String),
+    /// It answered, but lacks a capability atproto OAuth requires.
+    Unsupported(String),
+}
+
+impl std::fmt::Display for ServerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unavailable(why) | Self::Unsupported(why) => f.write_str(why),
+        }
+    }
+}
+
+impl From<String> for ServerError {
+    fn from(why: String) -> Self {
+        Self::Unavailable(why)
+    }
+}
+
+impl ServerError {
+    /// The error code the PWA's sign-in page shows a message for.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Unavailable(_) => "server_unavailable",
+            Self::Unsupported(_) => "server_unsupported",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -157,13 +231,13 @@ impl OAuthClient {
 
     /// The authorization server behind a PDS, with the spec's checks: the PDS
     /// names it, and its metadata's issuer is the URL it was fetched from.
-    pub async fn discover(&self, pds: &str) -> Result<AuthServer, String> {
+    pub async fn discover(&self, pds: &str) -> Result<AuthServer, ServerError> {
         let resource_url = format!("{pds}/.well-known/oauth-protected-resource");
         let resource: Value = self.get_json(&resource_url).await?;
         let described =
             resource.get("resource").and_then(Value::as_str).map(|r| r.trim_end_matches('/'));
         if described != Some(pds.trim_end_matches('/')) {
-            return Err(format!("{resource_url} describes {described:?}, not {pds}"));
+            return Err(format!("{resource_url} describes {described:?}, not {pds}").into());
         }
         let issuer = resource
             .get("authorization_servers")
@@ -179,7 +253,7 @@ impl OAuthClient {
     /// An issuer's metadata, reused for a while: refreshes and revocations
     /// for sessions whose issuer was checked when they were created. A failed
     /// fetch marks the issuer down, which only the renewer heeds.
-    pub async fn cached_auth_server(&self, issuer: &str) -> Result<AuthServer, String> {
+    pub async fn cached_auth_server(&self, issuer: &str) -> Result<AuthServer, ServerError> {
         let now = now_ms();
         let cached =
             self.servers.lock().expect("the metadata cache isn't poisoned").get(issuer).cloned();
@@ -197,9 +271,10 @@ impl OAuthClient {
     }
 
     /// An authorization server's metadata, checked against its issuer.
-    pub async fn auth_server(&self, issuer: &str) -> Result<AuthServer, String> {
+    /// One lacking a capability atproto requires is refused as unsupported.
+    pub async fn auth_server(&self, issuer: &str) -> Result<AuthServer, ServerError> {
         if !bare_origin(issuer) {
-            return Err(format!("the issuer {issuer:?} isn't a bare origin"));
+            return Err(format!("the issuer {issuer:?} isn't a bare origin").into());
         }
         let metadata_url = format!("{issuer}/.well-known/oauth-authorization-server");
         let server: AuthServer = serde_json::from_value(self.get_json(&metadata_url).await?)
@@ -207,7 +282,7 @@ impl OAuthClient {
         // An atproto issuer is a bare origin; the same string is stored and
         // compared everywhere, so a trailing slash is refused, not trimmed.
         if server.issuer != issuer {
-            return Err(format!("{metadata_url} claims to be {}", server.issuer));
+            return Err(format!("{metadata_url} claims to be {}", server.issuer).into());
         }
         for endpoint in [
             &server.authorization_endpoint,
@@ -215,6 +290,11 @@ impl OAuthClient {
             &server.pushed_authorization_request_endpoint,
         ] {
             self.http.guarded(endpoint)?;
+        }
+        if let Some(missing) = server.missing_capability() {
+            return Err(ServerError::Unsupported(format!(
+                "{issuer} doesn't support atproto OAuth: its metadata lacks {missing}"
+            )));
         }
         Ok(server)
     }

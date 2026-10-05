@@ -88,7 +88,7 @@ async fn refresh_leased(state: &AppState, id_hash: &str) -> Renewal {
     };
     let server = match state.oauth.cached_auth_server(issuer).await {
         Ok(server) => server,
-        Err(why) => return Renewal::Failed(why),
+        Err(why) => return Renewal::Failed(why.to_string()),
     };
     match state.oauth.refresh(&server, &row.client_id, old, &key).await {
         // Tokens for someone else are a refused grant, not a renewal.

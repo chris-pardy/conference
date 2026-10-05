@@ -1,5 +1,5 @@
 ---
-status: implementing
+status: blocked
 impact: cross-cutting
 depends-on: [ci-pipeline]
 branch: feature/attendee-sign-in
@@ -810,6 +810,22 @@ Where the build refined the approved design:
   and the renewer's `session::end_revoking` wipe the row first and revoke
   only if they were the one to end it, so requests racing on a just-idled
   session revoke once, and a failed wipe revokes nothing.
+- **What's revoked is what was removed.** Sign-out and replacing a
+  browser's session delete the row with `DELETE … RETURNING` and revoke the
+  tokens that came back. `session::wipe` clears the tokens only if they're
+  still the ones it read (re-reading up to three times if a renewal saved
+  new ones in between) and returns that row for `end` and `end_revoking` to
+  revoke. So a renewal landing between the read and the delete or wipe
+  never leaves its new grant live with no row holding it.
+- **Authorization servers must advertise what atproto requires.**
+  `auth_server` refuses one whose metadata lacks
+  `authorization_response_iss_parameter_supported`,
+  `require_pushed_authorization_requests`,
+  `client_id_metadata_document_supported`, `private_key_jwt`, ES256 for
+  client assertions and DPoP, or the `atproto` scope, and logs which. The
+  PWA shows `server_unsupported` for it, not "couldn't be reached".
+  `create` in `prompt_values_supported` isn't required for sign-up:
+  vivarium 0.0.1 doesn't advertise it but does sign people up with it.
 - **The generated signing key is a single row.** `client_keys` has a
   `slot` primary key that is always `1`, next to the `kid`, private JWK and
   `created_at`. Every instance tries to insert its own new key with
@@ -1683,3 +1699,98 @@ fixes yet.
      sign-out, a change or an expiry sets the session, and drops a
      `getSession` answer that started before the latest bump. A new unit
      test in `SessionProvider.test.tsx` covers it.
+
+### Round 15
+
+The reviewer found 0 blocking, 0 major, 3 minor and 3 nits, so the round
+isn't clean. `pnpm check` was green. Every finding was fixed after the
+review except one part of #2, and `pnpm check` is green again. No reviewer
+has seen the round 15 fixes.
+
+1. **[minor] Sign-out, replacing a browser's session and ending one revoked
+   the refresh token from a row read earlier, not the one they removed.** A
+   renewal saving R2 between the CSRF layer's read and sign-out's delete
+   left R2 live at the authorization server with no row holding it, while
+   the spent R1 was revoked.
+   - Fixed: `session::delete` is `DELETE … RETURNING` and returns the row
+     it deleted; `logout` and `retire` revoke that (and nothing, if another
+     request deleted it first). `session::wipe` clears the tokens only while
+     `refresh_token` is still the one it read, re-reading if a renewal
+     changed it (the third try wipes whatever is there), and returns the
+     row it wiped, which `end` and `end_revoking` revoke. The Rust tests
+     `ending_a_session_revokes_the_tokens_it_wiped_not_the_ones_read` and
+     `deleting_a_session_returns_the_tokens_it_deleted` cover both.
+2. **[minor] Authorization-server metadata was checked only for its issuer
+   and endpoints**, so a server lacking a capability atproto requires
+   failed late, reported as "couldn't be reached".
+   - Fixed: `AuthServer` reads the required capabilities, and
+     `auth_server` refuses a server missing any of them with the new
+     `ServerError::Unsupported`, logging which. Sign-in, sign-up and the
+     callback answer `server_unsupported`, which `signin.tsx` (not frozen)
+     now has a message for. Vivarium's metadata and TC-9's stub both pass.
+     A unit test removes or changes each capability in turn, and a Rust
+     test signs up against a server without `private_key_jwt` and sees
+     `server_unsupported`.
+   - Declined: requiring `create` in `prompt_values_supported` for
+     sign-up. Vivarium 0.0.1 doesn't advertise it (its list is `none`,
+     `login`, `consent`, `select_account`), yet signs people up with
+     `prompt=create`, so requiring it would refuse the server the frozen
+     TC-8 passes against.
+3. **[minor] The callback swallowed database errors loading or consuming
+   the pending request** as `invalid_request`, unlogged.
+   - Fixed: errors are logged and answered `server_error`; `invalid_request`
+     is kept for no such request and for one another request consumed
+     first. A Rust test drops `oauth_requests` and sees `server_error`.
+4. **[nit] `request_expired` was unreachable**: the pre-auth cookie lives
+   exactly as long as the request, and was checked first.
+   - Fixed: the callback checks `expires_at` before the cookie (the request
+     is consumed either way). A Rust test sends a late callback with no
+     cookie and sees `request_expired`, then `invalid_request` on a retry.
+5. **[nit] The account initial split surrogate pairs** ("🦋 Ana" gave a
+   lone surrogate).
+   - Fixed: the initial is the first code point. A unit test in
+     `Shell.test.tsx` covers it.
+6. **[nit] "Sign in" dropped the page's `#fragment` from `return_to`.**
+   - Fixed: `useReturnTo` includes `location.hash`, which the server's
+     `sanitize` accepts. A unit test in `Shell.test.tsx` covers it.
+
+### Blocked after round 15
+
+Round 15 is the last round the limit allows (the decisions after rounds 10
+and 11), and it wasn't clean, so this needs a human decision before
+shipping.
+
+**What the rounds found (blocking / major / minor / nit):**
+
+| Round | Blocking | Major | Minor | Nits |
+|-------|----------|-------|-------|------|
+| 6 | 0 | 0 | 4 | 2 |
+| 7 | 0 | 0 | 3 | 4 |
+| 8 | 0 | 0 | 4 | 3 |
+| 9 | 0 | 1 | 1 | 3 |
+| 10 | 0 | 0 | 3 | 2 |
+| 11 | 0 | 0 | 2 | 2 |
+| 12 | 0 | 0 | 3 | 3 |
+| 13 | 0 | 0 | 1 | 3 |
+| 14 | 0 | 0 | 3 | 1 |
+| 15 | 0 | 0 | 3 | 3 |
+
+- No round of the build found anything blocking. Majors came only in
+  rounds 2 and 9, and round 9's was a regression from round 8's fix.
+- Later rounds find progressively narrower edge cases at configuration,
+  operations and race boundaries (rolling deploys, multiple instances,
+  database and authorization-server failures), plus gaps in the previous
+  round's fixes. The earlier fixes held.
+
+**Current state:** all 30 test cases pass, the frozen tests are unchanged,
+and `pnpm check` is green with the round 15 fixes.
+
+**Before shipping:** for vivarium 0.0.2 (PR #6), the branch needs
+`git merge origin/main` and a green `pnpm check` on the result before the
+PR. Round 15's capability check should be re-run against 0.0.2's metadata
+then.
+
+**The choices:**
+- Ship as is, with the round 15 fixes unreviewed.
+- Run a 16th round that reviews only the round 15 fixes.
+- Something else.

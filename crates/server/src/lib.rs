@@ -151,6 +151,11 @@ mod tests {
     /// App state on a database of its own, configured explicitly so the
     /// developer's environment can't change the outcome.
     async fn state() -> (AppState, TempDir) {
+        state_signing_up_at("http://127.0.0.1:1").await
+    }
+
+    /// The same, with sign-up sent to the PDS at `signup_pds_url`.
+    async fn state_signing_up_at(signup_pds_url: &str) -> (AppState, TempDir) {
         let dir =
             TempDir(std::env::temp_dir().join(format!("eventside-csrf-{}", keys::random_token(8))));
         let local = "http://127.0.0.1:1".to_owned();
@@ -161,7 +166,7 @@ mod tests {
             database_url: format!("sqlite://{}/eventside.db?mode=rwc", dir.0.display()),
             signing_key: None,
             scopes: vec!["atproto".into()],
-            signup_pds_url: local.clone(),
+            signup_pds_url: signup_pds_url.to_owned(),
             plc_url: local.clone(),
             handle_resolver_url: local,
             allow_private_network: true,
@@ -337,21 +342,43 @@ mod tests {
     /// A stand-in authorization server that records the client ID each token
     /// and revocation request was made as.
     async fn recording_auth_server() -> (String, Arc<std::sync::Mutex<Vec<(String, String)>>>) {
+        let (issuer, seen, _) = recording_auth_server_with_tokens().await;
+        (issuer, seen)
+    }
+
+    type Recorded = Arc<std::sync::Mutex<Vec<String>>>;
+
+    /// The same, also recording each token revoked.
+    async fn recording_auth_server_with_tokens()
+    -> (String, Arc<std::sync::Mutex<Vec<(String, String)>>>, Recorded) {
         use axum::Form;
         use std::collections::HashMap;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let issuer = format!("http://{}", listener.local_addr().unwrap());
         let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let revoked: Recorded = Arc::default();
         let metadata = serde_json::json!({
             "issuer": issuer,
             "authorization_endpoint": format!("{issuer}/authorize"),
             "token_endpoint": format!("{issuer}/token"),
             "pushed_authorization_request_endpoint": format!("{issuer}/par"),
             "revocation_endpoint": format!("{issuer}/revoke"),
+            "authorization_response_iss_parameter_supported": true,
+            "require_pushed_authorization_requests": true,
+            "client_id_metadata_document_supported": true,
+            "token_endpoint_auth_methods_supported": ["none", "private_key_jwt"],
+            "token_endpoint_auth_signing_alg_values_supported": ["ES256"],
+            "dpop_signing_alg_values_supported": ["ES256"],
+            "scopes_supported": ["atproto", "transition:generic"],
         });
-        let record = |path: &'static str, seen: Arc<std::sync::Mutex<Vec<(String, String)>>>| {
+        let record = |path: &'static str,
+                      seen: Arc<std::sync::Mutex<Vec<(String, String)>>>,
+                      revoked: Recorded| {
             move |Form(form): Form<HashMap<String, String>>| async move {
                 let client_id = form.get("client_id").cloned().unwrap_or_default();
+                if path == "revoke" {
+                    revoked.lock().unwrap().push(form.get("token").cloned().unwrap_or_default());
+                }
                 seen.lock().unwrap().push((path.to_owned(), client_id));
                 Json(serde_json::json!({
                     "access_token": "access-2",
@@ -368,10 +395,10 @@ mod tests {
                 "/.well-known/oauth-authorization-server",
                 get(move || async move { Json(metadata) }),
             )
-            .route("/token", post(record("token", seen.clone())))
-            .route("/revoke", post(record("revoke", seen.clone())));
+            .route("/token", post(record("token", seen.clone(), revoked.clone())))
+            .route("/revoke", post(record("revoke", seen.clone(), revoked.clone())));
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-        (issuer, seen)
+        (issuer, seen, revoked)
     }
 
     #[tokio::test]
@@ -536,5 +563,188 @@ mod tests {
             let set = res.headers().get("set-cookie").and_then(|v| v.to_str().ok()).unwrap_or("");
             assert!(set.starts_with(&format!("session={cookie};")), "{set:?}");
         }
+    }
+
+    #[tokio::test]
+    async fn ending_a_session_revokes_the_tokens_it_wiped_not_the_ones_read() {
+        let (state, _dir) = state().await;
+        let (issuer, _, revoked) = recording_auth_server_with_tokens().await;
+        let client_id = state.oauth.client_id.clone();
+        for end_revoking in [false, true] {
+            let (_, id_hash) = live_session(&state, &issuer, &client_id, "atproto").await;
+            // Read with refresh-1, then a renewal saves refresh-2 before the
+            // session is ended.
+            let stale = session::load(&state.db, &id_hash).await.unwrap().unwrap();
+            sqlx::query("UPDATE sessions SET refresh_token = 'refresh-2' WHERE id_hash = $1")
+                .bind(&id_hash)
+                .execute(&state.db)
+                .await
+                .unwrap();
+            if end_revoking {
+                session::end_revoking(&state, &stale).await.unwrap();
+            } else {
+                session::end(&state, &stale).await.unwrap();
+            }
+            for _ in 0..50 {
+                if !revoked.lock().unwrap().is_empty() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            assert_eq!(revoked.lock().unwrap().drain(..).collect::<Vec<_>>(), vec!["refresh-2"]);
+        }
+    }
+
+    #[tokio::test]
+    async fn deleting_a_session_returns_the_tokens_it_deleted() {
+        let (state, _dir) = state().await;
+        let client_id = state.oauth.client_id.clone();
+        let (_, id_hash) = live_session(&state, "http://127.0.0.1:1", &client_id, "atproto").await;
+        sqlx::query("UPDATE sessions SET refresh_token = 'refresh-2' WHERE id_hash = $1")
+            .bind(&id_hash)
+            .execute(&state.db)
+            .await
+            .unwrap();
+        let deleted = session::delete(&state.db, &id_hash).await.unwrap().unwrap();
+        assert_eq!(deleted.refresh_token.as_deref(), Some("refresh-2"));
+        assert!(session::delete(&state.db, &id_hash).await.unwrap().is_none());
+    }
+
+    /// A PDS whose authorization server (at the same origin) serves `metadata`.
+    async fn pds_with_auth_server(metadata: impl Fn(&str) -> serde_json::Value) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let resource = serde_json::json!({ "resource": origin, "authorization_servers": [origin] });
+        let metadata = metadata(&origin);
+        let app = Router::new()
+            .route(
+                "/.well-known/oauth-protected-resource",
+                get(move || async move { Json(resource) }),
+            )
+            .route(
+                "/.well-known/oauth-authorization-server",
+                get(move || async move { Json(metadata) }),
+            );
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        origin
+    }
+
+    /// Where a GET to one of the app's routes redirects.
+    async fn redirect_from(state: &AppState, path_and_query: &str, cookie: Option<&str>) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = router(state.clone());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let mut req = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap()
+            .get(format!("http://{addr}{path_and_query}"));
+        if let Some(cookie) = cookie {
+            req = req.header("cookie", cookie);
+        }
+        let res = req.send().await.unwrap();
+        assert_eq!(res.status().as_u16(), 302);
+        res.headers()["location"].to_str().unwrap().to_owned()
+    }
+
+    #[tokio::test]
+    async fn an_authorization_server_without_atproto_capabilities_is_refused() {
+        let pds = pds_with_auth_server(|origin| {
+            serde_json::json!({
+                "issuer": origin,
+                "authorization_endpoint": format!("{origin}/authorize"),
+                "token_endpoint": format!("{origin}/token"),
+                "pushed_authorization_request_endpoint": format!("{origin}/par"),
+                "authorization_response_iss_parameter_supported": true,
+                "require_pushed_authorization_requests": true,
+                "client_id_metadata_document_supported": true,
+                // No private_key_jwt.
+                "token_endpoint_auth_methods_supported": ["none"],
+                "token_endpoint_auth_signing_alg_values_supported": ["ES256"],
+                "dpop_signing_alg_values_supported": ["ES256"],
+                "scopes_supported": ["atproto"],
+            })
+        })
+        .await;
+        let (state, _dir) = state_signing_up_at(&pds).await;
+        let location = redirect_from(&state, "/oauth/signup?return_to=/here", None).await;
+        assert_eq!(location, "/signin?error=server_unsupported&return_to=%2Fhere");
+    }
+
+    #[test]
+    fn every_capability_atproto_requires_is_checked() {
+        let full = serde_json::json!({
+            "issuer": "https://as.example",
+            "authorization_endpoint": "https://as.example/authorize",
+            "token_endpoint": "https://as.example/token",
+            "pushed_authorization_request_endpoint": "https://as.example/par",
+            "authorization_response_iss_parameter_supported": true,
+            "require_pushed_authorization_requests": true,
+            "client_id_metadata_document_supported": true,
+            "token_endpoint_auth_methods_supported": ["private_key_jwt"],
+            "token_endpoint_auth_signing_alg_values_supported": ["ES256"],
+            "dpop_signing_alg_values_supported": ["ES256"],
+            "scopes_supported": ["atproto"],
+        });
+        let server: oauth::AuthServer = serde_json::from_value(full.clone()).unwrap();
+        assert_eq!(server.missing_capability(), None);
+        for (field, without) in [
+            ("authorization_response_iss_parameter_supported", serde_json::json!(false)),
+            ("require_pushed_authorization_requests", serde_json::json!(false)),
+            ("client_id_metadata_document_supported", serde_json::json!(false)),
+            ("token_endpoint_auth_methods_supported", serde_json::json!(["none"])),
+            ("token_endpoint_auth_signing_alg_values_supported", serde_json::json!(["RS256"])),
+            ("dpop_signing_alg_values_supported", serde_json::json!(["ES256K"])),
+            ("scopes_supported", serde_json::json!(["transition:generic"])),
+        ] {
+            for value in [Some(without), None] {
+                let mut metadata = full.clone();
+                match value {
+                    Some(value) => metadata[field] = value,
+                    None => {
+                        metadata.as_object_mut().unwrap().remove(field);
+                    }
+                }
+                let server: oauth::AuthServer = serde_json::from_value(metadata).unwrap();
+                let missing = server.missing_capability();
+                assert!(missing.is_some_and(|m| m.contains(field)), "{field}: {missing:?}");
+            }
+        }
+    }
+
+    async fn pending_request(state: &AppState, request_state: &str, expires_at: i64) {
+        sqlx::query(
+            "INSERT INTO oauth_requests (state, kind, client_id, pkce_verifier, dpop_key, issuer, \
+             expected_did, preauth_hash, return_to, expires_at) \
+             VALUES ($1, 'login', $2, 'verifier', '{}', 'http://127.0.0.1:1', NULL, $3, '/here', $4)",
+        )
+        .bind(request_state)
+        .bind(&state.oauth.client_id)
+        .bind(keys::sha256_b64("preauth"))
+        .bind(expires_at)
+        .execute(&state.db)
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_late_callback_is_reported_as_expired() {
+        let (state, _dir) = state().await;
+        pending_request(&state, "late", db::now_ms() - 1).await;
+        // The pre-auth cookie ran out with the request, so none comes back.
+        let location = redirect_from(&state, "/oauth/callback?state=late&code=c", None).await;
+        assert_eq!(location, "/signin?error=request_expired&return_to=%2Fhere");
+        // It was consumed: trying again finds nothing.
+        let location = redirect_from(&state, "/oauth/callback?state=late&code=c", None).await;
+        assert!(location.starts_with("/signin?error=invalid_request"), "{location}");
+    }
+
+    #[tokio::test]
+    async fn a_callback_that_cannot_reach_the_database_is_a_server_error() {
+        let (state, _dir) = state().await;
+        sqlx::query("DROP TABLE oauth_requests").execute(&state.db).await.unwrap();
+        let location = redirect_from(&state, "/oauth/callback?state=any&code=c", None).await;
+        assert!(location.starts_with("/signin?error=server_error"), "{location}");
     }
 }

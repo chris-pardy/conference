@@ -154,13 +154,13 @@ pub fn outdated(state: &AppState, row: &SessionRow) -> bool {
 }
 
 /// Ends a session: its tokens and keys are wiped, but the row keeps who it
-/// was until the sweeper removes it. Whoever ends it revokes its grant, in
+/// was until the sweeper removes it. Whoever ends it revokes its grant, the
+/// one it wiped (which a renewal may have changed since `row` was read), in
 /// the background; a request that finds it already ended leaves that be.
 pub async fn end(state: &AppState, row: &SessionRow) -> Result<(), sqlx::Error> {
-    if wipe(&state.db, &row.id_hash).await? {
-        let revoking = row.clone();
+    if let Some(wiped) = wipe(&state.db, &row.id_hash).await? {
         let background = state.clone();
-        tokio::spawn(async move { revoke(&background, &revoking).await });
+        tokio::spawn(async move { revoke(&background, &wiped).await });
     }
     Ok(())
 }
@@ -174,15 +174,15 @@ const REVOKE_TIMEOUT: Duration = Duration::from_secs(15);
 /// couldn't be reached isn't waited on: the session is only wiped. Like
 /// `end`, only the call that ends the session revokes its grant.
 pub async fn end_revoking(state: &AppState, row: &SessionRow) -> Result<(), sqlx::Error> {
-    if !wipe(&state.db, &row.id_hash).await? {
+    let Some(row) = wipe(&state.db, &row.id_hash).await? else {
         return Ok(());
-    }
+    };
     match &row.issuer {
         Some(issuer) if state.oauth.backing_off(issuer) => {
             eprintln!("could not revoke {}'s grant: {issuer} is backing off", row.did);
         }
         issuer => {
-            if tokio::time::timeout(REVOKE_TIMEOUT, revoke(state, row)).await.is_err() {
+            if tokio::time::timeout(REVOKE_TIMEOUT, revoke(state, &row)).await.is_err() {
                 eprintln!("could not revoke {}'s grant: timed out", row.did);
                 if let Some(issuer) = issuer {
                     state.oauth.mark_down(issuer);
@@ -211,31 +211,60 @@ pub async fn revoke(state: &AppState, row: &SessionRow) {
                 e.to_string()
             })
         }
-        Err(why) => Err(why),
+        Err(why) => Err(why.to_string()),
     };
     if let Err(why) = result {
         eprintln!("could not revoke {}'s grant: {why}", row.did);
     }
 }
 
+/// How many times `wipe` re-reads a row whose tokens a renewal changed
+/// under it before wiping whatever is there.
+const WIPE_ATTEMPTS: usize = 3;
+
 /// Marks a session ended and wipes its tokens, without revoking them (for a
-/// grant the authorization server has already refused). Returns whether this
-/// call ended it, rather than finding it already ended.
-pub async fn wipe(db: &Db, id_hash: &str) -> Result<bool, sqlx::Error> {
-    let done = sqlx::query(
-        "UPDATE sessions SET ended_at = $1, access_token = NULL, refresh_token = NULL, dpop_key = NULL, \
-         refresh_lease_until = NULL WHERE id_hash = $2 AND ended_at IS NULL",
-    )
-    .bind(now_ms())
-    .bind(id_hash)
-    .execute(db)
-    .await?;
-    Ok(done.rows_affected() == 1)
+/// grant the authorization server has already refused). Returns the row as it
+/// was just before this call wiped it, so a caller revokes the tokens that
+/// were actually removed, or `None` if it was already ended (or gone).
+///
+/// The tokens are wiped only if they're still the ones read, so a renewal
+/// that saves new tokens in between is never lost track of: the row is read
+/// again and the new tokens are the ones returned.
+pub async fn wipe(db: &Db, id_hash: &str) -> Result<Option<SessionRow>, sqlx::Error> {
+    for attempt in 1..=WIPE_ATTEMPTS {
+        let Some(row) = load(db, id_hash).await? else { return Ok(None) };
+        if row.ended_at.is_some() {
+            return Ok(None);
+        }
+        // On the last attempt, wipe whatever is there: a renewal racing that
+        // often is vanishingly unlikely, and the session must still end.
+        let checked = attempt < WIPE_ATTEMPTS;
+        let unchanged = if checked { " AND COALESCE(refresh_token, '') = $3" } else { "" };
+        let sql = format!(
+            "UPDATE sessions SET ended_at = $1, access_token = NULL, refresh_token = NULL, dpop_key = NULL, \
+             refresh_lease_until = NULL WHERE id_hash = $2 AND ended_at IS NULL{unchanged}"
+        );
+        let mut query = sqlx::query(&sql).bind(now_ms()).bind(id_hash);
+        if checked {
+            query = query.bind(row.refresh_token.clone().unwrap_or_default());
+        }
+        let done = query.execute(db).await?;
+        if done.rows_affected() == 1 {
+            return Ok(Some(row));
+        }
+    }
+    Ok(None)
 }
 
-pub async fn delete(db: &Db, id_hash: &str) -> Result<(), sqlx::Error> {
-    sqlx::query("DELETE FROM sessions WHERE id_hash = $1").bind(id_hash).execute(db).await?;
-    Ok(())
+/// Deletes a session, returning the row it deleted (`None` if it was already
+/// gone), so the caller revokes the tokens it actually held.
+pub async fn delete(db: &Db, id_hash: &str) -> Result<Option<SessionRow>, sqlx::Error> {
+    sqlx::query_as::<_, SessionRow>(&format!(
+        "DELETE FROM sessions WHERE id_hash = $1 RETURNING {COLUMNS}"
+    ))
+    .bind(id_hash)
+    .fetch_optional(db)
+    .await
 }
 
 /// Removes stale pending requests, and sessions whose cookie has run out:
