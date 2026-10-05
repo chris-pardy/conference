@@ -437,6 +437,15 @@ mod tests {
         assert!(set.starts_with("session=;") && set.contains("Max-Age=0"), "{set:?}");
         // A live session still needs its CSRF token.
         assert_eq!(logout(live.clone()).await.status().as_u16(), 403);
+        // A cross-site form POST carries no cookie (it's `SameSite=Lax`), so
+        // the cookie it can't see isn't cleared either.
+        let res = reqwest::Client::new()
+            .post(format!("http://{addr}/oauth/logout"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status().as_u16(), 200);
+        assert!(res.headers().get("set-cookie").is_none(), "{:?}", res.headers());
         assert!(matches!(
             session::lookup(&state, &{
                 let mut h = axum::http::HeaderMap::new();

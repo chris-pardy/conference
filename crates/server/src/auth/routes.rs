@@ -329,7 +329,13 @@ async fn complete(
     // the person back through sign-in on their next request here.
     let scopes = tokens.scope.clone().unwrap_or_default();
     let granted: Vec<&str> = scopes.split_whitespace().collect();
-    let asked = oauth::client_scopes(client_id).unwrap_or_else(|| state.config.scopes.clone());
+    // Every pending request was pushed with a client ID this server built,
+    // so its scopes are always recoverable; if not, the grant can't be checked.
+    let Some(asked) = oauth::client_scopes(client_id) else {
+        eprintln!("callback: no scope list in the client ID {client_id:?}");
+        revoke().await;
+        return Err("server_error");
+    };
     if asked.iter().any(|s| !granted.contains(&s.as_str())) {
         revoke().await;
         return Err("scope_missing");
@@ -432,8 +438,8 @@ async fn retire(state: &AppState, id_hash: &str) {
     tokio::spawn(async move { session::revoke(&state, &row).await });
 }
 
-/// Signs out: revokes the grant, deletes the session and clears the cookie.
-/// The CSRF layer has already checked the token.
+/// Signs out: revokes the grant, deletes the session and clears the cookie
+/// the request carried. The CSRF layer has already checked the token.
 pub async fn logout(
     State(state): State<AppState>,
     checked: Option<Extension<CheckedSession>>,
@@ -476,7 +482,12 @@ pub async fn logout(
         let _ = tokio::time::timeout(REVOKE_WAIT, revoking).await;
     }
     let mut res = Json(json!({})).into_response();
-    if let Ok(value) = HeaderValue::from_str(&cookies::clear_session(secure)) {
+    // Only a cookie the request carried is cleared. A cross-site form POST
+    // carries none (it's `SameSite=Lax`), so it can't clear the cookie of a
+    // session it can't end.
+    if cookies::session(&headers, secure).is_some()
+        && let Ok(value) = HeaderValue::from_str(&cookies::clear_session(secure))
+    {
         res.headers_mut().insert(SET_COOKIE, value);
     }
     res

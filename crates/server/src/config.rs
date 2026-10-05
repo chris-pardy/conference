@@ -92,20 +92,26 @@ fn scopes(value: Option<&str>) -> Result<Vec<String>, String> {
 }
 
 /// `PUBLIC_URL`, which must be a bare `http` or `https` origin: the client
-/// ID, redirect URI, cookies and every same-origin check are built on it.
+/// ID, redirect URI, cookies and every same-origin check are built on it. It's
+/// returned as the browser serializes an origin (lowercase, punycode host, no
+/// default port), so it matches the `Origin` header.
 fn public_url(value: &str) -> Result<String, String> {
-    let url = trim_url(value);
-    let origin = url::Url::parse(&url)
+    url::Url::parse(value.trim())
         .ok()
-        .filter(|u| matches!(u.scheme(), "http" | "https"))
-        .map(|u| u.origin().ascii_serialization());
-    if origin.as_deref() == Some(url.as_str()) {
-        Ok(url)
-    } else {
-        Err(format!(
-            "PUBLIC_URL must be a bare origin like https://app.example (no path, query or default port), not {value:?}"
-        ))
-    }
+        .filter(|u| {
+            matches!(u.scheme(), "http" | "https")
+                && u.username().is_empty()
+                && u.password().is_none()
+                && u.path() == "/"
+                && u.query().is_none()
+                && u.fragment().is_none()
+        })
+        .map(|u| u.origin().ascii_serialization())
+        .ok_or_else(|| {
+            format!(
+                "PUBLIC_URL must be a bare origin like https://app.example (no path, query or credentials), not {value:?}"
+            )
+        })
 }
 
 fn nonzero(name: &str, value: Duration) -> Result<Duration, String> {
@@ -175,13 +181,21 @@ mod tests {
     fn the_public_url_is_a_bare_origin() {
         assert_eq!(public_url("https://app.example/"), Ok("https://app.example".to_owned()));
         assert_eq!(public_url("http://127.0.0.1:5173"), Ok("http://127.0.0.1:5173".to_owned()));
+        // Normalized as the browser sends it in `Origin`.
+        assert_eq!(public_url("HTTPS://App.Example"), Ok("https://app.example".to_owned()));
+        assert_eq!(
+            public_url("https://bücher.example"),
+            Ok("https://xn--bcher-kva.example".to_owned())
+        );
+        assert_eq!(public_url("https://app.example:443/"), Ok("https://app.example".to_owned()));
         for refused in [
             "https://app.example/eventside",
             "app.example",
             "127.0.0.1:5173",
             "ftp://app.example",
             "https://app.example?x=1",
-            "https://app.example:443",
+            "https://app.example#top",
+            "https://me@app.example",
         ] {
             assert!(public_url(refused).is_err(), "{refused}");
         }

@@ -772,9 +772,12 @@ Where the build refined the approved design:
   the idle timeout plus 30 days after it ended, which is never before its
   cookie runs out.
 - **Bad settings exit 2, before anything starts.** `Config::from_env`
-  checks `PUBLIC_URL` (a bare `http` or `https` origin, the rule issuers
-  follow: no path, query or default port, since the client ID, redirect
-  URI, cookies and same-origin checks are built on it), `DATABASE_URL`
+  checks `PUBLIC_URL` (a bare `http` or `https` origin with no path,
+  query, fragment or credentials, since the client ID, redirect URI,
+  cookies and same-origin checks are built on it; it's normalized as the
+  browser serializes an origin, so `https://App.Example:443` becomes
+  `https://app.example` and a non-ASCII host becomes punycode, and the
+  normalized value is the one used everywhere), `DATABASE_URL`
   (a supported scheme, and not in-memory SQLite) and `OAUTH_SIGNING_KEY`
   (a P-256 private JWK). A database that can't be reached or migrated
   still exits 1.
@@ -791,6 +794,18 @@ Where the build refined the approved design:
   idle ones, silently dropping every session and the generated signing key.
   The server refuses it at startup. `file:` URIs are refused too, since
   SQLite reads their own parameters; a plain path names any real file.
+- **Signing out of an ended or unknown session needs no CSRF token**, since
+  it holds no tokens, and clears the cookie, but only a cookie the request
+  carried. A cross-site form POST carries no cookie (`SameSite=Lax`), so it
+  gets a `200` with no `Set-Cookie` and can't strand a live session the
+  person could no longer reach to sign out. A live session always needs
+  its CSRF token.
+- **TC-24's IP rules are covered by a Rust unit test.** Vivarium serves
+  plain `http://localhost`, so the frozen integration test is refused by
+  the `https` check before the private-address guard runs. The guard's
+  rules (loopback, private, link-local and the rest, refused unless
+  `ALLOW_PRIVATE_NETWORK`) are covered by
+  `net::tests::private_addresses_are_refused_unless_allowed`.
 - **Only the request that ends a session revokes its grant.** `session::end`
   and the renewer's `session::end_revoking` wipe the row first and revoke
   only if they were the one to end it, so requests racing on a just-idled
@@ -1566,3 +1581,41 @@ fixes yet.
    person.
    - Fixed: only a 401 `AuthRequired` is signed out. Every other status is
      `unavailable`. A unit test covers both.
+
+### Round 13
+
+The reviewer found 0 blocking, 0 major, 1 minor and 3 nits, so the round
+isn't clean. `pnpm check` was green. Every finding was fixed after the
+review, and `pnpm check` is green again. No reviewer has seen the round 13
+fixes yet.
+
+1. **[minor] A cross-site form POST to `/oauth/logout` cleared the
+   person's session cookie while the session stayed live.** The POST
+   carries no `SameSite=Lax` cookie, so the CSRF layer saw no session and
+   let it through (round 10 #4), and the handler always cleared the
+   cookie. The grant stayed live and kept being refreshed, out of the
+   person's reach.
+   - Fixed: `logout` sends the clearing `Set-Cookie` only when the
+     request carried a session cookie. With none, it answers `200` with no
+     `Set-Cookie`. Live sessions still need the CSRF token, and an ended or
+     unknown cookie that was sent is still cleared. The Rust test
+     `signing_out_a_session_that_is_gone_clears_its_cookie` now also posts
+     with no cookie and no token and checks there's no `Set-Cookie`.
+2. **[nit] A `PUBLIC_URL` with an uppercase or non-ASCII host was refused**
+   with a message about path, query or port.
+   - Fixed: `public_url` accepts any `http` or `https` URL with no path,
+     query, fragment or credentials and returns its origin as the browser
+     serializes it (lowercase, punycode, no default port). `Config` holds
+     the normalized value, so the client ID, redirect URI and cookies all
+     use it. The config unit test covers the normalization and the new
+     refusals.
+3. **[nit] TC-24 passes without reaching the private-address guard**,
+   since vivarium is plain `http://localhost` and the `https` check
+   refuses first. The test is frozen.
+   - Fixed: the build notes record that the Rust unit test
+     `private_addresses_are_refused_unless_allowed` covers the IP rules.
+4. **[nit] The callback fell back to this instance's scope list when the
+   client ID had none.** The fallback couldn't run, and if it had, it would
+   have brought back the round 11/12 bug.
+   - Fixed: a client ID with no recoverable scope list revokes the grant,
+     logs, and fails the sign-in with `server_error`.

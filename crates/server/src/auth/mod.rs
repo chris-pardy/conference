@@ -112,7 +112,7 @@ pub async fn require_csrf(State(state): State<AppState>, mut req: Request, next:
     let row = match session::lookup(&state, req.headers()).await {
         Ok(Lookup::Live(row)) => row,
         // An ended or unknown session holds no tokens: signing out of it needs
-        // no token either, and the handler clears its cookie.
+        // no token either. The handler clears the cookie only if one was sent.
         Ok(Lookup::Expired(_) | Lookup::None) if path == "/oauth/logout" => {
             return next.run(req).await;
         }
