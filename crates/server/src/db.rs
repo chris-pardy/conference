@@ -65,18 +65,23 @@ pub async fn connect(url: &str) -> Result<Db, String> {
     Ok(pool)
 }
 
-/// SQLite creates the file but not its directory. An in-memory or temporary
-/// database is refused: each of the pool's connections would get its own.
+/// SQLite creates the file but not its directory. An in-memory database is
+/// refused: sqlx shares one between the pool's connections, but it vanishes
+/// when they all close (the pool closes idle ones), taking every session and
+/// the generated signing key with it. `file:` URIs are refused too, since
+/// SQLite reads their own parameters (`file::memory:`, `?mode=memory`), and a
+/// plain path names every real file.
 fn ensure_sqlite_dir(url: &str) -> Result<(), String> {
     let rest = url.trim_start_matches("sqlite:").trim_start_matches("//");
     let (path, query) = rest.split_once('?').unwrap_or((rest, ""));
     let in_memory = path.is_empty()
         || path.contains(":memory:")
         || path.starts_with("file:")
-        || query.split('&').any(|p| p == "mode=memory");
+        || url::form_urlencoded::parse(query.as_bytes())
+            .any(|(k, v)| (k == "mode" && v == "memory") || (k == "vfs" && v == "memdb"));
     if in_memory {
         return Err(
-            "DATABASE_URL must name a SQLite file, like sqlite://data/eventside.db?mode=rwc: an in-memory database isn't shared between connections"
+            "DATABASE_URL must name a SQLite file by its path, like sqlite://data/eventside.db?mode=rwc: an in-memory database is lost, with every session and the signing key, whenever its connections close"
                 .to_owned(),
         );
     }
@@ -118,6 +123,9 @@ mod tests {
             "sqlite:",
             "sqlite://data/x.db?mode=memory",
             "sqlite://file::memory:?cache=shared",
+            "sqlite://data/x.db?vfs=memdb",
+            "sqlite://data/x.db?mode=rwc&vfs=%6Demdb",
+            "sqlite://data/x.db?mode=%6Demory",
         ] {
             assert!(ensure_sqlite_dir(url).is_err(), "{url}");
         }

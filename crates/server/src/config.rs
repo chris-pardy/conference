@@ -78,10 +78,9 @@ fn scopes(value: Option<&str>) -> Result<Vec<String>, String> {
         Some(s) => s.split_whitespace().map(str::to_owned).collect(),
         None => LOGIN_SCOPES.iter().map(|s| (*s).to_owned()).collect(),
     };
-    if crate::oauth::well_formed_scope(&scopes.join(" ")) {
-        Ok(scopes)
-    } else {
-        Err("OAUTH_SCOPES must be distinct scope names, `atproto` among them".to_owned())
+    match crate::oauth::scope_problem(&scopes.join(" ")) {
+        None => Ok(scopes),
+        Some(problem) => Err(format!("OAUTH_SCOPES {problem}")),
     }
 }
 
@@ -144,6 +143,8 @@ mod tests {
         assert!(scopes(Some("transition:generic")).is_err());
         assert!(scopes(Some("atproto atproto")).is_err());
         assert!(scopes(Some("atproto \"quoted\"")).is_err());
+        let long = format!("atproto {}", "x".repeat(2048));
+        assert!(scopes(Some(&long)).unwrap_err().contains("2048"));
     }
 
     #[test]

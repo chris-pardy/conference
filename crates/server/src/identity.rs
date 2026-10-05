@@ -146,11 +146,16 @@ fn pds_endpoint(doc: &Value, did: &str) -> Option<String> {
     })
 }
 
+/// The handle the document claims, normalized as `resolve_handle` checks it,
+/// so the handle stored is the one that was checked; `None` when its first
+/// `at://` entry can't be a handle.
 fn claimed_handle(doc: &Value) -> Option<String> {
-    doc.get("alsoKnownAs")?
+    let aka = doc
+        .get("alsoKnownAs")?
         .as_array()?
         .iter()
-        .find_map(|aka| aka.as_str()?.strip_prefix("at://").map(str::to_ascii_lowercase))
+        .find_map(|aka| aka.as_str()?.strip_prefix("at://"))?;
+    normalize_handle(aka)
 }
 
 #[cfg(test)]
@@ -192,5 +197,14 @@ mod tests {
         let untyped = json!({ "service": [{ "id": "#atproto_pds", "type": "Other", "serviceEndpoint": "https://x.example" }] });
         assert_eq!(pds_endpoint(&untyped, "did:plc:abc"), None);
         assert_eq!(claimed_handle(&doc), Some("ana.example.com".into()));
+    }
+
+    #[test]
+    fn a_claimed_handle_is_normalized_like_the_one_checked() {
+        let claims = |aka: &str| claimed_handle(&json!({ "alsoKnownAs": [aka] }));
+        assert_eq!(claims("at://@Ana.Test"), Some("ana.test".into()));
+        assert_eq!(claims("at://ana.test/app.bsky"), None);
+        assert_eq!(claims("at://ana"), None);
+        assert_eq!(claims("https://ana.test"), None);
     }
 }

@@ -68,7 +68,7 @@ impl AppState {
         let db = db::connect(&config.database_url).await?;
         let key = oauth::signing_key(&db, config.signing_key.as_deref()).await?;
         let http = net::Http::new(config.allow_private_network);
-        let oauth = oauth::OAuthClient::new(&public_url, &config.scopes, key, http.clone());
+        let oauth = oauth::OAuthClient::new(&public_url, &config.scopes, key, http.clone())?;
         let resolver = identity::Resolver {
             http: http.clone(),
             plc_url: config.plc_url.clone(),
@@ -465,6 +465,21 @@ mod tests {
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(seen.lock().unwrap().clone(), vec![("revoke".to_owned(), client_id)]);
+    }
+
+    #[tokio::test]
+    async fn ending_a_session_already_ended_does_not_revoke_it_again() {
+        let (state, _dir) = state().await;
+        let (issuer, seen) = recording_auth_server().await;
+        let client_id = state.oauth.client_id.clone();
+        let (_, id_hash) = live_session(&state, &issuer, &client_id, "atproto").await;
+        let row = session::load(&state.db, &id_hash).await.unwrap().unwrap();
+        // The renewer and a request that found it idle, in either order.
+        session::end_revoking(&state, &row).await.unwrap();
+        session::end(&state, &row).await.unwrap();
+        session::end_revoking(&state, &row).await.unwrap();
         tokio::time::sleep(Duration::from_millis(200)).await;
         assert_eq!(seen.lock().unwrap().clone(), vec![("revoke".to_owned(), client_id)]);
     }

@@ -171,9 +171,12 @@ const REVOKE_TIMEOUT: Duration = Duration::from_secs(15);
 /// Ends a session like `end`, but revokes its grant in the caller's task (for
 /// at most `REVOKE_TIMEOUT`), so a caller that limits its own concurrency,
 /// like the renewer, limits its revocations too. An issuer that recently
-/// couldn't be reached isn't waited on: the session is only wiped.
+/// couldn't be reached isn't waited on: the session is only wiped. Like
+/// `end`, only the call that ends the session revokes its grant.
 pub async fn end_revoking(state: &AppState, row: &SessionRow) -> Result<(), sqlx::Error> {
-    let wiped = wipe(&state.db, &row.id_hash).await;
+    if !wipe(&state.db, &row.id_hash).await? {
+        return Ok(());
+    }
     match &row.issuer {
         Some(issuer) if state.oauth.backing_off(issuer) => {
             eprintln!("could not revoke {}'s grant: {issuer} is backing off", row.did);
@@ -187,7 +190,7 @@ pub async fn end_revoking(state: &AppState, row: &SessionRow) -> Result<(), sqlx
             }
         }
     }
-    wiped.map(drop)
+    Ok(())
 }
 
 /// Revokes a session's grant at its authorization server, as the client ID

@@ -88,9 +88,19 @@ const BACKOFF_MS: i64 = 30_000;
 const METADATA_TTL_MS: i64 = 10 * 60 * 1000;
 
 impl OAuthClient {
-    pub fn new(public_url: &str, scopes: &[String], key: EcKey, http: Http) -> Self {
+    /// A client asking for `scopes`, which must be a well-formed list: it is
+    /// the client ID, so `metadata` has to serve it.
+    pub fn new(
+        public_url: &str,
+        scopes: &[String],
+        key: EcKey,
+        http: Http,
+    ) -> Result<Self, String> {
         let scope = scopes.join(" ");
-        Self {
+        if let Some(problem) = scope_problem(&scope) {
+            return Err(format!("the OAuth scope list {problem}"));
+        }
+        Ok(Self {
             client_id: client_id(public_url, &scope),
             redirect_uri: format!("{public_url}/oauth/callback"),
             public_url: public_url.to_owned(),
@@ -100,7 +110,7 @@ impl OAuthClient {
             nonces: Arc::default(),
             servers: Arc::default(),
             down: Arc::default(),
-        }
+        })
     }
 
     /// The metadata document served at a client ID, given the `scope` query
@@ -119,7 +129,7 @@ impl OAuthClient {
             None => "atproto",
             // `atproto` alone is the bare URL's; another URL for it would
             // name a different client ID than the one it describes. This
-            // instance's own list is well formed: startup checks it.
+            // instance's own list is well formed: `new` checks it.
             Some(scope) if scope != "atproto" && well_formed_scope(scope) => scope,
             Some(_) => return None,
         };
@@ -446,14 +456,26 @@ fn client_id(public_url: &str, scope: &str) -> String {
 /// Whether a scope list is well formed: RFC 6749 scope tokens separated by
 /// single spaces, `atproto` among them, none twice, and not too long.
 pub fn well_formed_scope(scope: &str) -> bool {
+    scope_problem(scope).is_none()
+}
+
+/// The rule a scope list breaks, if any, worded to follow "the scope list".
+pub fn scope_problem(scope: &str) -> Option<&'static str> {
     let tokens: Vec<&str> = scope.split(' ').collect();
     let token_ok = |t: &&str| {
         !t.is_empty() && t.bytes().all(|b| matches!(b, 0x21 | 0x23..=0x5B | 0x5D..=0x7E))
     };
-    scope.len() <= 2048
-        && tokens.iter().all(token_ok)
-        && tokens.contains(&"atproto")
-        && tokens.iter().enumerate().all(|(i, t)| !tokens[..i].contains(t))
+    if scope.len() > 2048 {
+        Some("is longer than 2048 bytes")
+    } else if !tokens.iter().all(token_ok) {
+        Some("must be scope names separated by single spaces")
+    } else if !tokens.contains(&"atproto") {
+        Some("must include `atproto`")
+    } else if !tokens.iter().enumerate().all(|(i, t)| !tokens[..i].contains(t)) {
+        Some("names a scope twice")
+    } else {
+        None
+    }
 }
 
 /// Whether an issuer is a bare origin, as atproto requires: no path, query,
@@ -521,7 +543,8 @@ mod tests {
             &["atproto".into()],
             EcKey::generate(),
             Http::new(false),
-        );
+        )
+        .unwrap();
         let bare = client.metadata(None).unwrap();
         assert_eq!(bare["client_id"], client.client_id);
         assert_eq!(bare["scope"], "atproto");
@@ -544,6 +567,21 @@ mod tests {
             assert!(client.metadata(Some(refused)).is_none(), "{refused:?}");
         }
         assert!(client.metadata(Some(&format!("atproto {}", "x".repeat(2048)))).is_none());
+    }
+
+    #[test]
+    fn a_client_is_only_built_for_a_scope_list_it_can_serve() {
+        let build = |scopes: &[&str]| {
+            let scopes: Vec<String> = scopes.iter().map(|s| (*s).to_owned()).collect();
+            OAuthClient::new("https://app.example", &scopes, EcKey::generate(), Http::new(false))
+        };
+        assert!(build(&["atproto", "transition:generic"]).is_ok());
+        let err = |scopes: &[&str]| build(scopes).err().unwrap();
+        assert!(err(&["transition:generic"]).contains("atproto"));
+        assert!(err(&["atproto", "atproto"]).contains("twice"));
+        assert!(err(&["atproto", "\"quoted\""]).contains("scope names"));
+        let long = "x".repeat(2048);
+        assert!(err(&["atproto", &long]).contains("2048"));
     }
 
     #[test]

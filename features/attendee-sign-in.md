@@ -764,12 +764,16 @@ Where the build refined the approved design:
   cookie runs out.
 - **The default database** is `sqlite://data/eventside.db?mode=rwc`,
   relative to the working directory. `data/` is git-ignored.
-- **In-memory SQLite is refused.** `sqlite::memory:` (or any temporary
-  SQLite database) would give each of the pool's connections its own empty
-  database, so the server refuses it at startup.
+- **In-memory SQLite is refused.** sqlx shares an in-memory database
+  (`sqlite::memory:`, `mode=memory`, `vfs=memdb`) between the pool's
+  connections, but it vanishes when they all close, which the pool does to
+  idle ones, silently dropping every session and the generated signing key.
+  The server refuses it at startup. `file:` URIs are refused too, since
+  SQLite reads their own parameters; a plain path names any real file.
 - **Only the request that ends a session revokes its grant.** `session::end`
-  wipes the row first and spawns the revocation only if it was the one to
-  end it, so parallel requests on a just-idled session revoke once.
+  and the renewer's `session::end_revoking` wipe the row first and revoke
+  only if they were the one to end it, so requests racing on a just-idled
+  session revoke once, and a failed wipe revokes nothing.
 
 ## Test cases
 
@@ -1445,3 +1449,51 @@ green again. No reviewer has seen these fixes yet.
      sees one revocation.
 
 **Decision (2026-10-05):** the user approved an 11th review round to check the round 10 fixes.
+
+### Round 11
+
+The reviewer found 0 blocking, 0 major, 2 minor and 2 nits, so the round
+isn't clean. `pnpm check` was green. Every finding was fixed after the
+review, and `pnpm check` is green again. No reviewer has seen the round 11
+fixes yet.
+
+1. **[minor] `session::end_revoking` revoked a grant even when it didn't
+   end the session.** It ignored `wipe`'s result, so it revoked after
+   another request had already ended the session, and also when `wipe`
+   failed, leaving a live row on a revoked grant. Round 10 #5 fixed only
+   `end`.
+   - Fixed: `end_revoking` returns `wipe`'s error, and returns without
+     revoking when `wipe` reports the session was already ended. A Rust
+     test runs `end_revoking`, `end` and `end_revoking` on one session and
+     sees one revocation.
+2. **[minor] The stored handle was the DID document's raw `alsoKnownAs`
+   text, lowercased, not the normalized handle that was checked.** With
+   `at://@ana.test`, `resolve_handle` checked `ana.test` but `@ana.test`
+   went into the session, the header, `SessionExpired` and the banner's
+   `login_hint`.
+   - Fixed: `claimed_handle` returns the entry run through
+     `normalize_handle`, so the stored handle is the one checked. An entry
+     that can't be a handle gives `handle.invalid`. A unit test in
+     `identity.rs` covers it.
+3. **[nit] The reason given for refusing in-memory SQLite was wrong, and
+   `vfs=memdb` got through.** sqlx 0.8.6 shares an in-memory database
+   between the pool's connections. The real hazard is that it vanishes
+   when they all close, taking every session and the signing key with it.
+   - Fixed: the comment, the startup error and the build note give the
+     real reason. `vfs=memdb` is refused, and query parameters are
+     percent-decoded before they're checked, as sqlx does. `file:` URIs
+     are still refused: SQLite reads their own parameters (`file::memory:`
+     and the like), and a plain path names any real file. The `db.rs`
+     unit test covers the new cases.
+4. **[nit] The scope list was validated only in `Config::from_env`, and a
+   list over 2048 bytes failed with a message that didn't mention
+   length.** `OAuthClient::metadata` assumed startup had checked the list,
+   but a `Config` built directly (as tests do) could give a client whose
+   own client ID `metadata` refused.
+   - Fixed: `OAuthClient::new` returns an error for a list `metadata`
+     wouldn't serve, and `AppState::build` passes it on. A new
+     `scope_problem` names the rule that failed (length, token syntax,
+     missing `atproto`, a duplicate), and both errors use it. Unit tests
+     in `oauth.rs` and `config.rs` cover it.
+
+**Decision (2026-10-05):** the user allowed up to 15 review rounds for this build.
