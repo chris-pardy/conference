@@ -1,6 +1,6 @@
 ---
-status: analysis
-impact:
+status: design-review
+impact: cross-cutting
 depends-on: [attendee-sign-in, space-sync]
 branch:
 tests-commit:
@@ -201,6 +201,73 @@ organizations, are seeded by the script.
   the last owner from removing themselves?
 
 ## Architecture analysis
+
+**Existing code touched:**
+
+- None on `main` yet works with spaces: `crates/server` is a skeleton, and
+  ui-blocks shipped with fixture sources only.
+- `attendee-sign-in` (on its branch) adds the appview's sessions, OAuth
+  client and scope list in `crates/server/src/{auth,oauth,config}.rs`.
+  Conference-space builds on them in two ways:
+  - acting as the organization account needs a session the appview keeps
+    for an account nobody is browsing as
+  - matching by email needs `transition:email`, asked for at join time
+    (step-up), which sign-in's design deferred
+- `lexicons/`: new eventside records (the conference sidecar, roles,
+  membership-related records) and the vendored
+  `community.lexicon.calendar.event`, shared with [`plans`](plans.md).
+- `scripts/` and `tests/support/`: the admin CLI is new. Test support gains a
+  "seed a conference" helper that later features' tests will use in place
+  of creating raw spaces.
+
+**Features affected:**
+
+- [`space-sync`](space-sync.md) (`analysis`): it assumes "organizers
+  connect a space once by signing in with a `read` grant" and "tests
+  create spaces directly". Conference-space settles who connects (the
+  organization account, through the appview) and how spaces are created
+  and configured: app allow-list, `read_self`, and member policy. It also
+  makes membership changes (leave, remove, ban) something space-sync has
+  to act on: a former member's records stop being served.
+- [`attendee-sign-in`](attendee-sign-in.md) (being built): it needs an
+  appview-held session for an organization account, and step-up for
+  `transition:email` at join time. Its design says "no step-up for now",
+  so this either adds step-up or asks every attendee for the email scope
+  at sign-in.
+- [`ui-blocks`](ui-blocks.md) (complete): test support creates a space
+  directly with a member-list policy. Its tests don't change, but the
+  "real conferences create their spaces in conference-space" handoff it
+  recorded happens here.
+- [`block-actions`](block-actions.md) (`analysis`): its writes and views are
+  scoped to a space. Space roles (owner, staff) are what later card
+  authoring checks against.
+- [`plans`](plans.md) (`design-review`): plans hang off the conference node
+  with `childOf`, featuring needs the owner and staff roles, and "whole
+  conference" means the space's members.
+- Not yet specced: `program-import` (sessions and speakers, which sets the
+  speaker role), `event-branding` (the theme on the sidecar),
+  `conference-feed`, `groups`, `places`, `chat`, `connections` and
+  `event-profile`. All of them read membership and roles from here, and
+  scope their records to the conference's space.
+
+**New shared surfaces:**
+
+- The **conference model**: a public `calendar.event` (or an invite-only
+  link) as the entry point, a sidecar linking it to its space, and one space
+  per conference.
+- **Membership and roles**: every feature's permission checks ask "is this
+  DID a member, and with what role?".
+- **Acting as the organization**: the appview's path for writing as an
+  organization on behalf of an owner.
+- **The admin CLI and the test seeding helper.**
+
+**Verdict: cross-cutting.** Conference-space sets the foundations every
+later feature builds on. It adds lexicons and record shapes: the conference
+sidecar, roles and the join-related records. It defines the membership and
+role checks, and the appview's organization identity. It changes what
+`space-sync` (who connects, membership changes) and `attendee-sign-in`
+(an organization session, and the email scope or step-up) have to provide.
+It needs a design review.
 
 ## Design review
 
