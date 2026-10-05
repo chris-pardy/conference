@@ -1,6 +1,6 @@
 ---
-status: analysis
-impact:
+status: design-review
+impact: cross-cutting
 depends-on: [conference-space, space-sync, block-actions, conference-feed, groups, places]
 branch:
 tests-commit:
@@ -263,6 +263,90 @@ Plans you went to stay in your history, with their page and chat.
   edit, or only for time and place?
 
 ## Architecture analysis
+
+**Existing code touched:**
+
+- `lexicons/`: today it holds only `app/eventside/block/{defs,card}.json`.
+  Plans adds the first eventside records outside blocks, and the first
+  community lexicons the repo depends on.
+  - New eventside lexicons: the plan sidecar, `app.eventside.location.place`,
+    the invitation record, and the attendance-visibility field or record.
+  - Vendored community lexicons, used as they are: `calendar.event`,
+    `calendar.rsvp`, `location.{address,fsq,geo}`.
+  - The vision's `childOf`/`includes` tree records, in whichever namespace
+    `conference-space` settles on.
+- `lexicons/app/eventside/block/defs.json`: the conference-aware blocks
+  (`#sessionRef`, `#room`, `#time`, `#person`) are where a plan card would
+  live. A plan either renders through `#sessionRef` stretched to cover
+  plans, or needs a new `#planRef` block and a `#place` that supersedes or
+  generalizes `#room`. The same applies to `web/src/blocks/blocks/conference.tsx`
+  and the Rust mirror in `crates/blocks/src/lexicon.rs`.
+- `crates/server`: new XRPC endpoints for creating, editing, joining,
+  inviting and listing plans, and audience-filtered views over the
+  space-sync index. These are the first endpoints that serve another
+  member's records under a per-viewer audience check.
+- `web/src/routes`: today it has only `dev/`. Plans adds the first attendee
+  screens: the composer, the plan page and the Plans list.
+
+**Features affected:**
+
+- [`ui-blocks`](ui-blocks.md) (complete): its conference-aware vocabulary
+  gains a plan card, or `#sessionRef` is widened to cover one. `#room` either
+  becomes a reference to a `places` record or sits next to a new `#place`
+  block. A vocabulary change has to follow its "old clients skip unknown
+  blocks" rule and keep its gallery tests green.
+- [`block-actions`](block-actions.md) (`analysis`): its write path makes every
+  interaction an `app.eventside.block.action` record that middleware checks.
+  An RSVP here is a `community.lexicon.calendar.rsvp`, a different
+  collection. Either block-actions grows to write typed records (an action
+  whose accepted result is a community record), or plans writes RSVPs
+  through its own endpoint. That changes block-actions' scope, and its
+  ingest re-validation has to cover RSVPs and invitations written straight
+  to the PDS.
+- [`space-sync`](space-sync.md) (`analysis`): plans is the first consumer
+  that needs the index to serve records filtered by audience, and the first
+  to need community-namespace collections indexed. Its read API has to
+  support "records in collection X that point at node Y".
+- [`attendee-sign-in`](attendee-sign-in.md) (being built): writing plans,
+  RSVPs and invitations into the space as the attendee needs a `space:`
+  write scope added to the scope list. That's the mechanism its design
+  reserved for later features, and existing sessions will be asked to sign
+  in again.
+- `conference-space` (not specced): plans hang off its conference node with
+  `childOf`, and featuring needs its notion of who counts as an organizer
+  (co-owners).
+- `conference-feed` (not specced): it has to carry plan items with the
+  reasons "changed", "invited you" and "featured", pins for featured
+  whole-conference plans, and the rule that past plans drop out.
+- [`groups`](groups.md) and [`places`](places.md) (not specced): plans
+  defines how it references them (a group URI in an audience, a place URI
+  in a location), which sets their public shape before they're
+  brainstormed.
+- `chat` (not specced): it embeds plan cards, and each plan has a chat.
+- `program-import` (not specced): sessions are also `calendar.event` nodes,
+  and the Going/schedule view mixes them with plans. Rooms it imports become
+  `places`.
+- `connections` (not specced): the source of the "my connections" group.
+
+**New shared surfaces:**
+
+- The **node model in practice**: `calendar.event` plus sidecar, `childOf`
+  and `includes`. Sessions, plans and later meetups all share it.
+- **RSVP handling**: the community RSVP record, the public/private
+  attendance choice, and the counts and lists the appview serves. Sessions
+  will reuse it.
+- **Audience-filtered serving**: the appview check "may this viewer see
+  this node?", which feeds, chat and Going all rely on.
+- **The location union**, including `app.eventside.location.place`.
+- **Invitations** as audience grants, which chat invites may reuse.
+
+**Verdict: cross-cutting.** Plans adds lexicons and record shapes: the first
+community lexicons, the plan sidecar, and the location, invitation and
+featuring records. It sets the node, RSVP and audience-filtering model that
+sessions, feeds, chat and groups all build on. It changes what two specced
+features have to provide: block-actions' write path and space-sync's read
+API. It also extends a built one, ui-blocks' conference vocabulary, and adds
+a scope to attendee-sign-in. It needs a design review.
 
 ## Design review
 
