@@ -153,13 +153,16 @@ pub fn outdated(state: &AppState, row: &SessionRow) -> bool {
     state.config.scopes.iter().any(|s| !granted.contains(&s.as_str()))
 }
 
-/// Ends a session: its grant is revoked in the background, and its tokens and
-/// keys are wiped, but the row keeps who it was until the sweeper removes it.
+/// Ends a session: its tokens and keys are wiped, but the row keeps who it
+/// was until the sweeper removes it. Whoever ends it revokes its grant, in
+/// the background; a request that finds it already ended leaves that be.
 pub async fn end(state: &AppState, row: &SessionRow) -> Result<(), sqlx::Error> {
-    let revoking = row.clone();
-    let background = state.clone();
-    tokio::spawn(async move { revoke(&background, &revoking).await });
-    wipe(&state.db, &row.id_hash).await
+    if wipe(&state.db, &row.id_hash).await? {
+        let revoking = row.clone();
+        let background = state.clone();
+        tokio::spawn(async move { revoke(&background, &revoking).await });
+    }
+    Ok(())
 }
 
 /// How long `end_revoking` waits on the authorization server.
@@ -184,7 +187,7 @@ pub async fn end_revoking(state: &AppState, row: &SessionRow) -> Result<(), sqlx
             }
         }
     }
-    wiped
+    wiped.map(drop)
 }
 
 /// Revokes a session's grant at its authorization server, as the client ID
@@ -213,9 +216,10 @@ pub async fn revoke(state: &AppState, row: &SessionRow) {
 }
 
 /// Marks a session ended and wipes its tokens, without revoking them (for a
-/// grant the authorization server has already refused).
-pub async fn wipe(db: &Db, id_hash: &str) -> Result<(), sqlx::Error> {
-    sqlx::query(
+/// grant the authorization server has already refused). Returns whether this
+/// call ended it, rather than finding it already ended.
+pub async fn wipe(db: &Db, id_hash: &str) -> Result<bool, sqlx::Error> {
+    let done = sqlx::query(
         "UPDATE sessions SET ended_at = $1, access_token = NULL, refresh_token = NULL, dpop_key = NULL, \
          refresh_lease_until = NULL WHERE id_hash = $2 AND ended_at IS NULL",
     )
@@ -223,7 +227,7 @@ pub async fn wipe(db: &Db, id_hash: &str) -> Result<(), sqlx::Error> {
     .bind(id_hash)
     .execute(db)
     .await?;
-    Ok(())
+    Ok(done.rows_affected() == 1)
 }
 
 pub async fn delete(db: &Db, id_hash: &str) -> Result<(), sqlx::Error> {

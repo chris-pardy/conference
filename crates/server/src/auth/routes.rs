@@ -437,10 +437,11 @@ pub async fn logout(
     let row = match checked {
         // A live session, whose CSRF token the layer has checked.
         Some(Extension(CheckedSession(row))) => Some(row),
-        // The layer lets an ended session through without a token.
+        // The layer lets an ended or unknown session through without a token.
         None => match session::lookup(&state, &headers).await {
             Ok(Lookup::Expired(row)) => Some(row),
-            // Already gone (another sign-out); never a live session unchecked.
+            // Gone (another sign-out, or never there): only the cookie is
+            // cleared. Never a live session unchecked.
             Ok(Lookup::Live(_) | Lookup::None) => None,
             Err(err) => {
                 eprintln!("sign-out: {err}");

@@ -96,7 +96,7 @@ async fn refresh_leased(state: &AppState, id_hash: &str) -> Renewal {
             eprintln!("renewal: a refresh for {} came back for {:?}", row.did, tokens.sub);
             revoke_unsaved(state, &server, &row.client_id, &tokens, &key).await;
             match session::wipe(&state.db, id_hash).await {
-                Ok(()) => Renewal::Ended,
+                Ok(_) => Renewal::Ended,
                 Err(err) => Renewal::Failed(err.to_string()),
             }
         }

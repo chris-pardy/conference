@@ -732,9 +732,9 @@ Where the build refined the approved design:
   `/oauth-client-metadata.json` is `atproto` alone; `?scope=S` is served
   for any list of RFC 6749 scope tokens that includes `atproto`, has no
   duplicates and is at most 2 KB, and describes the client ID that is that
-  exact URL (`?scope=atproto` and malformed lists are `404`). This
-  instance's own configured list is always served, even if `OAUTH_SCOPES`
-  wouldn't pass that check. A grant from
+  exact URL (`?scope=atproto` and malformed lists are `404`). The server
+  refuses to start (exit 2) if `OAUTH_SCOPES` fails that check, so its own
+  list is always one the route serves. A grant from
   another instance's scope list may make the authorization server fetch
   that client's metadata again, from any instance, so an allow-list of this
   instance's own list (or one compiled into the binary) would break
@@ -764,6 +764,12 @@ Where the build refined the approved design:
   cookie runs out.
 - **The default database** is `sqlite://data/eventside.db?mode=rwc`,
   relative to the working directory. `data/` is git-ignored.
+- **In-memory SQLite is refused.** `sqlite::memory:` (or any temporary
+  SQLite database) would give each of the pool's connections its own empty
+  database, so the server refuses it at startup.
+- **Only the request that ends a session revokes its grant.** `session::end`
+  wipes the row first and spawns the revocation only if it was the one to
+  end it, so parallel requests on a just-idled session revoke once.
 
 ## Test cases
 
@@ -1400,3 +1406,42 @@ green again. No reviewer has seen these fixes yet.
      code and on round 8's, with `database is locked` when the test read
      the SQLite file during a renewal. The server now puts SQLite in WAL
      mode, so readers don't wait on writers (build notes).
+
+### Round 10
+
+The reviewer found 0 blocking, 0 major, 3 minor and 2 nits. `pnpm check`
+was green. Every finding was fixed after the review, and `pnpm check` is
+green again. No reviewer has seen these fixes yet.
+
+1. **[minor] `OAUTH_SCOPES` was never validated, and the metadata route
+   served this instance's own list however it was configured.**
+   - Fixed: the server refuses to start (exit 2) unless the list is
+     distinct, valid scope names including `atproto` (the same
+     `well_formed_scope` rule the metadata route uses). The route's "own
+     list is always served" exception and its unit test are gone. A unit
+     test in `config.rs` covers the check.
+2. **[minor] `DATABASE_URL=sqlite::memory:` started, but each pooled
+   connection was its own empty database.**
+   - Fixed: in-memory and temporary SQLite URLs (`:memory:`, an empty
+     path, `file:` URIs, `mode=memory`) are refused at startup, replacing
+     the `:memory:` special case. A unit test in `db.rs` covers them.
+3. **[minor] Nothing tested that a code is redeemed as the pending
+   request's client ID.**
+   - Fixed: a Rust test stores a pending request pushed as another scope
+     list's client ID and runs the callback against the recording
+     authorization server. It checks the token request and the unused
+     grant's revocation were both made as that client ID. It fails if
+     `complete` uses the instance's own client ID.
+4. **[nit] Signing out with a cookie that names no session got
+   `401 AuthRequired`, so the dead cookie wasn't cleared.**
+   - Fixed: the CSRF layer lets `/oauth/logout` through for an unknown
+     session as well as an ended one. Nothing is revoked or deleted, and
+     the handler clears the cookie. A live session still needs its CSRF
+     token. A Rust test covers both.
+5. **[nit] `session::end` spawned a revocation even when another request
+   had already ended the session.**
+   - Fixed: `wipe` reports whether it ended the session, and `end` spawns
+     the revocation only then. A Rust test ends the same session twice and
+     sees one revocation.
+
+**Decision (2026-10-05):** the user approved an 11th review round to check the round 10 fixes.

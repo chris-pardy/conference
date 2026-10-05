@@ -119,12 +119,8 @@ impl OAuthClient {
             None => "atproto",
             // `atproto` alone is the bare URL's; another URL for it would
             // name a different client ID than the one it describes. This
-            // instance's own list is always served, however it's configured.
-            Some(scope)
-                if scope != "atproto" && (scope == self.scope || well_formed_scope(scope)) =>
-            {
-                scope
-            }
+            // instance's own list is well formed: startup checks it.
+            Some(scope) if scope != "atproto" && well_formed_scope(scope) => scope,
             Some(_) => return None,
         };
         Some(json!({
@@ -449,7 +445,7 @@ fn client_id(public_url: &str, scope: &str) -> String {
 
 /// Whether a scope list is well formed: RFC 6749 scope tokens separated by
 /// single spaces, `atproto` among them, none twice, and not too long.
-fn well_formed_scope(scope: &str) -> bool {
+pub fn well_formed_scope(scope: &str) -> bool {
     let tokens: Vec<&str> = scope.split(' ').collect();
     let token_ok = |t: &&str| {
         !t.is_empty() && t.bytes().all(|b| matches!(b, 0x21 | 0x23..=0x5B | 0x5D..=0x7E))
@@ -548,14 +544,6 @@ mod tests {
             assert!(client.metadata(Some(refused)).is_none(), "{refused:?}");
         }
         assert!(client.metadata(Some(&format!("atproto {}", "x".repeat(2048)))).is_none());
-        // An instance's own list is served however it's configured.
-        let odd = OAuthClient::new(
-            "https://app.example",
-            &["transition:generic".into()],
-            EcKey::generate(),
-            Http::new(false),
-        );
-        assert_eq!(odd.metadata(Some("transition:generic")).unwrap()["client_id"], odd.client_id);
     }
 
     #[test]

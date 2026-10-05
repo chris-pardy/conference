@@ -41,10 +41,7 @@ impl Config {
             Some(v) => parse_duration(&v).map_err(|e| format!("{name}: {e}")),
             None => Ok(default),
         };
-        let scopes = match var("OAUTH_SCOPES") {
-            Some(s) => s.split_whitespace().map(str::to_owned).collect(),
-            None => LOGIN_SCOPES.iter().map(|s| (*s).to_owned()).collect(),
-        };
+        let scopes = scopes(var("OAUTH_SCOPES").as_deref())?;
         Ok(Self {
             port,
             public_url: var("PUBLIC_URL").map(|u| trim_url(&u)),
@@ -70,6 +67,21 @@ impl Config {
             token_refresh_skew: duration("TOKEN_REFRESH_SKEW", Duration::from_secs(60))?,
             atproto_url,
         })
+    }
+}
+
+/// The scopes to ask for: `OAUTH_SCOPES`, or `LOGIN_SCOPES` when it's unset.
+/// The list is this instance's client ID, so it must be one the metadata
+/// route serves: valid, distinct scope names, `atproto` among them.
+fn scopes(value: Option<&str>) -> Result<Vec<String>, String> {
+    let scopes: Vec<String> = match value {
+        Some(s) => s.split_whitespace().map(str::to_owned).collect(),
+        None => LOGIN_SCOPES.iter().map(|s| (*s).to_owned()).collect(),
+    };
+    if crate::oauth::well_formed_scope(&scopes.join(" ")) {
+        Ok(scopes)
+    } else {
+        Err("OAUTH_SCOPES must be distinct scope names, `atproto` among them".to_owned())
     }
 }
 
@@ -119,6 +131,19 @@ mod tests {
         assert_eq!(parse_duration("30d"), Ok(Duration::from_secs(2_592_000)));
         assert!(parse_duration("soon").is_err());
         assert!(parse_duration("5w").is_err());
+    }
+
+    #[test]
+    fn the_scope_list_must_include_atproto_once() {
+        assert_eq!(scopes(None), Ok(vec!["atproto".to_owned()]));
+        assert_eq!(
+            scopes(Some(" atproto  transition:generic ")),
+            Ok(vec!["atproto".to_owned(), "transition:generic".to_owned()])
+        );
+        assert!(scopes(Some("transition:generic transition:generic")).is_err());
+        assert!(scopes(Some("transition:generic")).is_err());
+        assert!(scopes(Some("atproto atproto")).is_err());
+        assert!(scopes(Some("atproto \"quoted\"")).is_err());
     }
 
     #[test]

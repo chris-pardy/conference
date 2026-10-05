@@ -374,6 +374,102 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_code_is_redeemed_as_the_client_its_request_was_pushed_as() {
+        let (state, _dir) = state().await;
+        let (issuer, seen) = recording_auth_server().await;
+        // Pushed by an instance with another scope list, e.g. mid-deploy.
+        let other = format!("{}?scope=atproto%20transition%3Ageneric", state.oauth.client_id);
+        sqlx::query(
+            "INSERT INTO oauth_requests (state, kind, client_id, pkce_verifier, dpop_key, issuer, \
+             expected_did, preauth_hash, return_to, expires_at) \
+             VALUES ($1, 'login', $2, 'verifier', $3, $4, NULL, $5, '/', $6)",
+        )
+        .bind("teststate")
+        .bind(&other)
+        .bind(keys::EcKey::generate().private_jwk())
+        .bind(&issuer)
+        .bind(keys::sha256_b64("preauth"))
+        .bind(db::now_ms() + 60_000)
+        .execute(&state.db)
+        .await
+        .unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = router(state.clone());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let res = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap()
+            .get(format!("http://{addr}/oauth/callback"))
+            .query(&[("state", "teststate"), ("iss", issuer.as_str()), ("code", "code")])
+            .header("cookie", "oauth_preauth_teststate=preauth")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status().as_u16(), 302);
+        // The DID can't be resolved here, so the unused grant is revoked:
+        // as the same client.
+        let seen = seen.lock().unwrap().clone();
+        assert_eq!(seen, vec![("token".to_owned(), other.clone()), ("revoke".to_owned(), other)]);
+    }
+
+    #[tokio::test]
+    async fn signing_out_a_session_that_is_gone_clears_its_cookie() {
+        let (state, _dir) = state().await;
+        let client_id = state.oauth.client_id.clone();
+        let (live, _) = live_session(&state, "http://127.0.0.1:1", &client_id, "atproto").await;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = router(state.clone());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let logout = |cookie: String| async move {
+            reqwest::Client::new()
+                .post(format!("http://{addr}/oauth/logout"))
+                .header("cookie", format!("session={cookie}"))
+                .send()
+                .await
+                .unwrap()
+        };
+        let res = logout("no-such-session".into()).await;
+        assert_eq!(res.status().as_u16(), 200);
+        let set = res.headers().get("set-cookie").and_then(|v| v.to_str().ok()).unwrap_or("");
+        assert!(set.starts_with("session=;") && set.contains("Max-Age=0"), "{set:?}");
+        // A live session still needs its CSRF token.
+        assert_eq!(logout(live.clone()).await.status().as_u16(), 403);
+        assert!(matches!(
+            session::lookup(&state, &{
+                let mut h = axum::http::HeaderMap::new();
+                h.insert("cookie", format!("session={live}").parse().unwrap());
+                h
+            })
+            .await
+            .unwrap(),
+            session::Lookup::Live(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn only_the_request_that_ends_a_session_revokes_it() {
+        let (state, _dir) = state().await;
+        let (issuer, seen) = recording_auth_server().await;
+        let client_id = state.oauth.client_id.clone();
+        let (_, id_hash) = live_session(&state, &issuer, &client_id, "atproto").await;
+        let row = session::load(&state.db, &id_hash).await.unwrap().unwrap();
+        // Two requests that both found it idle.
+        session::end(&state, &row).await.unwrap();
+        session::end(&state, &row).await.unwrap();
+        for _ in 0..50 {
+            if !seen.lock().unwrap().is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(seen.lock().unwrap().clone(), vec![("revoke".to_owned(), client_id)]);
+    }
+
+    #[tokio::test]
     async fn get_session_renews_the_cookie_on_every_answer() {
         let (state, _dir) = state().await;
         let client_id = state.oauth.client_id.clone();

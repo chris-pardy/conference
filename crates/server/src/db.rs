@@ -65,12 +65,20 @@ pub async fn connect(url: &str) -> Result<Db, String> {
     Ok(pool)
 }
 
-/// SQLite creates the file but not its directory.
+/// SQLite creates the file but not its directory. An in-memory or temporary
+/// database is refused: each of the pool's connections would get its own.
 fn ensure_sqlite_dir(url: &str) -> Result<(), String> {
-    let path = url.trim_start_matches("sqlite:").trim_start_matches("//");
-    let path = path.split('?').next().unwrap_or_default();
-    if path.is_empty() || path == ":memory:" {
-        return Ok(());
+    let rest = url.trim_start_matches("sqlite:").trim_start_matches("//");
+    let (path, query) = rest.split_once('?').unwrap_or((rest, ""));
+    let in_memory = path.is_empty()
+        || path.contains(":memory:")
+        || path.starts_with("file:")
+        || query.split('&').any(|p| p == "mode=memory");
+    if in_memory {
+        return Err(
+            "DATABASE_URL must name a SQLite file, like sqlite://data/eventside.db?mode=rwc: an in-memory database isn't shared between connections"
+                .to_owned(),
+        );
     }
     match std::path::Path::new(path).parent() {
         Some(dir) if !dir.as_os_str().is_empty() => std::fs::create_dir_all(dir)
@@ -99,5 +107,19 @@ mod tests {
         assert_eq!(Backend::of("postgresql://u@host/db"), Ok(Backend::Postgres));
         let err = Backend::of("mysql://u@host/db").unwrap_err();
         assert!(err.contains("sqlite") && err.contains("postgres"), "{err}");
+    }
+
+    #[test]
+    fn an_in_memory_sqlite_database_is_refused() {
+        for url in [
+            "sqlite::memory:",
+            "sqlite://:memory:",
+            "sqlite://",
+            "sqlite:",
+            "sqlite://data/x.db?mode=memory",
+            "sqlite://file::memory:?cache=shared",
+        ] {
+            assert!(ensure_sqlite_dir(url).is_err(), "{url}");
+        }
     }
 }
