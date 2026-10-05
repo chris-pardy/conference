@@ -278,40 +278,59 @@ what held up. The changes are listed under "Critique folded in" at the end.
 
 #### What vivarium supports
 
-These facts were read from the installed `@vivarium-dev/cli` 0.0.1 binary,
-and the critique spot-checked them:
+These facts were read from the `@vivarium-dev/cli` binary, first from 0.0.1
+and then again from **0.0.2** (PR #6), which catches up with the upstream
+permissioned-data proposal. The 0.0.2 facts:
 
 - **Space URIs** have the form `at://{ownerDid}/space/{type}/{skey}`. The
   owner must be an account on the PDS hosting the space, so the appview's
   `did:web` can't own one.
-- **`com.atproto.simplespace.*` is owner-only:**
-  - `createSpace {type, skey?, policy?, appAccess?}` (the owner is the
-    caller)
+- **`com.atproto.simplespace.*` is owner-only**, and OAuth sessions need
+  `manage=update` for member changes:
+  - `createSpace {spaceType, skey?, readPolicy, writePolicy, appAccess}`,
+    with every field required; the owner is the caller
   - `updateSpace`, `deleteSpace`
-  - `addMember` and `removeMember {space, did}`, which need `manage=update`
-  - `listMembers` and `getSpace`, which a space credential can also call
-- **Member policies** are `#publicPolicy`, `#memberListPolicy` and
-  `#managingAppPolicy`.
+  - `putMember {space, did, read, write}`, an upsert (it replaces 0.0.1's
+    `addMember`)
+  - `removeMember {space, did}`
+  - `listMembers`, which returns `{did, read, write}` entries and is
+    owner-session only
+  - `getSpace`
+- **Policies** are `#publicPolicy`, `#memberListPolicy` and
+  `#managingAppPolicy`, set separately for reading and writing. An unknown
+  policy denies.
 - **App access** is `#open` or `#allowList`. Under `#allowList`,
   `getSpaceCredential` needs a client attestation whose `iss` is on the
   list.
-- There are **no invites, join requests or bans**.
-- **The PDS enforces little:**
-  - the owner always passes the policy
-  - writes into a space are never checked against membership
-  - `removeMember` deletes a row, but credentials already issued live for
-    up to 2 hours
-- **OAuth scopes:**
+- There are **no invites, join requests, roles or bans**.
+- **What the PDS enforces:**
+  - the owner always passes
+  - writes into a user's own space repo are accepted whatever their
+    membership
+  - but the space host records and fans out a write only if its author has
+    `write` under the write policy, so a non-member's writes never reach
+    `listRepos`
+  - `removeMember` is a plain delete: credentials already issued (now 10
+    minutes, at most 1 hour) keep working until they expire
+  - `notifyCredentialRevoked` exists for revoking issued credentials, but
+    only the space's manager can send it
+- **OAuth scopes** (unchanged from 0.0.1):
   - `space:{type}?authority=…&action=…&collection=…&manage=…`
   - `authority` defaults to `self`
-  - a missing `action` means every action, read included
+  - a missing `action` means every action except `read_self`
   - every requested scope must appear verbatim in the client metadata
   - a delegation token (for `space-sync`) needs `action=read`
+- **Space credentials changed** in 0.0.2: they're HTTP-message-signature
+  bound to a P-256 `did:key` (not DPoP), last 10 minutes, and are needed for
+  `registerNotify` and `listRepos`. That's `space-sync`'s concern, recorded
+  under Impact.
 - **Email:** `transition:email` and `account:email` are accepted.
   `getSession` returns the email whatever the scopes, so tests can't prove
   the scope is needed.
 - **Vivarium is one PDS.** An organization or attendees on other PDSes go
   untested.
+- **No space lexicons ship** with vivarium's npm packages. Field names come
+  from its handler code.
 
 #### Approach
 
@@ -321,11 +340,12 @@ that can read the space. So every membership decision and check is made
 against the appview's `members` table.
 
 The space's own member list is kept as a **portable copy**, so another
-appview could take the space over:
+appview could take the space over. Since 0.0.2 it also does real work: the
+space host only records writes from members with `write`.
 
 1. The database is written first.
-2. The appview, acting as the organization, then calls `addMember` or
-   `removeMember`.
+2. The appview, acting as the organization, then calls
+   `putMember {read: true, write: true}` or `removeMember`.
 3. Failed calls are retried by a background job.
 4. `eventside admin members reconcile` repairs any drift.
 
@@ -389,8 +409,9 @@ spaces. A unit test checks the attestation's `iss`.
 
 **A conference is one space, entered through a calendar event.**
 
-- The space is `at://{orgDid}/space/app.eventside.conference/{skey}`, with
-  `#memberListPolicy` and `#allowList [bare client ID]`.
+- The space is `at://{orgDid}/space/app.eventside.conference/{skey}`,
+  created with `readPolicy` and `writePolicy` both `#memberListPolicy`, and
+  `appAccess` `#allowList [bare client ID]`.
 - **Public conferences:**
   - The organization's public repo holds a `community.lexicon.calendar.event`
     and an `app.eventside.conference` sidecar with the same rkey.
@@ -505,7 +526,7 @@ from other apps are ignored for now.
   - `membership.rs`: the `members`, `org_members` and pre-assigned role
     tables, plus the role checks
   - `join.rs`: the join order, codes, list matching and rate limits
-  - `pds_sync.rs`: the `addMember`/`removeMember` outbox and its retry job
+  - `pds_sync.rs`: the `putMember`/`removeMember` outbox and its retry job
   - `routes.rs`: XRPC
   - `admin.rs`: the CLI
 - **`crates/server/src/auth/`** (from `attendee-sign-in`, changed):
@@ -550,7 +571,7 @@ from other apps are ignored for now.
 | `invite_codes`: hashed code, space, personal DID or handle?, expiry, max uses, uses | appview DB | CLI | join |
 | `attendee_list`: space, DID or unresolved handle, email HMAC | appview DB | CLI import | join |
 | `join_requests`, `bans` (by DID) | appview DB | join, CLI | join, CLI |
-| `pds_outbox`: pending `addMember`/`removeMember` | appview DB | membership changes | the retry job |
+| `pds_outbox`: pending `putMember`/`removeMember` | appview DB | membership changes | the retry job |
 | `sessions.kind`, `oauth_requests.purpose` | appview DB (sign-in tables) | sign-in | sign-in, renewer |
 
 #### Interfaces
@@ -595,6 +616,11 @@ from other apps are ignored for now.
   - attestation as the bare client ID
   - the serving filter `was_member_at`
   - "tests create spaces directly" becomes `seedConference`
+  - vivarium 0.0.2 changes its credential flow: HTTP message signatures
+    with a P-256 `did:key`, 10-minute credentials, `registerNotify` and
+    `listRepos` needing a credential, and `repoRev`/`spaceRev` in
+    notifications and `listRepos`. Its design should be written against
+    0.0.2
 - **[`ui-blocks`](ui-blocks.md)** (complete): no change. Its fixture's
   `ats://…` space strings are opaque test data in frozen files.
 - **[`block-actions`](block-actions.md)** and **[`plans`](plans.md)**:
@@ -695,6 +721,35 @@ A fresh reviewer critiqued the first draft. Changes:
    - the single-PDS testing risk
    - `transition:email`
    - the email step offered alongside "request" rather than forced
+
+### Round 1
+
+**Feedback:** the user said vivarium had a new release that catches up with
+upstream spaces, to be adopted on a branch (PR #6, vivarium 0.0.2). They
+also asked about a "group host" design in progress. No such design was
+found under that name; related work found:
+
+- the upstream proposal's space authority/space host split, with
+  invites and roles out of scope
+- the group-as-its-own-DID pattern (Newbold's community spaces, Ellich's
+  opensocial.community, the Certified Group Service, the Arbiter), which
+  matches our organization account
+- membership handshake records (an invite by the group, a confirm by the
+  member) as a portable alternative to roles in the database
+
+The user is looking for the group-host design. It will be checked against
+this one when found.
+
+**Changes:**
+
+- "What vivarium supports" rewritten for 0.0.2.
+- `addMember` → `putMember {read: true, write: true}`. The portable member
+  list now also gates which writes the space host records.
+- `createSpace` with explicit `readPolicy`, `writePolicy` and `appAccess`.
+- `space-sync`'s impact notes 0.0.2's new credential flow.
+- Nothing else in the approach changed: the appview's database stays the
+  source of truth, because removal still doesn't revoke issued credentials
+  and only the appview holds them.
 
 ## Test cases
 
