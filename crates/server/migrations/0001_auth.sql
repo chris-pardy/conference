@@ -46,8 +46,11 @@ CREATE INDEX sessions_did ON sessions (did);
 CREATE INDEX sessions_idle ON sessions (ended_at, last_seen_at, id_hash);
 CREATE INDEX sessions_renewal ON sessions (ended_at, token_expires_at, id_hash);
 
+-- The one generated signing key. `slot` is always 1, so instances racing to
+-- generate it conflict on the insert and all read back the same row.
 CREATE TABLE client_keys (
-    kid TEXT PRIMARY KEY,
+    slot BIGINT PRIMARY KEY CHECK (slot = 1),
+    kid TEXT NOT NULL,
     private_jwk TEXT NOT NULL,
     created_at BIGINT NOT NULL
 );

@@ -810,6 +810,30 @@ Where the build refined the approved design:
   and the renewer's `session::end_revoking` wipe the row first and revoke
   only if they were the one to end it, so requests racing on a just-idled
   session revoke once, and a failed wipe revokes nothing.
+- **The generated signing key is a single row.** `client_keys` has a
+  `slot` primary key that is always `1`, next to the `kid`, private JWK and
+  `created_at`. Every instance tries to insert its own new key with
+  `ON CONFLICT (slot) DO NOTHING` and then reads `slot = 1`, so instances
+  starting together on a fresh database all use the one key that was
+  stored, and a restart never switches to another.
+- **Where the design's interfaces ended up.** Later features use these
+  names:
+  - `CurrentUser` is `auth::CurrentUser` (`crates/server/src/auth/mod.rs`),
+    with `did`, `handle` and `scopes` as designed.
+  - `LOGIN_SCOPES` is `config::LOGIN_SCOPES` (`crates/server/src/config.rs`).
+    `OAUTH_SCOPES` overrides it at run time.
+  - `user.pds_client().await?` is `user.pds_client(&state).await?`, taking
+    the `AppState`, and returns an `auth::pds::PdsClient`.
+  - `ClientKeys` is `state.oauth.key`, one `keys::EcKey` (the configured
+    `OAUTH_SIGNING_KEY` or the generated row), with its `kid` set.
+  - `AppState::db()` is the field `state.db` (an `sqlx::AnyPool`, through
+    `AppState`'s `Deref` to `Inner`).
+  - The CSRF middleware is `auth::require_csrf`, layered over the router in
+    `lib.rs`.
+  - The design's `oauth/` and `xrpc/auth.rs` modules are the single files
+    `crates/server/src/oauth.rs` and `crates/server/src/auth/routes.rs`.
+  - Test helpers: `signIn` and `signUp` are in `tests/support/auth.ts`,
+    `signInAs` in `e2e/support/auth.ts`.
 
 ## Test cases
 
@@ -1619,3 +1643,43 @@ fixes yet.
    have brought back the round 11/12 bug.
    - Fixed: a client ID with no recoverable scope list revokes the grant,
      logs, and fails the sign-in with `server_error`.
+
+### Round 14
+
+The reviewer found 0 blocking, 0 major, 3 minor and 1 nit, so the round
+isn't clean. `pnpm check` was green. Every finding was fixed after the
+review, and `pnpm check` is green again. No reviewer has seen the round 14
+fixes yet.
+
+1. **[minor] `/signin?error=__proto__` unmounted the whole app.** The
+   message lookup indexed a plain object with the URL's `error`, so
+   inherited keys matched: `__proto__` rendered `Object.prototype` as a
+   React child and threw, and `constructor` or `toString` showed an empty
+   alert.
+   - Fixed: the lookup counts only the object's own keys
+     (`Object.hasOwn`) and falls back otherwise. The new unit test
+     `web/src/routes/signin.test.tsx` checks a known code and four
+     inherited keys. No other lookup in `web/src` indexes an object
+     literal with a URL- or server-provided string unguarded: the block
+     registry, fixture markers and bindings already use `Object.hasOwn`.
+2. **[minor] Instances generating the signing key at once could each use
+   a different one.** The insert's `ON CONFLICT (kid)` used a random
+   `kid`, so it never conflicted, and an instance could read back its own
+   key before an older one landed.
+   - Fixed: `client_keys` holds one row, keyed by a `slot` that is always
+     `1`. Every instance inserts with `ON CONFLICT (slot) DO NOTHING` and
+     reads that row back. The `kid` is still stored in the row. The Rust
+     test `instances_generating_the_signing_key_at_once_agree_on_it` races
+     four calls through two pools on a fresh database and checks they agree
+     and one row exists. It failed against the old code.
+3. **[minor] The design's interfaces for later features don't exist under
+   those names**, and the build notes didn't say so.
+   - Fixed: a build-notes entry maps each one (`CurrentUser`,
+     `LOGIN_SCOPES`, `pds_client`, `ClientKeys`, `AppState::db()`, the CSRF
+     middleware, the module paths and the test helpers) to the real one.
+4. **[nit] A session check in flight during sign-out could sign the
+   header back in** with a dead CSRF token when it answered late.
+   - Fixed: `SessionProvider` keeps a generation count, bumped whenever
+     sign-out, a change or an expiry sets the session, and drops a
+     `getSession` answer that started before the latest bump. A new unit
+     test in `SessionProvider.test.tsx` covers it.

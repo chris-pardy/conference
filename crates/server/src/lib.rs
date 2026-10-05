@@ -191,6 +191,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn instances_generating_the_signing_key_at_once_agree_on_it() {
+        let dir =
+            TempDir(std::env::temp_dir().join(format!("eventside-key-{}", keys::random_token(8))));
+        let url = format!("sqlite://{}/eventside.db?mode=rwc", dir.0.display());
+        let one = db::connect(&url).await.unwrap();
+        let two = db::connect(&url).await.unwrap();
+        let (a, b, c, d) = tokio::join!(
+            oauth::signing_key(&one, None),
+            oauth::signing_key(&two, None),
+            oauth::signing_key(&one, None),
+            oauth::signing_key(&two, None),
+        );
+        let a = a.unwrap();
+        for other in [b.unwrap(), c.unwrap(), d.unwrap()] {
+            assert_eq!(other.public_jwk(), a.public_jwk());
+        }
+        let rows: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM client_keys").fetch_one(&one).await.unwrap();
+        assert_eq!(rows, 1);
+    }
+
+    #[tokio::test]
     async fn a_route_added_by_a_feature_gets_the_csrf_check() {
         let (state, _dir) = state().await;
         let cookie = session::create(

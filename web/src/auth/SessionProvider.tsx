@@ -1,17 +1,29 @@
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, connectSession, sessionLearned } from '../api'
 import { fetchSession, type Session, SessionContext } from './session'
 
 /** Loads who's signed in once, and keeps it current as the session changes. */
 export function SessionProvider({ children }: { children: ReactNode }) {
-  const [session, setSession] = useState<Session>({ kind: 'loading' })
+  const [session, setSessionState] = useState<Session>({ kind: 'loading' })
+  // Bumped whenever the session is set from something newer than a
+  // getSession already in flight (sign-out, a change or expiry api() saw),
+  // so that answer, when it lands, can't undo it.
+  const generation = useRef(0)
+  const setSession = useCallback((next: Session) => {
+    generation.current++
+    setSessionState(next)
+  }, [])
 
   useEffect(() => {
     const controller = new AbortController()
     const load = () => {
+      const started = generation.current
       fetchSession(controller.signal)
-        // Keep what's known if the appview can't be asked right now.
-        .then((next) => setSession((prev) => (next.kind === 'unavailable' && prev.kind !== 'loading' ? prev : next)))
+        .then((next) => {
+          if (generation.current !== started) return
+          // Keep what's known if the appview can't be asked right now.
+          setSessionState((prev) => (next.kind === 'unavailable' && prev.kind !== 'loading' ? prev : next))
+        })
         .catch(() => {})
     }
     load()
@@ -37,7 +49,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       expired: (handle, did) => setSession({ kind: 'expired', handle, did }),
       changed: setSession,
     })
-  }, [csrfToken, did])
+  }, [csrfToken, did, setSession])
 
   const signOut = useCallback(async () => {
     try {
@@ -59,7 +71,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }
     setSession({ kind: 'signedOut' })
     return true
-  }, [did])
+  }, [did, setSession])
 
   const value = useMemo(() => ({ session, signOut }), [session, signOut])
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>

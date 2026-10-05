@@ -19,6 +19,11 @@ const MESSAGES: Record<string, string> = {
 }
 const FALLBACK = 'Sign-in didn’t work. Please try again.'
 
+/** The message for an error code from the URL. Only the codes above count, never inherited keys like `__proto__`. */
+function messageFor(error: string): string {
+  return Object.hasOwn(MESSAGES, error) ? MESSAGES[error] : FALLBACK
+}
+
 export default function SignIn() {
   const [params] = useSearchParams()
   const returnTo = params.get('return_to') ?? '/'
@@ -36,7 +41,7 @@ export default function SignIn() {
       <p className="signin__lede">Use your atproto account, the one you use for Bluesky and other apps.</p>
       {error && (
         <p className="signin__error" role="alert">
-          {MESSAGES[error] ?? FALLBACK}
+          {messageFor(error)}
         </p>
       )}
       <form className="signin__form" onSubmit={submit}>

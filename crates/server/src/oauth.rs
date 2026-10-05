@@ -519,32 +519,30 @@ fn origin(url: &str) -> String {
 }
 
 /// The client's signing key: the configured one, or one generated once and
-/// kept in the database. Several instances racing to generate agree on the
-/// oldest.
+/// kept in the database's single `client_keys` row. Instances racing to
+/// generate it conflict on that row, and all use the one that was stored.
 pub async fn signing_key(db: &Db, configured: Option<&str>) -> Result<EcKey, String> {
     if let Some(jwk) = configured {
         let key = EcKey::from_jwk(jwk).map_err(|e| format!("OAUTH_SIGNING_KEY: {e}"))?;
         let kid = key.kid.clone().unwrap_or_else(|| "eventside-1".into());
         return Ok(key.with_kid(kid));
     }
-    let existing = || {
-        sqlx::query_as::<_, (String, String)>(
-            "SELECT kid, private_jwk FROM client_keys ORDER BY created_at, kid LIMIT 1",
-        )
-        .fetch_optional(db)
-    };
-    if existing().await.map_err(|e| e.to_string())?.is_none() {
-        let key = EcKey::generate();
-        sqlx::query("INSERT INTO client_keys (kid, private_jwk, created_at) VALUES ($1, $2, $3) ON CONFLICT (kid) DO NOTHING")
-            .bind(random_token(12))
-            .bind(key.private_jwk())
-            .bind(now_ms())
-            .execute(db)
-            .await
-            .map_err(|e| format!("could not store the signing key: {e}"))?;
-    }
-    let (kid, jwk) =
-        existing().await.map_err(|e| e.to_string())?.ok_or("the signing key vanished")?;
+    let key = EcKey::generate();
+    sqlx::query(
+        "INSERT INTO client_keys (slot, kid, private_jwk, created_at) VALUES (1, $1, $2, $3) ON CONFLICT (slot) DO NOTHING",
+    )
+    .bind(random_token(12))
+    .bind(key.private_jwk())
+    .bind(now_ms())
+    .execute(db)
+    .await
+    .map_err(|e| format!("could not store the signing key: {e}"))?;
+    let (kid, jwk) = sqlx::query_as::<_, (String, String)>(
+        "SELECT kid, private_jwk FROM client_keys WHERE slot = 1",
+    )
+    .fetch_one(db)
+    .await
+    .map_err(|e| format!("could not read the signing key: {e}"))?;
     Ok(EcKey::from_jwk(&jwk)?.with_kid(kid))
 }
 
