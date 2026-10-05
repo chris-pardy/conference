@@ -1,6 +1,7 @@
 // The fetch every feature uses to talk to the appview. It sends the session's
 // CSRF token on state-changing requests, and reports an ended session to the
-// SessionProvider so the shell can offer to sign the person back in.
+// SessionProvider so the shell can offer to sign the person back in, or show
+// the signed-out state when the session was signed out elsewhere.
 
 import { fetchSession, type Session } from './auth/session'
 
@@ -75,6 +76,8 @@ export async function api(input: string, init: RequestInit = {}): Promise<Respon
   if (res.status === 401) {
     const body = await errorOf(res)
     if (body.error === 'SessionExpired') connection?.expired(body.handle, body.did)
+    // Signed out elsewhere, e.g. in another window.
+    else if (body.error === 'AuthRequired') connection?.changed({ kind: 'signedOut' })
   }
   return res
 }

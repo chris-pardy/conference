@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use axum::extract::{Query, State};
+use axum::extract::{Query, RawQuery, State};
 use axum::http::header::{CACHE_CONTROL, LOCATION, SET_COOKIE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -17,7 +17,7 @@ use crate::AppState;
 use crate::db::now_ms;
 use crate::identity::{IdentityError, is_valid_did, normalize_handle};
 use crate::keys::{EcKey, random_token, sha256_b64};
-use crate::oauth::{AuthServer, OAuthError, ParRequest};
+use crate::oauth::{self, AuthServer, OAuthError, ParRequest};
 
 /// How long sign-out waits for revocation before answering.
 const REVOKE_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
@@ -28,9 +28,10 @@ const PENDING_MS: i64 = 10 * 60 * 1000;
 type Params = Query<HashMap<String, String>>;
 
 /// The client metadata at a client ID: the bare URL, or `?scope=…` for
-/// another scope list (see `OAuthClient::metadata`).
-pub async fn client_metadata(State(state): State<AppState>, Query(params): Params) -> Response {
-    match state.oauth.metadata(params.get("scope").map(String::as_str)) {
+/// another scope list, exactly as the client ID spells it (see
+/// `OAuthClient::metadata`).
+pub async fn client_metadata(State(state): State<AppState>, RawQuery(query): RawQuery) -> Response {
+    match state.oauth.metadata(query.as_deref()) {
         Some(metadata) => Json(metadata).into_response(),
         None => StatusCode::NOT_FOUND.into_response(),
     }
@@ -322,9 +323,14 @@ async fn complete(
             return Err("issuer_mismatch");
         }
     }
+    // The grant is checked against the scopes this request was pushed with,
+    // not this instance's: during a rolling deploy another instance may have
+    // pushed it. If this instance asks for more, `session::outdated` sends
+    // the person back through sign-in on their next request here.
     let scopes = tokens.scope.clone().unwrap_or_default();
     let granted: Vec<&str> = scopes.split_whitespace().collect();
-    if state.config.scopes.iter().any(|s| !granted.contains(&s.as_str())) {
+    let asked = oauth::client_scopes(client_id).unwrap_or_else(|| state.config.scopes.clone());
+    if asked.iter().any(|s| !granted.contains(&s.as_str())) {
         revoke().await;
         return Err("scope_missing");
     }

@@ -42,12 +42,19 @@ impl Config {
             None => Ok(default),
         };
         let scopes = scopes(var("OAUTH_SCOPES").as_deref())?;
+        let public_url = var("PUBLIC_URL").map(|u| public_url(&u)).transpose()?;
+        let database_url =
+            var("DATABASE_URL").unwrap_or_else(|| "sqlite://data/eventside.db?mode=rwc".into());
+        crate::db::check_url(&database_url)?;
+        let signing_key = var("OAUTH_SIGNING_KEY");
+        if let Some(jwk) = &signing_key {
+            crate::keys::EcKey::from_jwk(jwk).map_err(|e| format!("OAUTH_SIGNING_KEY: {e}"))?;
+        }
         Ok(Self {
             port,
-            public_url: var("PUBLIC_URL").map(|u| trim_url(&u)),
-            database_url: var("DATABASE_URL")
-                .unwrap_or_else(|| "sqlite://data/eventside.db?mode=rwc".into()),
-            signing_key: var("OAUTH_SIGNING_KEY"),
+            public_url,
+            database_url,
+            signing_key,
             scopes,
             signup_pds_url: trim_url(&var("SIGNUP_PDS_URL").unwrap_or_else(|| atproto_url.clone())),
             plc_url: trim_url(&var("PLC_URL").unwrap_or_else(|| atproto_url.clone())),
@@ -81,6 +88,23 @@ fn scopes(value: Option<&str>) -> Result<Vec<String>, String> {
     match crate::oauth::scope_problem(&scopes.join(" ")) {
         None => Ok(scopes),
         Some(problem) => Err(format!("OAUTH_SCOPES {problem}")),
+    }
+}
+
+/// `PUBLIC_URL`, which must be a bare `http` or `https` origin: the client
+/// ID, redirect URI, cookies and every same-origin check are built on it.
+fn public_url(value: &str) -> Result<String, String> {
+    let url = trim_url(value);
+    let origin = url::Url::parse(&url)
+        .ok()
+        .filter(|u| matches!(u.scheme(), "http" | "https"))
+        .map(|u| u.origin().ascii_serialization());
+    if origin.as_deref() == Some(url.as_str()) {
+        Ok(url)
+    } else {
+        Err(format!(
+            "PUBLIC_URL must be a bare origin like https://app.example (no path, query or default port), not {value:?}"
+        ))
     }
 }
 
@@ -145,6 +169,22 @@ mod tests {
         assert!(scopes(Some("atproto \"quoted\"")).is_err());
         let long = format!("atproto {}", "x".repeat(2048));
         assert!(scopes(Some(&long)).unwrap_err().contains("2048"));
+    }
+
+    #[test]
+    fn the_public_url_is_a_bare_origin() {
+        assert_eq!(public_url("https://app.example/"), Ok("https://app.example".to_owned()));
+        assert_eq!(public_url("http://127.0.0.1:5173"), Ok("http://127.0.0.1:5173".to_owned()));
+        for refused in [
+            "https://app.example/eventside",
+            "app.example",
+            "127.0.0.1:5173",
+            "ftp://app.example",
+            "https://app.example?x=1",
+            "https://app.example:443",
+        ] {
+            assert!(public_url(refused).is_err(), "{refused}");
+        }
     }
 
     #[test]

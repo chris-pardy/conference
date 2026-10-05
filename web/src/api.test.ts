@@ -53,3 +53,16 @@ test('a stale CSRF token is not retried for a different account', async () => {
   expect(sent).toEqual(['old'])
   expect(changed).toHaveBeenCalledWith({ kind: 'signedIn', user: user('did:plc:bob', 'new') })
 })
+
+test('a request refused as signed out shows the signed-out state', async () => {
+  const changed = connect('did:plc:alice', 'token')
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => Response.json({ error: 'AuthRequired', message: 'Sign in to continue.' }, { status: 401 })),
+  )
+
+  const res = await api('/xrpc/app.eventside.example', { method: 'POST' })
+
+  expect(res.status).toBe(401)
+  expect(changed).toHaveBeenCalledWith({ kind: 'signedOut' })
+})

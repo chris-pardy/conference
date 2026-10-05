@@ -30,9 +30,11 @@ export function useSession(): SessionContextValue {
 export const GET_SESSION = '/xrpc/app.eventside.auth.getSession'
 
 /**
- * Reads who's signed in. Only the appview's own answer decides: a network
- * error or a 5xx reads as `unavailable`, never as signed out. Throws only
- * when aborted.
+ * Reads who's signed in. Only the appview's own answer decides: its 401
+ * `AuthRequired` is signed out and its 401 `SessionExpired` is expired.
+ * Anything else (a network error, a 5xx, or another status such as a
+ * proxy's 429 or 408) reads as `unavailable`, never as signed out. Throws
+ * only when aborted.
  */
 export async function fetchSession(signal?: AbortSignal): Promise<Session> {
   let res: Response
@@ -49,11 +51,11 @@ export async function fetchSession(signal?: AbortSignal): Promise<Session> {
       return { kind: 'unavailable' }
     }
   }
-  if (res.status >= 500) return { kind: 'unavailable' }
+  if (res.status !== 401) return { kind: 'unavailable' }
   const body = await res.json().catch(() => ({}))
-  if (res.status === 401 && body.error === 'SessionExpired')
-    return { kind: 'expired', handle: body.handle, did: body.did }
-  return { kind: 'signedOut' }
+  if (body.error === 'SessionExpired') return { kind: 'expired', handle: body.handle, did: body.did }
+  if (body.error === 'AuthRequired') return { kind: 'signedOut' }
+  return { kind: 'unavailable' }
 }
 
 /** Who to sign back in after a session expired: the handle, or the DID when the handle didn't verify. */

@@ -727,12 +727,21 @@ Where the build refined the approved design:
   instance answers. A session (`sessions.client_id`) keeps that client ID,
   and every refresh and revocation, from any instance, is made as it. So
   instances on different scope lists, sharing one database during a
-  rolling deploy, never use each other's grants as the wrong client.
+  rolling deploy, never use each other's grants as the wrong client. The
+  callback checks the grant against the scopes that client ID names (the
+  ones the request was pushed with), not the answering instance's list. If
+  that instance asks for more, `session::outdated` sends the person back
+  through sign-in on their next request to it.
 - **The metadata route serves any well-formed scope list.**
   `/oauth-client-metadata.json` is `atproto` alone; `?scope=S` is served
   for any list of RFC 6749 scope tokens that includes `atproto`, has no
   duplicates and is at most 2 KB, and describes the client ID that is that
-  exact URL (`?scope=atproto` and malformed lists are `404`). The server
+  exact URL. Only the exact spelling a client ID uses is served: the raw
+  query must be `scope=` and the list percent-encoded as the client ID
+  encodes it. `?scope=atproto`, malformed lists, other encodings (`+`,
+  lowercase hex, unencoded `:`) and extra or repeated parameters are
+  `404`, so a served document's `client_id` is always the URL it was
+  fetched from. The server
   refuses to start (exit 2) if `OAUTH_SCOPES` fails that check, so its own
   list is always one the route serves. A grant from
   another instance's scope list may make the authorization server fetch
@@ -762,6 +771,18 @@ Where the build refined the approved design:
   its cookie for the PWA to hear `SessionExpired`. An ended row is kept for
   the idle timeout plus 30 days after it ended, which is never before its
   cookie runs out.
+- **Bad settings exit 2, before anything starts.** `Config::from_env`
+  checks `PUBLIC_URL` (a bare `http` or `https` origin, the rule issuers
+  follow: no path, query or default port, since the client ID, redirect
+  URI, cookies and same-origin checks are built on it), `DATABASE_URL`
+  (a supported scheme, and not in-memory SQLite) and `OAUTH_SIGNING_KEY`
+  (a P-256 private JWK). A database that can't be reached or migrated
+  still exits 1.
+- **The PWA reads only the appview's own refusals as signed out.**
+  `fetchSession` is signed out for a 401 `AuthRequired` and expired for a
+  401 `SessionExpired`; any other status (a proxy's 429 or 408, say) is
+  `unavailable`. `api()` shows the signed-out state when a request is
+  refused with `AuthRequired`, as after a sign-out in another window.
 - **The default database** is `sqlite://data/eventside.db?mode=rwc`,
   relative to the working directory. `data/` is git-ignored.
 - **In-memory SQLite is refused.** sqlx shares an in-memory database
@@ -1497,3 +1518,51 @@ fixes yet.
      in `oauth.rs` and `config.rs` cover it.
 
 **Decision (2026-10-05):** the user allowed up to 15 review rounds for this build.
+
+### Round 12
+
+The reviewer found 0 blocking, 0 major, 3 minor and 3 nits, so the round
+isn't clean. `pnpm check` was green. Every finding was fixed after the
+review, and `pnpm check` is green again. No reviewer has seen the round 12
+fixes yet.
+
+1. **[minor] The callback checked the grant against the answering
+   instance's scope list, not the one the request was pushed with.**
+   During a rolling deploy, a sign-in pushed by an `atproto` instance and
+   answered by one asking for more was revoked and sent to
+   `scope_missing`, though the person granted everything asked.
+   - Fixed: `oauth::client_scopes` recovers the scope list from the
+     pending request's client ID, and the callback checks the grant
+     against it. If the answering instance asks for more,
+     `session::outdated` sends the person back through sign-in on their
+     next request. No schema change was needed. A Rust unit test covers
+     `client_scopes`, and an integration test pushes on one instance,
+     answers the callback on another with a grown list, and sees no error
+     and then `SessionExpired`.
+2. **[minor] `api()` ignored a 401 `AuthRequired`.** After a sign-out in
+   another window, a refused request left the shell showing the person
+   signed in.
+   - Fixed: `api()` reports `AuthRequired` to the `SessionProvider` as
+     signed out. A unit test sits next to the CSRF retry tests.
+3. **[minor] `PUBLIC_URL` wasn't checked.** A value with a path published
+   a client ID and redirect URI the routes don't serve, and a scheme-less
+   one started with non-`Secure` cookies and an unusable client ID.
+   - Fixed: `Config::from_env` requires a bare `http` or `https` origin
+     (the rule `bare_origin` uses) and exits 2 otherwise. A trailing slash
+     is still trimmed. Unit and integration tests cover it.
+4. **[nit] The metadata route served documents whose `client_id` wasn't
+   the fetched URL** (`+` for spaces, extra or repeated parameters).
+   - Fixed: the route reads the raw query and serves only the exact
+     spelling `client_id` produces. The bare URL and the canonical
+     `?scope=…` URL still answer 200. Unit and integration tests cover
+     both sides.
+5. **[nit] Config errors found in `AppState::build` exited 1, others 2.**
+   - Fixed: `DATABASE_URL` (scheme, in-memory SQLite) and
+     `OAUTH_SIGNING_KEY` are checked in `Config::from_env`, so they exit 2.
+     `db::connect` still runs the same check for a `Config` built
+     directly. An integration test checks the exit codes.
+6. **[nit] `fetchSession` read any 4xx other than `SessionExpired` as
+   signed out**, so a proxy's 429 or 408 showed "Sign in" to a signed-in
+   person.
+   - Fixed: only a 401 `AuthRequired` is signed out. Every other status is
+     `unavailable`. A unit test covers both.

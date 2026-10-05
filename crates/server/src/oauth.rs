@@ -113,9 +113,11 @@ impl OAuthClient {
         })
     }
 
-    /// The metadata document served at a client ID, given the `scope` query
-    /// parameter it was asked for with (none for the bare URL, which is
-    /// `atproto` alone).
+    /// The metadata document served at a client ID, given the raw query
+    /// string it was fetched with (none for the bare URL, which is `atproto`
+    /// alone). Only the exact URL that is a client ID is served: `scope=`
+    /// and the list encoded as `client_id` encodes it, nothing else, so the
+    /// document's `client_id` is always the URL it was fetched from.
     ///
     /// Not only this instance's own scope list is served: a grant issued
     /// under another list (by an instance on another version, during a
@@ -124,15 +126,12 @@ impl OAuthClient {
     /// well-formed list is served, at the URL that is its client ID. That
     /// grants nothing: the client is confidential, so every request as any
     /// of these client IDs needs an assertion signed with this client's key.
-    pub fn metadata(&self, query_scope: Option<&str>) -> Option<Value> {
-        let scope = match query_scope {
-            None => "atproto",
-            // `atproto` alone is the bare URL's; another URL for it would
-            // name a different client ID than the one it describes. This
-            // instance's own list is well formed: `new` checks it.
-            Some(scope) if scope != "atproto" && well_formed_scope(scope) => scope,
-            Some(_) => return None,
+    pub fn metadata(&self, query: Option<&str>) -> Option<Value> {
+        let scope = match query {
+            None => "atproto".to_owned(),
+            Some(query) => scope_of_query(query)?,
         };
+        let scope = scope.as_str();
         Some(json!({
             "client_id": client_id(&self.public_url, scope),
             "client_name": "Eventside",
@@ -443,14 +442,43 @@ pub struct ParRequest<'a> {
 /// ID, which changes exactly when the list does.
 fn client_id(public_url: &str, scope: &str) -> String {
     let base = format!("{public_url}/oauth-client-metadata.json");
-    if scope == "atproto" {
-        base
-    } else {
-        format!(
-            "{base}?scope={}",
-            percent_encoding::utf8_percent_encode(scope, percent_encoding::NON_ALPHANUMERIC)
-        )
+    if scope == "atproto" { base } else { format!("{base}?{}", scope_query(scope)) }
+}
+
+/// The query string a client ID carries for a scope list other than `atproto`.
+fn scope_query(scope: &str) -> String {
+    format!(
+        "scope={}",
+        percent_encoding::utf8_percent_encode(scope, percent_encoding::NON_ALPHANUMERIC)
+    )
+}
+
+/// The scope list a client ID's query string names, if it is exactly the
+/// query `client_id` builds for a well-formed list other than `atproto`.
+fn scope_of_query(query: &str) -> Option<String> {
+    let encoded = query.strip_prefix("scope=")?;
+    let scope = percent_encoding::percent_decode_str(encoded).decode_utf8().ok()?.into_owned();
+    (scope != "atproto" && well_formed_scope(&scope) && scope_query(&scope) == query)
+        .then_some(scope)
+}
+
+/// The scopes a client ID of this app asks for: `atproto` for the bare
+/// metadata URL, or the list its query names. A pending sign-in's grant is
+/// checked against these, the scopes its request was pushed with, whichever
+/// instance answers the callback. `None` for anything else.
+pub fn client_scopes(client_id: &str) -> Option<Vec<String>> {
+    let (url, query) = match client_id.split_once('?') {
+        Some((url, query)) => (url, Some(query)),
+        None => (client_id, None),
+    };
+    if !url.ends_with("/oauth-client-metadata.json") {
+        return None;
     }
+    let scope = match query {
+        None => "atproto".to_owned(),
+        Some(query) => scope_of_query(query)?,
+    };
+    Some(scope.split(' ').map(str::to_owned).collect())
 }
 
 /// Whether a scope list is well formed: RFC 6749 scope tokens separated by
@@ -548,25 +576,47 @@ mod tests {
         let bare = client.metadata(None).unwrap();
         assert_eq!(bare["client_id"], client.client_id);
         assert_eq!(bare["scope"], "atproto");
-        // Another instance's list, during a rolling deploy.
-        let grown = client.metadata(Some("atproto transition:generic")).unwrap();
-        assert_eq!(
-            grown["client_id"],
-            client_id("https://app.example", "atproto transition:generic")
-        );
+        // Another instance's list, during a rolling deploy, at exactly its client ID.
+        let grown_id = client_id("https://app.example", "atproto transition:generic");
+        let query = grown_id.split_once('?').unwrap().1;
+        assert_eq!(query, "scope=atproto%20transition%3Ageneric");
+        let grown = client.metadata(Some(query)).unwrap();
+        assert_eq!(grown["client_id"], grown_id);
         assert_eq!(grown["scope"], "atproto transition:generic");
         for refused in [
-            "atproto",
+            "scope=atproto",
             "",
-            "transition:generic",
-            "atproto  transition:generic",
-            " atproto",
-            "atproto atproto",
-            "atproto \"quoted\"",
+            "scope=",
+            "scope=transition%3Ageneric",
+            "scope=atproto%20%20transition%3Ageneric",
+            "scope=%20atproto",
+            "scope=atproto%20atproto",
+            "scope=atproto%20%22quoted%22",
+            // Other spellings of a served list name other client IDs.
+            "scope=atproto+transition:generic",
+            "scope=atproto%20transition:generic",
+            "scope=atproto%20transition%3ageneric",
+            "scope=atproto%20transition%3Ageneric&x=1",
+            "x=1&scope=atproto%20transition%3Ageneric",
+            "scope=atproto%20transition%3Ageneric&scope=atproto",
         ] {
             assert!(client.metadata(Some(refused)).is_none(), "{refused:?}");
         }
-        assert!(client.metadata(Some(&format!("atproto {}", "x".repeat(2048)))).is_none());
+        let long = scope_query(&format!("atproto {}", "x".repeat(2048)));
+        assert!(client.metadata(Some(&long)).is_none());
+    }
+
+    #[test]
+    fn a_client_id_names_the_scopes_it_asks_for() {
+        let bare = client_id("https://app.example", "atproto");
+        assert_eq!(client_scopes(&bare), Some(vec!["atproto".to_owned()]));
+        let grown = client_id("https://app.example", "atproto transition:generic");
+        assert_eq!(
+            client_scopes(&grown),
+            Some(vec!["atproto".to_owned(), "transition:generic".to_owned()])
+        );
+        assert_eq!(client_scopes("https://app.example/other.json"), None);
+        assert_eq!(client_scopes(&format!("{bare}?scope=atproto")), None);
     }
 
     #[test]

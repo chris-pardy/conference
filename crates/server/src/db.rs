@@ -37,9 +37,22 @@ impl Backend {
     }
 }
 
+/// The backend a `DATABASE_URL` names, if the server can use it: Postgres,
+/// or SQLite in a file. Startup checks it before anything else.
+pub fn check_url(url: &str) -> Result<Backend, String> {
+    let backend = Backend::of(url)?;
+    if backend == Backend::Sqlite && sqlite_in_memory(url) {
+        return Err(
+            "DATABASE_URL must name a SQLite file by its path, like sqlite://data/eventside.db?mode=rwc: an in-memory database is lost, with every session and the signing key, whenever its connections close"
+                .to_owned(),
+        );
+    }
+    Ok(backend)
+}
+
 /// Connects to the database and brings its schema up to date.
 pub async fn connect(url: &str) -> Result<Db, String> {
-    let backend = Backend::of(url)?;
+    let backend = check_url(url)?;
     if backend == Backend::Sqlite {
         ensure_sqlite_dir(url)?;
     }
@@ -65,26 +78,29 @@ pub async fn connect(url: &str) -> Result<Db, String> {
     Ok(pool)
 }
 
-/// SQLite creates the file but not its directory. An in-memory database is
-/// refused: sqlx shares one between the pool's connections, but it vanishes
+/// Whether a SQLite URL names an in-memory database, which is refused: sqlx shares one between the pool's connections, but it vanishes
 /// when they all close (the pool closes idle ones), taking every session and
 /// the generated signing key with it. `file:` URIs are refused too, since
 /// SQLite reads their own parameters (`file::memory:`, `?mode=memory`), and a
 /// plain path names every real file.
-fn ensure_sqlite_dir(url: &str) -> Result<(), String> {
-    let rest = url.trim_start_matches("sqlite:").trim_start_matches("//");
-    let (path, query) = rest.split_once('?').unwrap_or((rest, ""));
-    let in_memory = path.is_empty()
+fn sqlite_in_memory(url: &str) -> bool {
+    let (path, query) = sqlite_path(url);
+    path.is_empty()
         || path.contains(":memory:")
         || path.starts_with("file:")
         || url::form_urlencoded::parse(query.as_bytes())
-            .any(|(k, v)| (k == "mode" && v == "memory") || (k == "vfs" && v == "memdb"));
-    if in_memory {
-        return Err(
-            "DATABASE_URL must name a SQLite file by its path, like sqlite://data/eventside.db?mode=rwc: an in-memory database is lost, with every session and the signing key, whenever its connections close"
-                .to_owned(),
-        );
-    }
+            .any(|(k, v)| (k == "mode" && v == "memory") || (k == "vfs" && v == "memdb"))
+}
+
+/// A SQLite URL's path and query.
+fn sqlite_path(url: &str) -> (&str, &str) {
+    let rest = url.trim_start_matches("sqlite:").trim_start_matches("//");
+    rest.split_once('?').unwrap_or((rest, ""))
+}
+
+/// SQLite creates the file but not its directory.
+fn ensure_sqlite_dir(url: &str) -> Result<(), String> {
+    let (path, _) = sqlite_path(url);
     match std::path::Path::new(path).parent() {
         Some(dir) if !dir.as_os_str().is_empty() => std::fs::create_dir_all(dir)
             .map_err(|e| format!("could not create the database directory {}: {e}", dir.display())),
@@ -127,7 +143,8 @@ mod tests {
             "sqlite://data/x.db?mode=rwc&vfs=%6Demdb",
             "sqlite://data/x.db?mode=%6Demory",
         ] {
-            assert!(ensure_sqlite_dir(url).is_err(), "{url}");
+            assert!(check_url(url).is_err(), "{url}");
         }
+        assert_eq!(check_url("sqlite://data/x.db?mode=rwc"), Ok(Backend::Sqlite));
     }
 }
