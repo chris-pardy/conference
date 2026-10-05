@@ -71,8 +71,8 @@ async fn refresh_leased(state: &AppState, id_hash: &str) -> Renewal {
         Ok(None) => return Renewal::Failed("the session is gone".into()),
         Err(err) => return Renewal::Failed(err.to_string()),
     };
-    // Granted under an older scope list (and client ID): the person signs in
-    // again rather than renewing a grant the server no longer asks for.
+    // Missing a scope this instance asks for: the person signs in again
+    // rather than renewing a grant that's no longer enough.
     if session::outdated(state, &row) {
         return match session::end_revoking(state, &row).await {
             Ok(()) => Renewal::Ended,
@@ -90,11 +90,11 @@ async fn refresh_leased(state: &AppState, id_hash: &str) -> Renewal {
         Ok(server) => server,
         Err(why) => return Renewal::Failed(why),
     };
-    match state.oauth.refresh(&server, old, &key).await {
+    match state.oauth.refresh(&server, &row.client_id, old, &key).await {
         // Tokens for someone else are a refused grant, not a renewal.
         Ok(tokens) if tokens.sub.as_deref() != Some(row.did.as_str()) => {
             eprintln!("renewal: a refresh for {} came back for {:?}", row.did, tokens.sub);
-            revoke_unsaved(state, &server, &tokens, &key).await;
+            revoke_unsaved(state, &server, &row.client_id, &tokens, &key).await;
             match session::wipe(&state.db, id_hash).await {
                 Ok(()) => Renewal::Ended,
                 Err(err) => Renewal::Failed(err.to_string()),
@@ -118,11 +118,11 @@ async fn refresh_leased(state: &AppState, id_hash: &str) -> Renewal {
                 Ok(done) if done.rows_affected() == 1 => Renewal::Renewed,
                 // Signed out or ended mid-refresh: nothing holds the new grant, so revoke it.
                 Ok(_) => {
-                    revoke_unsaved(state, &server, &tokens, &key).await;
+                    revoke_unsaved(state, &server, &row.client_id, &tokens, &key).await;
                     Renewal::Ended
                 }
                 Err(err) => {
-                    revoke_unsaved(state, &server, &tokens, &key).await;
+                    revoke_unsaved(state, &server, &row.client_id, &tokens, &key).await;
                     Renewal::Failed(format!("could not save renewed tokens: {err}"))
                 }
             }
@@ -154,9 +154,15 @@ async fn refresh_leased(state: &AppState, id_hash: &str) -> Renewal {
 }
 
 /// Revokes a refreshed grant that no session will hold.
-async fn revoke_unsaved(state: &AppState, server: &AuthServer, tokens: &TokenSet, key: &EcKey) {
+async fn revoke_unsaved(
+    state: &AppState,
+    server: &AuthServer,
+    client_id: &str,
+    tokens: &TokenSet,
+    key: &EcKey,
+) {
     if let Some(refresh) = &tokens.refresh_token
-        && let Err(err) = state.oauth.revoke(server, refresh, key).await
+        && let Err(err) = state.oauth.revoke(server, client_id, refresh, key).await
     {
         eprintln!("renewal: could not revoke an unsaved grant: {err}");
     }

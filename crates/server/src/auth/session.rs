@@ -28,8 +28,8 @@ pub struct SessionRow {
     pub refresh_token: Option<String>,
     pub token_expires_at: Option<i64>,
     pub scopes: String,
-    /// The client the grant was issued to; `None` for the current one.
-    pub client_id: Option<String>,
+    /// The client ID the grant was issued to, which refreshes and revokes it.
+    pub client_id: String,
     pub csrf_token: String,
     pub last_seen_at: i64,
     pub ended_at: Option<i64>,
@@ -48,7 +48,7 @@ const COLUMNS: &str = "id_hash, did, handle, display_name, avatar, pds, dpop_key
 pub enum Lookup {
     /// No cookie, or one that names no session.
     None,
-    /// The session ended (idle, refused refresh, or scopes that grew).
+    /// The session ended (idle, refused refresh, or a scope it lacks).
     Expired(SessionRow),
     Live(SessionRow),
 }
@@ -126,35 +126,31 @@ pub async fn lookup(state: &AppState, headers: &HeaderMap) -> Result<Lookup, sql
     Ok(Lookup::Live(row))
 }
 
-/// Records use of a session, at most every so often. Returns whether it did.
-/// `getSession`, which the PWA calls on every load, renews the cookie then;
-/// other routes only move `last_seen_at`.
-pub async fn touch(state: &AppState, row: &SessionRow) -> Result<bool, sqlx::Error> {
+/// Records use of a session, at most every so often. (`getSession`, which
+/// the PWA calls on every load, also renews the cookie each time.)
+pub async fn touch(state: &AppState, row: &SessionRow) -> Result<(), sqlx::Error> {
     // At most hourly, or more often for idle timeouts short enough to need it.
     let every = (ms(state.config.session_idle_timeout) / 10).clamp(100, 60 * 60 * 1000);
     let now = now_ms();
     if now - row.last_seen_at < every {
-        return Ok(false);
+        return Ok(());
     }
     sqlx::query("UPDATE sessions SET last_seen_at = $1 WHERE id_hash = $2 AND ended_at IS NULL")
         .bind(now)
         .bind(&row.id_hash)
         .execute(&state.db)
         .await?;
-    Ok(true)
+    Ok(())
 }
 
 /// Whether a session's grant is outdated, so the person signs in again: it
-/// lacks a scope the server now asks for at sign-in, or it was issued to an
-/// earlier client ID (the scope list changed in any way). An earlier client's
-/// grant can't be refreshed, or revoked, as the current client.
+/// lacks a scope this instance asks for at sign-in. Nothing else counts: a
+/// grant with more scopes, or issued to another client ID (another scope
+/// list, e.g. from an instance on another version during a rolling deploy),
+/// is still good, and is refreshed and revoked as its own client ID.
 pub fn outdated(state: &AppState, row: &SessionRow) -> bool {
     let granted: Vec<&str> = row.scopes.split_whitespace().collect();
-    state.config.scopes.iter().any(|s| !granted.contains(&s.as_str())) || another_client(state, row)
-}
-
-fn another_client(state: &AppState, row: &SessionRow) -> bool {
-    row.client_id.as_deref().is_some_and(|id| id != state.oauth.client_id)
+    state.config.scopes.iter().any(|s| !granted.contains(&s.as_str()))
 }
 
 /// Ends a session: its grant is revoked in the background, and its tokens and
@@ -191,27 +187,24 @@ pub async fn end_revoking(state: &AppState, row: &SessionRow) -> Result<(), sqlx
     wiped
 }
 
-/// Revokes a session's grant at its authorization server, best effort. A
-/// grant issued to an earlier client ID is left to expire: the server would
-/// refuse to revoke it for another client. An unreachable server is marked
-/// down, which the renewer heeds.
+/// Revokes a session's grant at its authorization server, as the client ID
+/// it was issued to, best effort. An unreachable server is marked down,
+/// which the renewer heeds.
 pub async fn revoke(state: &AppState, row: &SessionRow) {
     let (Some(issuer), Some(refresh), Some(key)) = (&row.issuer, &row.refresh_token, &row.dpop_key)
     else {
         return;
     };
-    if another_client(state, row) {
-        eprintln!("not revoking {}'s grant: it was issued to an earlier client ID", row.did);
-        return;
-    }
     let Ok(key) = EcKey::from_jwk(key) else { return };
     let result = match state.oauth.cached_auth_server(issuer).await {
-        Ok(server) => state.oauth.revoke(&server, refresh, &key).await.map_err(|e| {
-            if matches!(e, crate::oauth::OAuthError::Unavailable(_)) {
-                state.oauth.mark_down(issuer);
-            }
-            e.to_string()
-        }),
+        Ok(server) => {
+            state.oauth.revoke(&server, &row.client_id, refresh, &key).await.map_err(|e| {
+                if matches!(e, crate::oauth::OAuthError::Unavailable(_)) {
+                    state.oauth.mark_down(issuer);
+                }
+                e.to_string()
+            })
+        }
         Err(why) => Err(why),
     };
     if let Err(why) = result {

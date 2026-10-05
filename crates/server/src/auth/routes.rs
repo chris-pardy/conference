@@ -27,8 +27,13 @@ const PENDING_MS: i64 = 10 * 60 * 1000;
 
 type Params = Query<HashMap<String, String>>;
 
-pub async fn client_metadata(State(state): State<AppState>) -> Json<Value> {
-    Json(state.oauth.metadata())
+/// The client metadata at a client ID: the bare URL, or `?scope=…` for
+/// another scope list (see `OAuthClient::metadata`).
+pub async fn client_metadata(State(state): State<AppState>, Query(params): Params) -> Response {
+    match state.oauth.metadata(params.get("scope").map(String::as_str)) {
+        Some(metadata) => Json(metadata).into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
 }
 
 pub async fn jwks(State(state): State<AppState>) -> Json<Value> {
@@ -156,13 +161,16 @@ async fn start(
         }
     };
     // `kind` (login or signup) is diagnostic only, for reading the table:
-    // the callback treats both flows alike.
+    // the callback treats both flows alike. The client ID is the one `par`
+    // pushed the request as; the callback redeems the code as it, whichever
+    // instance (and scope list) answers.
     let stored = sqlx::query(
-        "INSERT INTO oauth_requests (state, kind, pkce_verifier, dpop_key, issuer, expected_did, preauth_hash, \
-         return_to, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+        "INSERT INTO oauth_requests (state, kind, client_id, pkce_verifier, dpop_key, issuer, expected_did, \
+         preauth_hash, return_to, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
     )
     .bind(&request_state)
     .bind(flow)
+    .bind(&state.oauth.client_id)
     .bind(&verifier)
     .bind(dpop_key.private_jwk())
     .bind(&server.issuer)
@@ -181,6 +189,7 @@ async fn start(
 
 #[derive(sqlx::FromRow)]
 struct Pending {
+    client_id: String,
     pkce_verifier: String,
     dpop_key: String,
     issuer: String,
@@ -205,7 +214,7 @@ pub async fn callback(
 
     // Consume the pending request: whoever deletes it is the only one to use it.
     let pending = sqlx::query_as::<_, Pending>(
-        "SELECT pkce_verifier, dpop_key, issuer, expected_did, preauth_hash, return_to, expires_at \
+        "SELECT client_id, pkce_verifier, dpop_key, issuer, expected_did, preauth_hash, return_to, expires_at \
          FROM oauth_requests WHERE state = $1",
     )
     .bind(request_state)
@@ -264,19 +273,21 @@ async fn complete(
         eprintln!("callback: {why}");
         "server_unavailable"
     })?;
-    let tokens =
-        state.oauth.exchange_code(&server, code, &pending.pkce_verifier, &dpop_key).await.map_err(
-            |err| {
-                eprintln!("callback: token exchange failed: {err}");
-                match err {
-                    OAuthError::Unavailable(_) => "server_unavailable",
-                    _ => "authorization_failed",
-                }
-            },
-        )?;
+    let client_id = pending.client_id.as_str();
+    let tokens = state
+        .oauth
+        .exchange_code(&server, client_id, code, &pending.pkce_verifier, &dpop_key)
+        .await
+        .map_err(|err| {
+            eprintln!("callback: token exchange failed: {err}");
+            match err {
+                OAuthError::Unavailable(_) => "server_unavailable",
+                _ => "authorization_failed",
+            }
+        })?;
     let revoke = || async {
         if let Some(refresh) = &tokens.refresh_token
-            && let Err(err) = state.oauth.revoke(&server, refresh, &dpop_key).await
+            && let Err(err) = state.oauth.revoke(&server, client_id, refresh, &dpop_key).await
         {
             eprintln!("callback: could not revoke an unused grant: {err}");
         }
@@ -333,7 +344,7 @@ async fn complete(
             refresh_token: tokens.refresh_token.as_deref(),
             token_expires_at: tokens.expires_at(now_ms()),
             scopes: &scopes,
-            client_id: &state.oauth.client_id,
+            client_id,
         },
     )
     .await;
@@ -479,10 +490,9 @@ pub async fn get_session(State(state): State<AppState>, headers: HeaderMap) -> R
             );
         }
     };
-    let touched = session::touch(&state, &row).await.unwrap_or_else(|err| {
+    if let Err(err) = session::touch(&state, &row).await {
         eprintln!("getSession: could not record use: {err}");
-        false
-    });
+    }
     let mut body = json!({
         "did": row.did,
         "handle": row.handle,
@@ -497,9 +507,10 @@ pub async fn get_session(State(state): State<AppState>, headers: HeaderMap) -> R
     }
     let mut res = Json(body).into_response();
     res.headers_mut().insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
-    // Using the session keeps its cookie alive too.
-    if touched
-        && let Some(cookie) = cookies::session(&headers, state.secure_cookies())
+    // Using the session keeps its cookie alive too: renewed on every answer,
+    // not only when `last_seen_at` moves, since other routes move that
+    // without renewing the cookie.
+    if let Some(cookie) = cookies::session(&headers, state.secure_cookies())
         && let Ok(value) = HeaderValue::from_str(&cookies::set_session(
             &cookie,
             state.config.session_idle_timeout + TOMBSTONE,

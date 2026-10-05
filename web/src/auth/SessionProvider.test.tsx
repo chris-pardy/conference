@@ -11,13 +11,18 @@ const alice = { did: 'did:plc:alice', handle: 'alice.test', csrfToken: 'token' }
 const refused = () => Response.json({ error: 'InvalidCsrfToken', message: 'stale' }, { status: 403 })
 
 /** Signs Alice in, then has sign-out refused, and getSession answer with `after`. */
-async function signOutRefused(after: () => Response): Promise<{ ok: boolean; ctx: SessionContextValue }> {
+async function signOutRefused(
+  after: () => Response,
+): Promise<{ ok: boolean; ctx: SessionContextValue; sessionFetches: number }> {
   let signedIn = false
+  let sessionFetches = 0
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: string) => {
-      if (input.includes('getSession')) return signedIn ? after() : Response.json(alice)
-      return refused()
+      if (!input.includes('getSession')) return refused()
+      if (!signedIn) return Response.json(alice)
+      sessionFetches++
+      return after()
     }),
   )
   let ctx!: SessionContextValue
@@ -36,7 +41,7 @@ async function signOutRefused(after: () => Response): Promise<{ ok: boolean; ctx
   await act(async () => {
     ok = await ctx.signOut()
   })
-  return { ok, ctx }
+  return { ok, ctx, sessionFetches }
 }
 
 test('a refused sign-out is a failure when the appview cannot be asked', async () => {
@@ -48,6 +53,11 @@ test('a refused sign-out is a failure when the appview cannot be asked', async (
 test('a refused sign-out is a failure when the same account is still signed in', async () => {
   const { ok } = await signOutRefused(() => Response.json(alice))
   expect(ok).toBe(false)
+})
+
+test('a refused sign-out asks for the session only once', async () => {
+  const { sessionFetches } = await signOutRefused(() => Response.json(alice))
+  expect(sessionFetches).toBe(1)
 })
 
 test('a refused sign-out succeeds when another account signed in elsewhere', async () => {

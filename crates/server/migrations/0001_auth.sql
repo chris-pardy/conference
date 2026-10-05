@@ -2,9 +2,12 @@
 -- signing keys. Portable across SQLite and Postgres: TEXT and BIGINT only,
 -- timestamps in epoch milliseconds.
 
+-- `client_id` is the client ID the request was pushed as (it carries the
+-- scope list), so the callback redeems the code as that same client.
 CREATE TABLE oauth_requests (
     state TEXT PRIMARY KEY,
     kind TEXT NOT NULL,
+    client_id TEXT NOT NULL,
     pkce_verifier TEXT NOT NULL,
     dpop_key TEXT NOT NULL,
     issuer TEXT NOT NULL,
@@ -14,6 +17,8 @@ CREATE TABLE oauth_requests (
     expires_at BIGINT NOT NULL
 );
 
+-- `client_id` is the client the grant was issued to: it's refreshed and
+-- revoked as that client, whichever instance does it.
 CREATE TABLE sessions (
     id_hash TEXT PRIMARY KEY,
     did TEXT NOT NULL,
@@ -23,6 +28,7 @@ CREATE TABLE sessions (
     pds TEXT,
     dpop_key TEXT,
     issuer TEXT,
+    client_id TEXT NOT NULL,
     access_token TEXT,
     refresh_token TEXT,
     token_expires_at BIGINT,
@@ -35,7 +41,10 @@ CREATE TABLE sessions (
 );
 
 CREATE INDEX sessions_did ON sessions (did);
-CREATE INDEX sessions_renewal ON sessions (ended_at, token_expires_at);
+-- Renewal's two queries, each paged by its own column: idle sessions, and
+-- tokens due for a refresh.
+CREATE INDEX sessions_idle ON sessions (ended_at, last_seen_at, id_hash);
+CREATE INDEX sessions_renewal ON sessions (ended_at, token_expires_at, id_hash);
 
 CREATE TABLE client_keys (
     kid TEXT PRIMARY KEY,

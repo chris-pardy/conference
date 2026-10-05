@@ -1,5 +1,5 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react'
-import { api, connectSession } from '../api'
+import { api, connectSession, sessionLearned } from '../api'
 import { fetchSession, type Session, SessionContext } from './session'
 
 /** Loads who's signed in once, and keeps it current as the session changes. */
@@ -46,9 +46,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       // worked only if the session this window meant to end is seen to be
       // over: signed out, expired, or another account signed in elsewhere.
       // If the appview can't be asked, or it's still the same account, it
-      // didn't.
+      // didn't. Uses what api() learned when it caught up, if it asked.
       if (res.status === 403) {
-        const now = await fetchSession().catch((): Session => ({ kind: 'unavailable' }))
+        const now = sessionLearned(res) ?? (await fetchSession().catch((): Session => ({ kind: 'unavailable' })))
         if (now.kind === 'unavailable' || (now.kind === 'signedIn' && now.user.did === did)) return false
         setSession(now)
         return true

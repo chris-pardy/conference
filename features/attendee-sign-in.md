@@ -721,12 +721,42 @@ Where the build refined the approved design:
   and production servers cache too. Without a new client ID, a server keeps
   refusing scopes that the cached metadata doesn't list. With `atproto`
   alone, the ID is the plain metadata URL.
-- **A session remembers the client ID its grant was issued to**
-  (`sessions.client_id`, migration `0003`). Any change to the scope list
-  changes the client ID, and a grant can't be refreshed or revoked as
-  another client. So a session issued to an earlier client ID is ended like
-  one whose scopes grew, and the person signs in again; its grant isn't
-  revoked (the server would refuse) and is left to expire.
+- **Every grant is used as the client ID it was issued to.** A pending
+  request (`oauth_requests.client_id`) records the client ID its PAR was
+  pushed as, and the callback redeems the code as that client, whichever
+  instance answers. A session (`sessions.client_id`) keeps that client ID,
+  and every refresh and revocation, from any instance, is made as it. So
+  instances on different scope lists, sharing one database during a
+  rolling deploy, never use each other's grants as the wrong client.
+- **The metadata route serves any well-formed scope list.**
+  `/oauth-client-metadata.json` is `atproto` alone; `?scope=S` is served
+  for any list of RFC 6749 scope tokens that includes `atproto`, has no
+  duplicates and is at most 2 KB, and describes the client ID that is that
+  exact URL (`?scope=atproto` and malformed lists are `404`). This
+  instance's own configured list is always served, even if `OAUTH_SCOPES`
+  wouldn't pass that check. A grant from
+  another instance's scope list may make the authorization server fetch
+  that client's metadata again, from any instance, so an allow-list of this
+  instance's own list (or one compiled into the binary) would break
+  rolling deploys. Serving any list grants nothing: the client is
+  confidential, and every PAR, token and revocation request as any of these
+  client IDs needs an assertion signed with this client's key.
+- **A session ends for a missing scope, and nothing else about its grant.**
+  `session::outdated` is true only when the granted scopes lack one this
+  instance asks for at sign-in. A grant with more scopes, or issued to
+  another client ID, stays live and is refreshed as its own client.
+- **`getSession` renews the session cookie on every answer**, not only when
+  it moves `last_seen_at` (at most hourly). Other routes move
+  `last_seen_at` without renewing the cookie, so renewing only on a touch
+  could let a heavily used PWA's cookie run out while its row was live.
+- **SQLite runs in WAL mode** (`PRAGMA journal_mode = WAL` on connect, kept
+  in the file). In the default rollback mode, a reader of the file outside
+  the server (the tests' `storedTokens`) failed with `database is locked`
+  while the renewer was writing.
+- **The schema is one migration, `0001_auth.sql`.** The branch's three
+  migrations were squashed before merging, since they reach `main`
+  together. A local `data/` database created from this branch before
+  round 9 has the old migration checksums and has to be deleted.
 - **The session cookie lives for the idle timeout plus 30 days** (the
   tombstone), not just the idle timeout. An idle session has to still send
   its cookie for the PWA to hear `SessionExpired`. An ended row is kept for
@@ -1324,3 +1354,49 @@ green again. No reviewer has seen these fixes yet.
    - Fixed: `auth_server` refuses an issuer that isn't a bare origin
      (its URL's origin must serialize to the issuer exactly), with a unit
      test.
+
+### Round 9
+
+The reviewer found 0 blocking, 1 major, 1 minor and 3 nits. `pnpm check`
+was green. Every finding was fixed after the review, and `pnpm check` is
+green again. No reviewer has seen these fixes yet.
+
+1. **[major] Round 8's client ID check ended healthy sessions across
+   instances, and a callback could redeem a code as the wrong client.**
+   - Fixed: `oauth_requests` records the client ID each PAR was pushed as,
+     and the callback exchanges the code (and revokes an unused grant) as
+     it. Sessions store it too, and `exchange_code`, `refresh` and
+     `revoke` take the client ID, so every call for a row is made as that
+     row's client from any instance. The skipped revocation for "another
+     client" is gone.
+   - `session::outdated` checks only for a missing scope again, so a
+     superset grant or another client ID no longer ends a session.
+   - `/oauth-client-metadata.json?scope=S` serves metadata for any
+     well-formed scope list containing `atproto`, at its exact client ID,
+     and `404`s anything else (this instance's own list is always served).
+     Why not an allow-list is in the build notes.
+   - Rust tests cover the metadata rule, `outdated`, and a session issued
+     to another client ID being refreshed and revoked as that client,
+     against a stand-in authorization server that records the client ID.
+2. **[minor] The cookie was renewed only when `getSession` itself moved
+   `last_seen_at`.**
+   - Fixed: `getSession` renews the cookie on every successful answer, and
+     `touch` no longer reports whether it wrote. A Rust test checks two
+     answers in a row both set the cookie.
+3. **[nit] The expired banner's "Not you? Sign out" ignored a failure.**
+   - Fixed: a `useSignOut` hook and `SignOutFailed` alert, shared with the
+     account menu. A unit test in `Shell.test.tsx` covers the banner.
+4. **[nit] A refused sign-out fetched the session twice.**
+   - Fixed: `api()` keeps the session it fetched while handling an
+     `InvalidCsrfToken` refusal, by response, behind `sessionLearned(res)`.
+     `signOut` uses it, and only asks itself when `api()` didn't. A unit
+     test counts one fetch.
+5. **[nit] The first schema shipped as three migrations, with NULL
+   handling no deployment would need.**
+   - Fixed: squashed into `0001_auth.sql`, with `client_id NOT NULL` on
+     `sessions` and `oauth_requests`, and the NULL handling removed. The
+     worktree's local `data/` database was deleted; see the build notes.
+   - Also while running the gate: TC-11 failed every time, on this round's
+     code and on round 8's, with `database is locked` when the test read
+     the SQLite file during a renewal. The server now puts SQLite in WAL
+     mode, so readers don't wait on writers (build notes).

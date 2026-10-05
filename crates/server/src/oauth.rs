@@ -103,14 +103,36 @@ impl OAuthClient {
         }
     }
 
-    /// The client metadata document served at the client ID.
-    pub fn metadata(&self) -> Value {
-        json!({
-            "client_id": self.client_id,
+    /// The metadata document served at a client ID, given the `scope` query
+    /// parameter it was asked for with (none for the bare URL, which is
+    /// `atproto` alone).
+    ///
+    /// Not only this instance's own scope list is served: a grant issued
+    /// under another list (by an instance on another version, during a
+    /// rolling deploy) is refreshed and revoked as its own client ID, and the
+    /// authorization server may fetch that client's metadata again. So any
+    /// well-formed list is served, at the URL that is its client ID. That
+    /// grants nothing: the client is confidential, so every request as any
+    /// of these client IDs needs an assertion signed with this client's key.
+    pub fn metadata(&self, query_scope: Option<&str>) -> Option<Value> {
+        let scope = match query_scope {
+            None => "atproto",
+            // `atproto` alone is the bare URL's; another URL for it would
+            // name a different client ID than the one it describes. This
+            // instance's own list is always served, however it's configured.
+            Some(scope)
+                if scope != "atproto" && (scope == self.scope || well_formed_scope(scope)) =>
+            {
+                scope
+            }
+            Some(_) => return None,
+        };
+        Some(json!({
+            "client_id": client_id(&self.public_url, scope),
             "client_name": "Eventside",
             "client_uri": self.public_url,
             "redirect_uris": [self.redirect_uri],
-            "scope": self.scope,
+            "scope": scope,
             "grant_types": ["authorization_code", "refresh_token"],
             "response_types": ["code"],
             "token_endpoint_auth_method": "private_key_jwt",
@@ -118,7 +140,7 @@ impl OAuthClient {
             "dpop_bound_access_tokens": true,
             "application_type": "web",
             "jwks_uri": format!("{}/oauth/jwks.json", self.public_url),
-        })
+        }))
     }
 
     pub fn jwks(&self) -> Value {
@@ -271,20 +293,22 @@ impl OAuthClient {
         Ok(url.into())
     }
 
-    /// Exchanges an authorization code for tokens.
+    /// Exchanges an authorization code for tokens, as the client ID the
+    /// request was pushed as.
     pub async fn exchange_code(
         &self,
         server: &AuthServer,
+        client_id: &str,
         code: &str,
         verifier: &str,
         dpop_key: &EcKey,
     ) -> Result<TokenSet, OAuthError> {
-        let assertion = client_assertion(&self.key, &self.client_id, &server.issuer);
+        let assertion = client_assertion(&self.key, client_id, &server.issuer);
         let form = [
             ("grant_type", "authorization_code"),
             ("code", code),
             ("code_verifier", verifier),
-            ("client_id", self.client_id.as_str()),
+            ("client_id", client_id),
             ("redirect_uri", self.redirect_uri.as_str()),
             ("client_assertion_type", ASSERTION_TYPE),
             ("client_assertion", assertion.as_str()),
@@ -292,36 +316,40 @@ impl OAuthClient {
         self.token_request(server, &form, dpop_key).await
     }
 
+    /// Refreshes a grant, as the client ID it was issued to.
     pub async fn refresh(
         &self,
         server: &AuthServer,
+        client_id: &str,
         refresh_token: &str,
         dpop_key: &EcKey,
     ) -> Result<TokenSet, OAuthError> {
-        let assertion = client_assertion(&self.key, &self.client_id, &server.issuer);
+        let assertion = client_assertion(&self.key, client_id, &server.issuer);
         let form = [
             ("grant_type", "refresh_token"),
             ("refresh_token", refresh_token),
-            ("client_id", self.client_id.as_str()),
+            ("client_id", client_id),
             ("client_assertion_type", ASSERTION_TYPE),
             ("client_assertion", assertion.as_str()),
         ];
         self.token_request(server, &form, dpop_key).await
     }
 
-    /// Revokes a token. Servers without a revocation endpoint are skipped.
+    /// Revokes a token, as the client ID it was issued to. Servers without a
+    /// revocation endpoint are skipped.
     pub async fn revoke(
         &self,
         server: &AuthServer,
+        client_id: &str,
         token: &str,
         dpop_key: &EcKey,
     ) -> Result<(), OAuthError> {
         let Some(endpoint) = &server.revocation_endpoint else { return Ok(()) };
-        let assertion = client_assertion(&self.key, &self.client_id, &server.issuer);
+        let assertion = client_assertion(&self.key, client_id, &server.issuer);
         let form = [
             ("token", token),
             ("token_type_hint", "refresh_token"),
-            ("client_id", self.client_id.as_str()),
+            ("client_id", client_id),
             ("client_assertion_type", ASSERTION_TYPE),
             ("client_assertion", assertion.as_str()),
         ];
@@ -419,6 +447,19 @@ fn client_id(public_url: &str, scope: &str) -> String {
     }
 }
 
+/// Whether a scope list is well formed: RFC 6749 scope tokens separated by
+/// single spaces, `atproto` among them, none twice, and not too long.
+fn well_formed_scope(scope: &str) -> bool {
+    let tokens: Vec<&str> = scope.split(' ').collect();
+    let token_ok = |t: &&str| {
+        !t.is_empty() && t.bytes().all(|b| matches!(b, 0x21 | 0x23..=0x5B | 0x5D..=0x7E))
+    };
+    scope.len() <= 2048
+        && tokens.iter().all(token_ok)
+        && tokens.contains(&"atproto")
+        && tokens.iter().enumerate().all(|(i, t)| !tokens[..i].contains(t))
+}
+
 /// Whether an issuer is a bare origin, as atproto requires: no path, query,
 /// fragment, trailing slash or default port.
 fn bare_origin(issuer: &str) -> bool {
@@ -475,6 +516,46 @@ mod tests {
             client_id("https://app.example", "atproto transition:generic"),
             "https://app.example/oauth-client-metadata.json?scope=atproto%20transition%3Ageneric"
         );
+    }
+
+    #[test]
+    fn metadata_is_served_for_any_well_formed_scope_list() {
+        let client = OAuthClient::new(
+            "https://app.example",
+            &["atproto".into()],
+            EcKey::generate(),
+            Http::new(false),
+        );
+        let bare = client.metadata(None).unwrap();
+        assert_eq!(bare["client_id"], client.client_id);
+        assert_eq!(bare["scope"], "atproto");
+        // Another instance's list, during a rolling deploy.
+        let grown = client.metadata(Some("atproto transition:generic")).unwrap();
+        assert_eq!(
+            grown["client_id"],
+            client_id("https://app.example", "atproto transition:generic")
+        );
+        assert_eq!(grown["scope"], "atproto transition:generic");
+        for refused in [
+            "atproto",
+            "",
+            "transition:generic",
+            "atproto  transition:generic",
+            " atproto",
+            "atproto atproto",
+            "atproto \"quoted\"",
+        ] {
+            assert!(client.metadata(Some(refused)).is_none(), "{refused:?}");
+        }
+        assert!(client.metadata(Some(&format!("atproto {}", "x".repeat(2048)))).is_none());
+        // An instance's own list is served however it's configured.
+        let odd = OAuthClient::new(
+            "https://app.example",
+            &["transition:generic".into()],
+            EcKey::generate(),
+            Http::new(false),
+        );
+        assert_eq!(odd.metadata(Some("transition:generic")).unwrap()["client_id"], odd.client_id);
     }
 
     #[test]

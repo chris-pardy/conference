@@ -50,6 +50,14 @@ pub async fn connect(url: &str) -> Result<Db, String> {
         .connect(url)
         .await
         .map_err(|e| format!("could not connect to the {} database: {e}", backend.name()))?;
+    if backend == Backend::Sqlite {
+        // Readers (and other processes reading the file) never wait on the
+        // renewer's writes. The setting is kept in the file.
+        sqlx::query("PRAGMA journal_mode = WAL")
+            .fetch_optional(&pool)
+            .await
+            .map_err(|e| format!("could not set up the SQLite database: {e}"))?;
+    }
     MIGRATOR
         .run(&pool)
         .await

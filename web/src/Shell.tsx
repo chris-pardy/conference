@@ -40,10 +40,28 @@ function AccountControl() {
   )
 }
 
-function AccountMenu({ user }: { user: SessionInfo }) {
+/** Signs out, remembering whether the last attempt failed. */
+function useSignOut(): [() => void, boolean] {
   const { signOut } = useSession()
-  const [open, setOpen] = useState(false)
   const [failed, setFailed] = useState(false)
+  const run = () => {
+    setFailed(false)
+    void signOut().then((ok) => setFailed(!ok))
+  }
+  return [run, failed]
+}
+
+function SignOutFailed({ className }: { className: string }) {
+  return (
+    <p className={className} role="alert">
+      Couldn’t sign out. Check your connection and try again.
+    </p>
+  )
+}
+
+function AccountMenu({ user }: { user: SessionInfo }) {
+  const [signOut, failed] = useSignOut()
+  const [open, setOpen] = useState(false)
   const menu = useRef<HTMLDivElement>(null)
 
   // Close on a click elsewhere or Escape.
@@ -90,25 +108,21 @@ function AccountMenu({ user }: { user: SessionInfo }) {
             className="shell__menu-item"
             onClick={() => {
               setOpen(false)
-              setFailed(false)
-              void signOut().then((ok) => setFailed(!ok))
+              signOut()
             }}
           >
             Sign out
           </button>
         </div>
       )}
-      {failed && (
-        <p className="shell__menu shell__error" role="alert">
-          Couldn’t sign out. Check your connection and try again.
-        </p>
-      )}
+      {failed && <SignOutFailed className="shell__menu shell__error" />}
     </div>
   )
 }
 
 function ExpiredBanner() {
-  const { session, signOut } = useSession()
+  const { session } = useSession()
+  const [signOut, failed] = useSignOut()
   const returnTo = useReturnTo()
   if (session.kind !== 'expired') return null
   const hint = signInHint(session)
@@ -124,10 +138,11 @@ function ExpiredBanner() {
           <Link to={`/signin?${new URLSearchParams({ return_to: returnTo })}`}>Sign in again</Link>
         )}
         {/* On a shared device, the next person can clear the old session. */}
-        <button type="button" onClick={() => void signOut()}>
+        <button type="button" onClick={signOut}>
           Not you? Sign out
         </button>
       </span>
+      {failed && <SignOutFailed className="shell__error" />}
     </div>
   )
 }

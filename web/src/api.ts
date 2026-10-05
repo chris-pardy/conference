@@ -23,6 +23,18 @@ export function connectSession(next: Connection): void {
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
 
+/** The session `api()` fetched while answering a refused request, by response. */
+const learned = new WeakMap<Response, Session>()
+
+/**
+ * The session `api()` learned while handling an `InvalidCsrfToken` refusal,
+ * if it asked (`unavailable` when the appview couldn't be asked), so a caller
+ * needn't ask again.
+ */
+export function sessionLearned(res: Response): Session | undefined {
+  return learned.get(res)
+}
+
 async function errorOf(res: Response): Promise<{ error?: string; handle?: string; did?: string }> {
   return res
     .clone()
@@ -45,12 +57,12 @@ export async function api(input: string, init: RequestInit = {}): Promise<Respon
   // retried.
   if (res.status === 403 && (await errorOf(res)).error === 'InvalidCsrfToken') {
     const sentFor = connection?.did
-    const current = await fetchSession().catch(() => undefined)
-    if (current && current.kind !== 'unavailable') connection?.changed(current)
+    const current: Session = await fetchSession().catch(() => ({ kind: 'unavailable' }))
+    if (current.kind !== 'unavailable') connection?.changed(current)
     const replayable = !(init.body instanceof ReadableStream)
     if (
       replayable &&
-      current?.kind === 'signedIn' &&
+      current.kind === 'signedIn' &&
       sentFor &&
       current.user.did === sentFor &&
       current.user.csrfToken !== sent
@@ -58,6 +70,7 @@ export async function api(input: string, init: RequestInit = {}): Promise<Respon
       if (connection) connection.csrfToken = current.user.csrfToken
       res = await send(current.user.csrfToken)
     }
+    learned.set(res, current)
   }
   if (res.status === 401) {
     const body = await errorOf(res)

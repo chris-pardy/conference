@@ -136,3 +136,8 @@
   padding: var(--g-space-2) var(--g-space-3);
   color: var(--g-color-danger);
 }
+
+.shell__expired .shell__error {
+  flex-basis: 100%;
+  padding: 0;
+}

@@ -268,16 +268,131 @@ mod tests {
         assert!(session::load(&state.db, &gone).await.unwrap().is_none());
     }
 
+    /// A live session, as the given client ID, with the given scopes and tokens.
+    async fn live_session(
+        state: &AppState,
+        issuer: &str,
+        client_id: &str,
+        scopes: &str,
+    ) -> (String, String) {
+        let dpop_key = keys::EcKey::generate().private_jwk();
+        let cookie = session::create(
+            &state.db,
+            NewSession {
+                did: "did:plc:test",
+                handle: "test.example",
+                display_name: None,
+                avatar: None,
+                pds: "http://127.0.0.1:1",
+                dpop_key: &dpop_key,
+                issuer,
+                access_token: "access",
+                refresh_token: Some("refresh-1"),
+                token_expires_at: i64::MAX,
+                scopes,
+                client_id,
+            },
+        )
+        .await
+        .unwrap();
+        let id_hash = keys::sha256_b64(&cookie);
+        (cookie, id_hash)
+    }
+
     #[tokio::test]
-    async fn a_grant_for_another_client_id_is_outdated() {
+    async fn a_grant_is_outdated_only_when_it_lacks_a_scope() {
         let (state, _dir) = state().await;
-        let id_hash = ended_session(&state, db::now_ms()).await;
+        let other = format!("{}?scope=atproto%20transition%3Ageneric", state.oauth.client_id);
+        let (_, id_hash) =
+            live_session(&state, "http://127.0.0.1:1", &other, "atproto transition:generic").await;
         let mut row = session::load(&state.db, &id_hash).await.unwrap().unwrap();
+        // More scopes, and another client ID: still good.
         assert!(!session::outdated(&state, &row));
-        row.client_id = None;
-        assert!(!session::outdated(&state, &row));
-        // Same scopes, reordered or shrunk: still another client ID.
-        row.client_id = Some(format!("{}?scope=atproto", state.oauth.client_id));
+        row.scopes = "transition:generic".into();
         assert!(session::outdated(&state, &row));
+    }
+
+    /// A stand-in authorization server that records the client ID each token
+    /// and revocation request was made as.
+    async fn recording_auth_server() -> (String, Arc<std::sync::Mutex<Vec<(String, String)>>>) {
+        use axum::Form;
+        use std::collections::HashMap;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let issuer = format!("http://{}", listener.local_addr().unwrap());
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let metadata = serde_json::json!({
+            "issuer": issuer,
+            "authorization_endpoint": format!("{issuer}/authorize"),
+            "token_endpoint": format!("{issuer}/token"),
+            "pushed_authorization_request_endpoint": format!("{issuer}/par"),
+            "revocation_endpoint": format!("{issuer}/revoke"),
+        });
+        let record = |path: &'static str, seen: Arc<std::sync::Mutex<Vec<(String, String)>>>| {
+            move |Form(form): Form<HashMap<String, String>>| async move {
+                let client_id = form.get("client_id").cloned().unwrap_or_default();
+                seen.lock().unwrap().push((path.to_owned(), client_id));
+                Json(serde_json::json!({
+                    "access_token": "access-2",
+                    "token_type": "DPoP",
+                    "refresh_token": "refresh-2",
+                    "expires_in": 3600,
+                    "scope": "atproto transition:generic",
+                    "sub": "did:plc:test",
+                }))
+            }
+        };
+        let app = Router::new()
+            .route(
+                "/.well-known/oauth-authorization-server",
+                get(move || async move { Json(metadata) }),
+            )
+            .route("/token", post(record("token", seen.clone())))
+            .route("/revoke", post(record("revoke", seen.clone())));
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        (issuer, seen)
+    }
+
+    #[tokio::test]
+    async fn a_grant_is_refreshed_and_revoked_as_the_client_it_was_issued_to() {
+        let (state, _dir) = state().await;
+        let (issuer, seen) = recording_auth_server().await;
+        // Issued by an instance with another scope list, e.g. mid-deploy.
+        let other = format!("{}?scope=atproto%20transition%3Ageneric", state.oauth.client_id);
+        assert_ne!(other, state.oauth.client_id);
+        let (_, id_hash) =
+            live_session(&state, &issuer, &other, "atproto transition:generic").await;
+        assert!(matches!(
+            auth::renew::refresh(&state, &id_hash).await,
+            auth::renew::Renewal::Renewed
+        ));
+        let row = session::load(&state.db, &id_hash).await.unwrap().unwrap();
+        assert_eq!(row.refresh_token.as_deref(), Some("refresh-2"));
+        assert_eq!(row.client_id, other);
+        session::revoke(&state, &row).await;
+        let seen = seen.lock().unwrap().clone();
+        assert_eq!(seen, vec![("token".to_owned(), other.clone()), ("revoke".to_owned(), other)]);
+    }
+
+    #[tokio::test]
+    async fn get_session_renews_the_cookie_on_every_answer() {
+        let (state, _dir) = state().await;
+        let client_id = state.oauth.client_id.clone();
+        // Just created, so `last_seen_at` isn't due to move.
+        let (cookie, _) = live_session(&state, "http://127.0.0.1:1", &client_id, "atproto").await;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = router(state.clone());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        for _ in 0..2 {
+            let res = reqwest::Client::new()
+                .get(format!("http://{addr}/xrpc/app.eventside.auth.getSession"))
+                .header("cookie", format!("session={cookie}"))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status().as_u16(), 200);
+            let set = res.headers().get("set-cookie").and_then(|v| v.to_str().ok()).unwrap_or("");
+            assert!(set.starts_with(&format!("session={cookie};")), "{set:?}");
+        }
     }
 }
