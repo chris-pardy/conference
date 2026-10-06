@@ -1,5 +1,5 @@
 ---
-status: ready
+status: design-review
 impact: cross-cutting
 depends-on: [attendee-sign-in]
 branch:
@@ -36,6 +36,427 @@ script. There are no admin screens in the app.
 **Finding a conference (invite-only).** For events such as a destination
 wedding, nothing is public. Someone with an invite link or code sees a
 sign-in and join prompt. Anyone else sees nothing.
+
+**Joining.** The attendee signs in (see
+[`attendee-sign-in`](attendee-sign-in.md)) and is admitted by any of the
+methods the organizer has turned on:
+
+- **Invite link or code:** one shared code ("atmosphere27"), or personal
+  codes.
+- **Attendee list:** the organizer imports a list from their ticketing
+  tool. People on it get in when they sign in, matched by atproto handle or
+  by verified email. Email matching asks the person's PDS for their email
+  (the OAuth `transition:email` scope) at join time.
+- **Request and approve:** the attendee asks, and an owner or staff member
+  approves.
+- **Open:** anyone signed in can join.
+
+Once admitted, they see the inside of the conference.
+
+**Inside.** Only members can open the conference's inside. Members read
+only their own records, and the appview serves everything else, as
+[`space-sync`](space-sync.md) already decided.
+
+**Leaving.** An attendee can leave a conference. What they wrote stays in
+their repo, but the appview stops serving it to others. They can rejoin
+through any method that admits them.
+
+**Organizers.** Each organization is its own atproto account. Its owners
+sign in as themselves, and the appview acts as the organization for them,
+so nobody shares a password, and owners can be added or removed. One
+organization can run several conferences.
+
+**Roles:**
+
+- **Owner:** full control, including adding and removing owners.
+- **Staff:** the same admin powers, except managing owners.
+- **Speaker:** an attendee linked to their sessions, usually set by
+  `program-import`.
+- **Attendee.**
+
+**Administration for November 1.** A script or CLI does all of it:
+
+- create the organization account and its conferences
+- add owners and staff
+- choose the join methods and the public or invite-only setting
+- import attendee lists, and issue codes
+- approve or deny requests
+- remove or ban members, and change roles
+
+A banned person is removed and can't rejoin by any method.
+
+**Done.** Two differently branded conferences, run by different
+organizations, are seeded by the script.
+
+- One attendee joins each by a different method.
+- They see the public page before joining and the inside after.
+- A non-member can't see the inside.
+- Removing or banning someone cuts off their access.
+
+## Data
+
+- **The organization** is an atproto account (a `did:plc`, on our PDS or
+  any PDS). The appview holds a session for it and writes as it, on behalf of
+  owners who are signed in as themselves.
+- **The conference's entry point** (public conferences) is a public
+  `community.lexicon.calendar.event` record in the organization's repo. It
+  can be one that already exists, such as one published through another
+  calendar app. An eventside sidecar record links it to the space and holds
+  the conference's settings: join methods, public or invite-only, and theme
+  (for [`event-branding`](event-branding.md)).
+- **Invite-only conferences** have no public event record. Their entry point
+  is an invite link that names the space.
+- **The space** is a permissioned space owned by the organization:
+  - one space per conference
+  - the conference's sessions, plans, chat and everything else inside it
+    are records in that space
+  - which apps can read it is the organizer's choice (a curated allow-list
+    or open), and every member can read everything in it through those apps
+    (revised in design review round 2; this replaced "only the appview reads,
+    members get `read_self`")
+- **Membership and roles** are the space's member list, plus a role for each
+  member, recorded by the organization.
+- **Attendee lists, codes, requests and bans** are kept by the organization,
+  where attendees can't read them. Whether that's records in the
+  organization's repo inside the space, or rows in the appview's database,
+  is for the architecture analysis.
+- **Emails** from list imports, or from `transition:email`, are used only for
+  matching and are never served to other members.
+
+## Options considered
+
+### The organizer identity
+
+- **Its own account, with the appview acting for owners** (chosen). Owners
+  sign in as themselves, and nobody shares a login.
+- An organization account whose credentials the owners share: the shared
+  login the vision rules out.
+- A person's account owning the conference: the event would be tied to one
+  person.
+
+### How attendees get in
+
+- **Any combination of invite code, attendee list, request and approve, and
+  open** (chosen).
+- One method per conference: simpler to explain and test.
+
+### Matching an attendee list
+
+- **By handle or by email, whichever the row has** (chosen).
+- By email only, through `transition:email`: ticketing exports have emails,
+  but it adds a scope at join time.
+- By handle only: ticketing tools rarely have handles.
+
+### Roles for the MVP
+
+- **Owner, staff, speaker, attendee** (chosen).
+- Sponsor: deferred. It was demo item 4's "sponsor data sharing", which now
+  waits for a later feature.
+
+### Administration
+
+- **A script or CLI for everything, for November 1** (chosen).
+- Admin screens in the PWA: a stronger demo of the organizer side, but more
+  to build.
+- Scripted setup plus a small Members screen in the PWA (approve, remove,
+  ban, change role).
+
+### What non-members see
+
+- **It depends on the conference. Public by default, with the entry point a
+  public community calendar event; invite-only conferences show nothing**
+  (chosen).
+- Always a public page.
+- Never anything until you're in.
+
+### Leaving
+
+- **Allowed, and the attendee's records stay theirs** (chosen).
+- Allowed, and their records are deleted.
+- Not in the MVP: membership would end only when an owner removed it.
+
+## Out of scope
+
+- Admin screens in the app.
+- The sponsor role, and sponsor data sharing.
+- Billing, tiers and counting active participants.
+- Per-conference onboarding (code of conduct, event profile):
+  `event-profile`.
+- Configuring branding: [`event-branding`](event-branding.md).
+- Signing up on our own PDS at registration.
+- Group, plan and ballot spaces themselves: this feature sets the model
+  (one space per audience), and `groups`, `plans` and `polls` build them.
+
+## Open questions
+
+None. Each one was settled in the design review:
+
+- **RSVPs from other calendar apps as a way to join:** deferred. They're
+  ignored for now.
+- **Attaching an existing event:** allowed only for an event in the
+  organization's own repo (`conference create --event`).
+- **The organization's session:** an operator who can sign in as the
+  organization runs `eventside admin org connect` once. The session has no
+  cookie and never idles out.
+- **Where lists, codes, requests and bans live:** in the appview's database,
+  because they're secrets or decisions about whom to admit. Membership,
+  roles and rules live in the space.
+- **The last owner:** the CLI refuses to remove the last owner. The operator
+  is trusted, so this is a safety check, not a security boundary.
+
+## Architecture analysis
+
+**Existing code touched:**
+
+- None on `main` yet works with spaces: `crates/server` is a skeleton, and
+  ui-blocks shipped with fixture sources only.
+- `attendee-sign-in` (on its branch) adds the appview's sessions, OAuth
+  client and scope list in `crates/server/src/{auth,oauth,config}.rs`.
+  Conference-space builds on them in two ways:
+  - acting as the organization account needs a session the appview keeps
+    for an account nobody is browsing as
+  - matching by email needs `transition:email`, asked for at join time
+    (step-up), which sign-in's design deferred
+- `lexicons/`: new eventside records (the conference sidecar, roles,
+  membership-related records) and the vendored
+  `community.lexicon.calendar.event`, shared with [`plans`](plans.md).
+- `scripts/` and `tests/support/`: the admin CLI is new. Test support gains a
+  "seed a conference" helper that later features' tests will use in place
+  of creating raw spaces.
+
+**Features affected:**
+
+- [`space-sync`](space-sync.md) (`analysis`): it assumes "organizers
+  connect a space once by signing in with a `read` grant" and "tests
+  create spaces directly". Conference-space settles who connects (the
+  organization account, through the appview) and how spaces are created
+  and configured: app allow-list, `read_self`, and member policy. It also
+  makes membership changes (leave, remove, ban) something space-sync has
+  to act on: a former member's records stop being served.
+- [`attendee-sign-in`](attendee-sign-in.md) (being built): it needs an
+  appview-held session for an organization account, and step-up for
+  `transition:email` at join time. Its design says "no step-up for now",
+  so this either adds step-up or asks every attendee for the email scope
+  at sign-in.
+- [`ui-blocks`](ui-blocks.md) (complete): test support creates a space
+  directly with a member-list policy. Its tests don't change, but the
+  "real conferences create their spaces in conference-space" handoff it
+  recorded happens here.
+- [`block-actions`](block-actions.md) (`analysis`): its writes and views are
+  scoped to a space. Space roles (owner, staff) are what later card
+  authoring checks against.
+- [`plans`](plans.md) (`design-review`): plans hang off the conference node
+  with `childOf`, featuring needs the owner and staff roles, and "whole
+  conference" means the space's members.
+- Not yet specced: `program-import` (sessions and speakers, which sets the
+  speaker role), `event-branding` (the theme on the sidecar),
+  `conference-feed`, `groups`, `places`, `chat`, `connections` and
+  `event-profile`. All of them read membership and roles from here, and
+  scope their records to the conference's space.
+
+**New shared surfaces:**
+
+- The **conference model**: a public `calendar.event` (or an invite-only
+  link) as the entry point, a sidecar linking it to its space, and one space
+  per conference.
+- **Membership and roles**: every feature's permission checks ask "is this
+  DID a member, and with what role?".
+- **Acting as the organization**: the appview's path for writing as an
+  organization on behalf of an owner.
+- **The admin CLI and the test seeding helper.**
+
+**Verdict: cross-cutting.** Conference-space sets the foundations every
+later feature builds on. It adds lexicons and record shapes: the conference
+sidecar, roles and the join-related records. It defines the membership and
+role checks, and the appview's organization identity. It changes what
+`space-sync` (who connects, membership changes) and `attendee-sign-in`
+(an organization session, and the email scope or step-up) have to provide.
+It needs a design review.
+
+## Design review
+
+### Design (revised in round 3)
+
+Round 3 makes **our server the space host**. Earlier rounds had the
+organization's PDS host the space and our appview manage it through the
+organization's OAuth session. Their decisions on joining, privacy within a
+space, and space types still stand. The rest is rewritten here, and the
+round entries below record what changed when.
+
+#### What the protocol and vivarium support
+
+From the current permissioned-data proposal (0016), vivarium 0.0.2 (which
+matches it: HTTP-message-signature credentials) and a review of vivarium's
+source. The sibling `public-spaces` host tracks an older alpha format (DPoP
+credentials) that vivarium 0.0.2 rejects, so we target the 0.0.2 format.
+
+- **A space's authority** is the DID at the root of its URI
+  (`at://{authority}/space/{type}/{skey}`). Its DID document names:
+  - the **space host**: service `#atproto_space_host` (type
+    `AtprotoSpaceHost`), falling back to `#atproto_pds`
+  - the **credential key**: verification method `#atproto_space`, falling
+    back to `#atproto`. Service-auth JWTs from the authority are checked
+    against `#atproto`, so we publish the same key under both.
+- **The space host must implement:**
+  - `com.atproto.space.getSpaceCredential`: takes a single-use delegation
+    JWT from a user (`aud` = `{authority}#atproto_space_host`), an HTTP
+    message signature by the app's P-256 `did:key`, and, under an app
+    allow-list, a client attestation. It checks the user's read access and
+    the app's access, then returns a credential signed with the authority's
+    key: `{iss: authority, sub: space, cnf: {kid: app did:key}, iat, exp,
+    jti}`, 10 minutes by default, 1 hour at most.
+  - `listRepos` (the writer set, with `repoRev`, `hash` and `spaceRev`),
+    `registerNotify` and `unregisterNotify`, all credential-authenticated
+  - receiving `notifyWrite` from writers' PDSes (service-auth from the
+    writer): check the write policy, ignore stale or future revisions, assign
+    a `spaceRev`, and forward to registered syncers
+  - sending `notifySpaceDeleted`, and `notifyCredentialRevoked` to repo
+    hosts
+  - The `simplespace.*` management methods are a PDS requirement, not a host
+    one, so a host like ours uses its own admin.
+- **Vivarium 0.0.2 as an attendee's PDS works with a host elsewhere:**
+  - it accepts writes into a space whose authority isn't one of its accounts
+  - it sends `notifyWrite` to the authority's `#atproto_space_host`, with
+    retries
+  - it verifies our credentials against the authority's DID document
+  - it issues delegation tokens for foreign spaces (with an OAuth `read`
+    grant)
+  - it accepts our revocation and deletion notifications
+- **Vivarium's PLC accepts any valid operation,** so our server can create a
+  `did:plc` with custom services and keys. Vivarium resolves `did:web` over
+  plain http only for loopback or declared app hosts.
+- **One catch:** if the authority DID *is* a vivarium account, vivarium acts
+  as the host itself and refuses writes. Repointing an existing vivarium
+  account needs a vivarium change. Minted authorities don't.
+- **Attendee scopes** must name the authority:
+  `space:{type}?authority={did}` or `authority=*`. The default is `self`.
+
+#### Approach
+
+**Our server is the space host for every eventside space.** Each
+organization has a **space authority DID** whose DID document points
+`#atproto_space_host` at our server and publishes an `#atproto_space` key
+that our server holds. Attendees' records still live in per-space repos on
+their own PDSes. Our server is where access is decided:
+
+- it issues every credential, so app access and read access are enforced by
+  the protocol at our door
+- it receives every write notification, so the write policy decides whose
+  records enter the space
+- membership, policies and app access are our own state, not a copy kept in
+  step with someone else's PDS
+
+**The authority DID:**
+
+- **Default: we mint one.** `eventside admin org create` makes a new
+  `did:plc`. Our server generates its rotation key and its signing key (as
+  both `#atproto_space` and `#atproto`), and registers a genesis operation
+  with one service, `#atproto_space_host` → our `PUBLIC_URL`. There's no
+  `#atproto_pds`.
+- **Bring your own (documented, not automated yet):**
+  - an existing `did:plc`: the owner adds our `#atproto_space_host`
+    service and the `#atproto_space` key we generate for them, with a PLC
+    operation they sign
+  - a `did:web` (e.g. `did:web:atmosphereconf.org`): they add the same two
+    entries to their `did.json`
+  - `eventside admin org adopt <did>` checks the document points at us with
+    a key we hold, then treats it like a minted one
+  - An existing account on a PDS that hosts spaces itself (vivarium today)
+    needs that PDS to defer to the declared host. That's a vivarium change,
+    deferred.
+- **Later:** we expect to run a small reference PDS. A minted authority
+  could then also get an `#atproto_pds` with us, and its own repo (for
+  posting to Bluesky from the conference, for example). Until then, a
+  minted authority has no repo.
+
+**Our server holds the authority's keys** (rotation and signing),
+encrypted at rest under a server key. That's custody, and it's stated to
+organizations. With "bring your own", the organization keeps its rotation
+key, and we only hold the space key they published.
+
+**Admins and organization records.** The authority (when minted) has no
+repo, so records the organization publishes are written by **admins**:
+
+- An organization's **admins** (owners and staff) are DIDs, kept as host
+  state. The authority itself can be one, if it has a repo of its own (bring
+  your own, or later our PDS).
+- An admin connects once, through `eventside admin connect <handle>`. That's
+  an OAuth sign-in with `ADMIN_SCOPES`, giving a cookieless session of kind
+  `admin` that never idles out (the round 1 "organization session", now held
+  for a person). Our server then writes the organization's records as that
+  admin:
+  - the **public calendar event** and its `app.eventside.conference`
+    sidecar, in the admin's public repo (public conferences)
+  - **role** and **rules** records, in the admin's repo inside the
+    conference space
+- **Readers trust organization records only from admins.** A role or rules
+  record counts only if its author was an admin of the space's organization
+  when the host recorded it. Admin status is host state that our server
+  publishes (see Interfaces), so every app can check it.
+- **Bootstrapping:** `org create` records the operator-named first owner.
+  Admins are added and removed by the CLI, and it refuses to remove the last
+  owner.
+
+**Membership is host state.**
+
+- Joining puts a member row in our database, with `read: true, write:
+  true` and a start time. Leaving, removal and bans give it an end time.
+- That's the member list our credential endpoint and write-notification
+  intake check. Nothing is copied to another server.
+- **Other apps see membership** through our host API: members with their
+  periods, and admins, for credential holders. A record counts if its
+  author was a member, with `write`, when we recorded it (its `spaceRev`).
+  The membership records of round 2 aren't needed, because the host is the
+  authority on membership.
+- **Removal takes effect at once, everywhere:**
+  - we stop accepting the person's write notifications
+  - we stop issuing credentials delegated by them
+  - we revoke the ones already issued (we track each credential's `jti` and
+    who delegated it) by sending `notifyCredentialRevoked` to every writer's
+    PDS
+
+**App access is host state too:** per conference, curated (an allow-list
+of client IDs, starting with eventside's bare client ID) or open. We
+enforce it in `getSpaceCredential`, so it holds for every app.
+`eventside admin apps add|remove|open|curate` edits it. Switching to open
+warns first.
+
+**One space per audience, all hosted by us.** The types from round 2 stand:
+
+| Space type | Audience | Authority | Policies | Specced in |
+|---|---|---|---|---|
+| `app.eventside.conference` | everyone admitted | the organization's authority | read and write: members | this feature |
+| `app.eventside.group` | organizer lists, plan audiences, derived groups (going to X, my connections), personal lists | the organization's authority, except personal lists (see `groups`) | members; derived groups are computed by us at check time | `groups` |
+| `app.eventside.ballot` | an anonymous poll's voters: they write, only admins and eventside read | the organization's authority | write: voters; read: admins | `polls` (later) |
+
+Because we're the host, **derived groups need no managing-app policy**. We
+compute membership ourselves when checking a credential or a write, and the
+group publishes a description of its rule. Round 2's "exception" goes away.
+Personal lists that must stay private from the organizer are for `groups`
+to settle: under the organization's authority, the organizer's admins could
+be given read access.
+
+**Rules enforced by readers** (from round 2, unchanged in substance):
+
+- The rules record says, per record type, who may write it: cards and
+  announcements only admins, plans, chat and RSVPs any member.
+- The protocol can't restrict writes by collection, so readers apply the
+  rules, judged at the record's `spaceRev` using roles and admins at that
+  point.
+- Our appview applies them at ingest. Other apps are expected to.
+- Finer rules (block-actions middleware) are eventside's own.
+
+**The conference entry point:**
+
+- **Public conferences:** a `community.lexicon.calendar.event` plus the
+  `app.eventside.conference` sidecar (space URI, `visibility`, join flags,
+  `appAccess` mode, theme), in an admin's public repo.
+  `conference create --event <at-uri>` adopts an existing event, if an
+  admin of the organization wrote it.
+- **Invite-only conferences:** the same records, written inside the space
+  by an admin. The entry point is `/join/{code}`.
+- **Identity:** the event URI is the conference node (plans' `childOf`),
+  and the space URI is the access boundary. `getConference` accepts either.
 
 **Joining.** The attendee signs in (see
 [`attendee-sign-in`](attendee-sign-in.md)) and is admitted by any of the
@@ -611,15 +1032,13 @@ conference. That's how an invite-only conference's link works. The link is
 
 **Leaving, removing, banning:**
 
-- **Leave or remove:** `removeMember` runs first, then the membership record
-  gets its `until`, then the index row ends. If the PDS call fails, the
-  request fails and is retried, and nothing changes until it succeeds.
+- **Leave or remove:** the member row gets its end time, the person's
+  credentials are revoked, and their later writes aren't accepted. Done in
+  one database transaction plus outgoing revocations, retried until
+  delivered.
 - **Ban:** remove, plus a ban row keyed by DID.
-- **What a former member sees:** nothing from any conference endpoint, from
-  the next request on.
-- **Rejoining:** whatever the person wrote while they weren't a member
-  stays unserved. `space-sync` records the membership periods and serves a
-  record only if it was written while its author was a member.
+- **Rejoining** starts a new membership period. Records written in between
+  are never accepted, because the host refused their notifications.
 
 **Abuse limits on `join`:**
 
@@ -628,37 +1047,17 @@ conference. That's how an invite-only conference's link works. The link is
 - Shared codes can have an expiry and a usage cap (`codes issue --shared
   --expires … --max-uses …`).
 
-**Organizations, owners and roles:**
+**Admin CLI** (a subcommand of the server binary):
 
-- **Owners and staff belong to the organization:** the `org_members` table
-  (`owner` or `staff`). They're also admitted as members of each of the
-  organization's conferences, with a role record there.
-- **Speakers** get a role record in their conference; attendees have none.
-  The appview indexes role records into `members.role`.
-- **Pre-assigned roles:** `program-import` (or the CLI) can give a DID or
-  handle a role, e.g. `speaker`, before the person joins. That works like
-  an attendee-list row: it admits them, with the role, when they join.
-- **The CLI's operator is trusted.** It runs on the server host with the
-  database. The owner/staff difference only matters to future admin
-  screens. `org owner remove` still refuses to remove the last owner, as a
-  safety check, not a security boundary.
-
-**Admin CLI** (a subcommand of the server binary, sharing its database
-and organization sessions):
-
-- `org create-record` and `org connect <handle>`
-- `org owner add|remove`, `org staff add|remove`
-- `conference create [--event <at-uri>] [--invite-only]`, which creates the
-  space and writes the sidecar (and the event, if not attached)
-- `join set --code --list --request --open`
-- `codes issue [--personal <did|handle>…] [--shared --expires --max-uses]`
-- `list import <csv>` (columns: handle, email, role?)
-- `requests list|approve|deny`
-- `member remove|ban|role` (`role` writes or deletes the role record)
-- `members reconcile`
-- `apps add|remove <client-id>`, `apps open|curate`
-- `rules set <file>` (writes the rules record; `conference create` writes a
-  default)
+- `org create --owner <handle>` (mints the authority) and `org adopt <did>`
+- `org admin add|remove <handle> --role owner|staff`, and
+  `admin connect <handle>`
+- `conference create [--event <at-uri>] [--invite-only] [--as <admin>]`
+- `join set`, `codes issue`, `list import <csv>`, `requests
+  list|approve|deny`
+- `member remove|ban|role` (`role` writes or deletes the role record as an
+  admin)
+- `apps add|remove|open|curate`, `rules set <file>`
 
 **Deferred:** whether a public `community.lexicon.calendar.rsvp` of
 "going" to the conference's event should count as a way to join. RSVPs
@@ -666,263 +1065,134 @@ from other apps are ignored for now.
 
 #### Components
 
-- **`crates/server/src/conference/`** (new):
-  - `mod.rs`: the `Conference` model, and loading by event or space URI
-  - `membership.rs`: membership changes (PDS first, then the index), the
-    `members`, `org_members` and pre-assigned role tables, role records,
-    and the role checks
-  - `rules.rs`: the rules record (default, parsing) and
-    `may_write(space, did, collection)` for ingest
-  - `join.rs`: the join order, codes, list matching and rate limits
-  - `routes.rs`: XRPC
-  - `admin.rs`: the CLI
-- **`crates/server/src/auth/`** (from `attendee-sign-in`, changed):
-  - `oauth_requests.purpose`
-  - `sessions.kind`
-  - `ORG_SCOPES`
-  - `outdated()` per kind
-  - no idle timeout for organization sessions
-  - `CurrentUser` refuses organization sessions
-  - the `email` callback path
-- **`crates/server/src/space.rs`** (new, shared):
-  - a client for `simplespace.*` and `space.*` writes
-  - space URI parsing
-  - client attestation, always as the bare client ID
-  - `space-sync` adds the read and notify side
-- **PWA:**
-  - `routes/c/$actor/$rkey.tsx`: the public conference page, where
-    `$actor` is a DID or a handle (links use the DID)
-  - `routes/join/$code.tsx`
-  - the join panel: code entry, request, "verify my email", and the states
-    pending, refused and banned (the reason isn't shown)
-  - a minimal shell for members
-- **Test support:**
-  - `tests/support/conference.ts`: `seedConference({visibility, join,
-    owners, list?, codes?})` creates the organization account through
-    vivarium, connects it through the real OAuth flow, and runs the CLI
-    commands
-  - `joinAs(page, handle, conference, {code?})`
+- **`crates/server/src/spacehost/`** (new): the host.
+  - `credential.rs`: delegation verification (replay cache), RFC 9421 HTTP
+    message signature verification (ecdsa-p256-sha256), client attestation,
+    and minting with the authority key. It also tracks issued `jti`s.
+  - `notify.rs`: `notifyWrite` intake (service-auth verification, write
+    policy, `spaceRev`), forwarding to syncers, `registerNotify`, and the
+    outgoing `notifySpaceDeleted` and `notifyCredentialRevoked`
+  - `repos.rs`: `listRepos`
+  - `api.rs`: our host API (membership, admins, policies, for credential
+    holders)
+  - `authority.rs`: minting the `did:plc` (genesis operation), adopting a
+    DID, key custody, DID-document checks
+- **`crates/server/src/conference/`** (new): the conference model, join
+  (unchanged), membership and roles on top of the host, rules, and the admin
+  CLI.
+- **`crates/server/src/auth/`** (from `attendee-sign-in`, changed): pending
+  requests get a `purpose` (`login`, `admin` or `email`), sessions get a
+  `kind` (`attendee` or `admin`), `ADMIN_SCOPES`, `outdated()` per kind, no
+  idle timeout for admin sessions, `CurrentUser` refuses admin sessions, and
+  the email callback.
+- **PWA:** the public page (`/c/$actor/$rkey`), `/join/$code`, the join
+  panel, and a minimal members' shell. Unchanged from round 2.
+- **Test support:** `seedConference` mints an authority on vivarium's PLC
+  with our server as host, makes an admin account, connects it through the
+  real OAuth flow, and runs the CLI. `joinAs` is unchanged.
 
 #### Data
 
 | Item | Where | Written by | Read by |
 |---|---|---|---|
-| `community.lexicon.calendar.event` | org repo: public, or inside the space if invite-only | the appview as the org (or already existing) | anyone if public; the appview |
-| `app.eventside.conference` sidecar: `space`, `visibility`, `appAccess` (`curated` or `open`), `join {code, list, request, open}`, `theme?` | next to the event, same rkey | the appview as the org | anyone if public; any app |
-| The space, its policies, app access and member list (**the source of truth**) | the org's PDS | the appview as the org | the PDS; every app on the app list |
-| `app.eventside.conference.role {subject, role}` | org repo, inside the space | the appview as the org | every member's apps |
-| `app.eventside.conference.member {subject, since, until?}` | org repo, inside the space | the appview as the org | every member's apps (whose records to show) |
-| `app.eventside.conference.rules` (rkey `self`): per collection, who may write | org repo, inside the space | the appview as the org | every member's apps (enforced at ingest) |
-| `conferences`: space URI, event URI, org DID, settings | appview DB | CLI | everything (no cache) |
-| `org_members`: org DID, DID, `owner` or `staff` | appview DB | CLI | role checks |
-| `members`: space, DID, role (indexed from role records), joined via, joined and left at | appview DB, an index of the space's member list | join, leave, CLI, reconcile | every feature's checks |
-| `member_periods`: space, DID, from, to | appview DB | join, leave, CLI | `space-sync`'s serving filter |
-| `preassigned`: space, DID or handle, role | appview DB | CLI, `program-import` | join |
-| `invite_codes`: hashed code, space, personal DID or handle?, expiry, max uses, uses | appview DB | CLI | join |
-| `attendee_list`: space, DID or unresolved handle, email HMAC | appview DB | CLI import | join |
-| `join_requests`, `bans` (by DID) | appview DB | join, CLI | join, CLI |
-| `sessions.kind`, `oauth_requests.purpose` | appview DB (sign-in tables) | sign-in | sign-in, renewer |
+| Authority DID document (`#atproto_space_host`, `#atproto_space`/`#atproto` key) | PLC (or the organization's `did.json`) | our server (minted) or the organization (adopted) | everyone |
+| `authorities`: DID, encrypted rotation and signing keys, minted or adopted | host DB | CLI | the host |
+| `spaces`: URI, type, read and write policy, app access, allow-list | host DB | CLI, `groups`, `polls` | the host |
+| `admins`: authority, DID, `owner` or `staff`, since, until | host DB | CLI | the host; the host API |
+| `members`: space, DID, `read`, `write`, joined via, since, until | host DB, the source of truth | join, leave, CLI | the host; the host API; every feature's checks |
+| `writers`: space, DID, `repoRev`, `hash`, `spaceRev`; plus a space-wide `spaceRev` sequence | host DB | `notifyWrite` intake | `listRepos`; `space-sync` |
+| `notify_registrations`, `credentials_issued` (`jti`, delegating DID, app key, expiry), delegation replay cache | host DB | the host | the host |
+| `community.lexicon.calendar.event` + `app.eventside.conference` sidecar | an admin's public repo (public) or inside the space (invite-only) | our server as the admin | anyone, or members |
+| `app.eventside.conference.role {subject, role}`, `app.eventside.conference.rules` | an admin's repo inside the space | our server as the admin | members' apps, trusted only from admins |
+| `invite_codes`, `attendee_list`, `join_requests`, `bans`, `preassigned` | host DB | CLI, join | join |
+| `sessions.kind`, `oauth_requests.purpose` | sign-in tables | sign-in | sign-in, renewer |
 
 #### Interfaces
 
-- **XRPC:**
-  - `app.eventside.conference.getConference {uri}`: `uri` is the event URI
-    or the space URI. It returns the public view, plus `viewer {member,
-    role?, pending?, banned?}` and the join methods open to this viewer. An
-    invite-only conference returns not-found to anyone who isn't a member.
-  - `join {conference?, code?}` returns `{status: joined | pending |
-    emailNeeded | refused, canRequest?}`.
-  - `leave {conference}`
-  - `listMyConferences`
-  - Writes need the session cookie and the CSRF token.
-- **Rust, for later features** (all reading the database, no caches):
-  - `membership::role(&db, &space, &did) -> Option<Role>`, where `Role` is
-    owner, staff, speaker or attendee
-  - `require_member(space)` → `CurrentMember {did, role}`
-  - `members(&db, &space)`
-  - `was_member_at(&db, &space, &did, time)`, for `space-sync`
-  - `org_client(&org_did)`, a PDS client acting as the organization, for
-    `program-import` and `event-branding`
-  - `rules::may_write(&db, &space, &did, collection)`, for ingest in
-    `space-sync` and `block-actions`
-  - `space::create(owner_client, type, policies, app_access)` and
-    `space::put_member` / `remove_member`, reused by `groups` and `polls`
-    for their own space types
-  - `preassign(&space, actor, role)`, for `program-import`
-- **Tests:** `seedConference` and `joinAs`, plus the `eventside admin` CLI
-  through `spawnServer`'s binary.
+- **The protocol host endpoints:** `getSpaceCredential`, `listRepos`,
+  `registerNotify`, `unregisterNotify`, and receiving `notifyWrite`, at our
+  `PUBLIC_URL`, in vivarium 0.0.2's wire format.
+- **Our host API** (credential-authenticated, `app.eventside.space.*`):
+  `getSpace` (policies, app access, the authority's admins with periods)
+  and `listMembers` (members with `read`, `write` and their periods).
+  Published lexicons, so other apps can apply the reader rules.
+- **Conference XRPC** (cookie and CSRF): `getConference`, `join`, `leave`,
+  `listMyConferences`. Unchanged.
+- **Rust, for later features:**
+  - `membership::role`, `require_member`, `members`, `was_member_at`
+  - `rules::may_write`
+  - `spacehost::create_space(authority, type, policies, app_access)` and
+    `spacehost::set_member` / `end_member`, for `groups` and `polls`
+  - `spacehost::mint_for_self(space)`, so our own appview reads the space
+    like any other app
+  - `admin_client(admin_did)`, for writing as an admin (`program-import`,
+    `event-branding`)
 
 #### Impact on existing features
 
-- **[`attendee-sign-in`](attendee-sign-in.md)** (being built; this design
-  lands after it merges):
-  - pending requests get a `purpose`, sessions get a `kind`, and
-    `outdated()` and idle handling are per kind
-  - the organization callback is cookieless, and `CurrentUser` refuses
-    organization rows
-  - the `email` callback path
-  - its existing tests keep passing: `login` behaves exactly as now
-- **[`space-sync`](space-sync.md)** (`analysis`): the dependency is
-  reversed, so **space-sync depends on conference-space**. Its premise
-  changes: the appview is no longer "the only client allowed to hold space
-  credentials", and members no longer get only `read_self`. It's one reader
-  among several, and it honors membership and rules records. Its inputs from
-  here:
-  - the list of spaces, from `conferences`
-  - the organization session, which holds `action=read` for delegation
-  - attestation as the bare client ID
-  - the serving filter `was_member_at`, and `rules::may_write` at ingest
-  - "tests create spaces directly" becomes `seedConference`
-  - it syncs every eventside space type, not only conference spaces
-  - vivarium 0.0.2 changes its credential flow: HTTP message signatures
-    with a P-256 `did:key`, 10-minute credentials, `registerNotify` and
-    `listRepos` needing a credential, and `repoRev`/`spaceRev` in
-    notifications and `listRepos`. Its design should be written against
-    0.0.2
-- **[`ui-blocks`](ui-blocks.md)** (complete): no code change. Its fixture's
-  `ats://…` space strings are opaque test data in frozen files. Its chosen
-  privacy model ("members hold `read_self`; only our appview reads
-  everything and serves aggregates") **no longer holds** once other apps can
-  read: within a space, every member's apps can read everything. Its
-  feature file should record that this was superseded here.
-- **The privacy model for anonymous votes and Q&A** (chosen in ui-blocks and
-  relied on by `block-actions`): replaced by ballot spaces. Votes or
-  questions that must stay anonymous are written into an
-  `app.eventside.ballot` space where voters are write-only, and only the
-  aggregate is published. `block-actions`' design must use that pattern for
-  anonymous actions (its `actionTally` view still works, computed from the
-  ballot space by the owner's app).
-- **[`block-actions`](block-actions.md)** and **[`plans`](plans.md)**:
-  - attendee writes into an organization's space need
-    `space:{type}?authority=*` scopes in `LOGIN_SCOPES`, with explicit
-    `action=create&action=update&action=delete` and a `collection=` per
-    record type (a missing `action` would include read)
-  - they gate with `require_member`, and ingest checks `rules::may_write`
-  - "whole conference" means the conference space; narrower audiences
-    write into a group space (`groups`)
-  - plans' `childOf` points at the event URI
-  - **`plans` needs revising:** "who sees what is enforced by the appview"
-    no longer holds; a picked-people audience needs its own space; and its
-    per-RSVP "public or private attendance" means nothing when every member
-    can read every RSVP in the space (it becomes "which space the RSVP is
-    written into", or is dropped)
-  - **`block-actions`:** its accepted-actions table is eventside's
-    judgement, not a rule other apps see
-- **Not yet specced:**
-  - `program-import` uses `org_client` and `preassign`
-  - `event-branding` writes the sidecar's `theme`, with `blob:` already in
-    `ORG_SCOPES`
-  - `groups` owns `app.eventside.group` spaces, including derived groups
-    under `#managingAppPolicy` (the appview answers `checkUserAccess`)
-  - `polls` (later) owns `app.eventside.ballot` spaces
-  - `chat` and feeds use `require_member`, and write into the audience's
-    space
+- **[`attendee-sign-in`](attendee-sign-in.md)** (complete): the session
+  `kind` and request `purpose`, `ADMIN_SCOPES`, per-kind `outdated()` and
+  idle handling, and the email path. Attendee behavior is unchanged, and its
+  tests keep passing. `LOGIN_SCOPES` gains attendee space scopes
+  (`authority=*`, explicit actions and collections) when the first feature
+  writes into a space.
+- **[`space-sync`](space-sync.md)** (`analysis`): changes the most. With
+  our server as the host, write notifications arrive here directly, and our
+  appview mints its own credentials. Space-sync becomes "fetch the new ops
+  from the writer's PDS (`listRepoOps` with a self-minted credential) and
+  index them". No organization delegation, no attestation round trip, no
+  `registerNotify` to a remote host. Its design should start from this.
+- **[`ui-blocks`](ui-blocks.md)** (complete): no code change. Its "members
+  `read_self`, only our appview reads" privacy model was superseded in
+  round 2.
+- **[`block-actions`](block-actions.md)**: anonymous actions use ballot
+  spaces; ingest checks `rules::may_write`; the accepted-actions table is
+  eventside's judgement.
+- **[`plans`](plans.md)**: a plan is written into its audience's space; a
+  picked-people plan needs its own group space; per-RSVP "private
+  attendance" means nothing within a space.
+- **`groups`** (not specced): its spaces are hosted by us under the
+  organization's authority, and derived groups are computed by the host.
+  Personal-list privacy is its call.
+- **Vivarium:** no change is needed for the tests. Adopting an existing
+  vivarium account as an authority needs vivarium to defer to the declared
+  host (deferred).
 
 #### Alternatives
 
-- **Our appview as the only reader, with its database as the truth**
-  (round 1): one allow-listed app, `read_self` for members, and every rule
-  in our code. Superseded in round 2: other apps must be able to read, so
-  the rules have to live in the space.
-- **`#managingAppPolicy` for the conference space**: always current, but
-  the decision would live in our code, and every policy check would depend
-  on our appview being up. Kept for derived groups only, where membership
-  can't be listed ahead of time. (Neither policy lets other apps list
-  members; that's what membership records are for.)
-- **One space for everything, with visibility by convention:** other apps
-  wouldn't honor it. One space per audience puts the boundary in the
-  protocol.
-- **A space per share** (every plan and chat its own space, even
-  whole-conference ones): uniform, but many spaces and member lists to keep
-  in step for no gain in privacy.
-- **Only the PDS member list, with no index:** a network round trip for
-  every check.
-- **An in-process `MembershipChanged` broadcast and caches:** wrong across
-  the CLI's process boundary (critique #2).
-- **The CLI calling admin endpoints on the running server:** this keeps
-  caches correct, but needs an admin auth path. Not needed without caches.
-- **Codes, lists and requests as records:** they hold secrets, and only the
-  appview reads them.
-- **Roles in the appview's database only** (round 1): other apps couldn't
-  see them.
-- **Organization sign-in through `LOGIN_SCOPES`:** every attendee would be
-  asked for `manage=` scopes.
-- **App passwords for the organization:** they skip OAuth scope checks
-  entirely.
-- **`transition:email` for everyone at sign-in:** every consent screen would
-  ask for an email.
-- **`account:email` instead of `transition:email`:** newer, but less widely
-  deployed. We use `transition:email` and revisit later.
+- **The organization's PDS as host, managed through its OAuth session**
+  (rounds 1 and 2): `putMember` round trips, a mirror to reconcile, removal
+  that couldn't revoke credentials, and an owner-only member list other
+  apps couldn't see.
+- **`#atproto_pds` pointing at us** (the fallback some alpha clients use
+  instead of `#atproto_space_host`): that would make us the authority's
+  PDS of record. Left out until we run the reference PDS.
+- **Host-state roles and rules** (served only by our API): no repo needed,
+  but they wouldn't be records. Admin-written records were chosen. Admin
+  status itself is host state, as the trust root.
+- **The `public-spaces` host:** it tracks the older DPoP format, and it's
+  public-only.
+- **Making the organization's existing account DID the default
+  authority:** needs its PDS's cooperation, and breaks on vivarium today.
+  Offered as "bring your own".
 
 #### Risks
 
-- **Vivarium (0.0.2) and upstream spaces are alpha**, with no published
-  space lexicons. `space.rs` isolates the calls.
-- **Rules are enforced by readers, not the PDS.** Spaces can't restrict
-  writes by collection, so a member's app can write a record the rules
-  forbid. Apps that honor the rules record ignore it; one that doesn't will
-  show it. Accepted: the rules record makes the expected behavior explicit.
-- **Other apps keep reading up to 10 minutes after removal**, with
-  credentials we didn't issue and can't revoke.
-- **Open app access is the organizer's call.** Anything in a conference
-  space is then readable by any app a member trusts. The admin CLI warns
-  when switching to open.
-- **Single-PDS tests:** an organization or attendees on other PDSes, and
-  attestation across hosts, go untested.
-- **Removal:** our appview stops serving a removed member at once, and
-  their later writes are never recorded by the space host (no `write`) or
-  served by us. Tested at both layers.
-- **`authority=*` attendee scopes are broad** (any organization's space of
-  that type). This is acceptable because the appview ignores writes from
-  non-members, and the scopes name their actions and collections.
-- **Email in production:** vivarium returns it regardless of scope. A unit
-  test checks that the `email` sign-in asks for `transition:email`.
-- **The organization session dying** blocks admin writes and `space-sync`.
-  The CLI reports it, and the operator re-runs `org connect`.
-- **The index drifting** from the space's member list (e.g. a CLI crash
-  between the PDS call and the index write): `members reconcile`, which also
-  runs at startup.
-
-#### Critique folded in
-
-A fresh reviewer critiqued the first draft. Changes:
-
-1. **Organization sessions:**
-   - pending requests get a purpose
-   - the organization callback is cookieless, and `CurrentUser` refuses
-     organization sessions
-   - `outdated()` and idle handling are per kind
-   - the changes needed in `attendee-sign-in` are listed explicitly
-2. **The CLI process boundary:** no in-process caches or broadcasts.
-   Everything reads the database.
-3. **Frozen fixture:** dropped the plan to edit ui-blocks'
-   `test-support.tsx`.
-4. **Dependency direction:** `space-sync` now depends on this feature, not
-   the reverse.
-5. **The allow-list and attestation** are pinned to the bare client ID.
-6. **Source of truth:** the database is the truth, and the PDS list is a
-   retried, reconcilable copy.
-7. **Gaps against the description:**
-   - organization-level owners and staff
-   - a trusted operator
-   - the shared organization login as a stated departure
-   - pre-assigned roles for speakers
-   - `--event` to attach an existing event
-   - the RSVP question deferred
-   - code-to-conference lookup for invite links
-   - membership periods for rejoining
-8. **Security:**
-   - rate limits, 80-bit personal codes, shared-code expiry and caps
-   - `emailConfirmed` required, HMAC'd emails, the email grant documented
-   - handles resolved to DIDs
-   - no `manage=delete`, and `repo:` and `blob:` scopes added
-   - explicit actions and collections for attendee scopes
-9. **Smaller points:**
-   - the event URI as the node and the space URI as the boundary
-   - DID-based routes
-   - the single-PDS testing risk
-   - `transition:email`
-   - the email step offered alongside "request" rather than forced
+- **Key custody:** for minted authorities we hold the rotation key, so a
+  breach of our server could take over organizations' DIDs. Keys are
+  encrypted at rest. A later "export your rotation key" or "add your own
+  rotation key" is worth planning.
+- **Real-network discovery:** some current alpha PDSes and clients locate
+  the host through `#atproto_pds`, which we omit. They may not find us
+  until we run the reference PDS. Vivarium and the proposal use
+  `#atproto_space_host`.
+- **Alpha churn:** the credential and notify formats changed twice in a
+  month. The host code is isolated in `spacehost/`, and the formats are
+  pinned to vivarium's.
+- **Rust implementations to build carefully:** RFC 9421 verification,
+  ES256 JWT minting and verification, PLC genesis operations.
+- **Rules are enforced by readers.** Other apps may ignore them.
+- **Single-PDS tests** (vivarium): attendees on other PDSes go untested.
 
 ### Round 1
 
@@ -1006,6 +1276,46 @@ Asked and answered in this round:
   round 1 contradictions removed.
 
 **Approved** by the user on 2026-10-05.
+
+### Round 3
+
+**Feedback:** make our server the space host. The organization is a
+`did:plc` or `did:web` whose document points at our server as its space
+host. Missing vivarium support can be added there. The sibling
+`public-spaces` project built a custom host.
+
+Researched: the proposal's host requirements; vivarium 0.0.2 as attendees'
+PDS for a space hosted elsewhere (works with no changes); `public-spaces`
+(an older DPoP wire format, so we target vivarium 0.0.2's).
+
+Decided with the user:
+
+- **The authority DID:** we mint a dedicated `did:plc` by default. Repointing
+  an existing DID, or adding entries to a `did:web`, is documented but not
+  automated yet.
+- **The DID document:** only `#atproto_space_host` and the `#atproto_space`
+  key. `#atproto_pds` is a fallback, and we leave it out until we run a
+  small reference PDS (expected, e.g. so people can post to Bluesky from
+  their conference).
+- **The organization's records** are written by an admin (into the space,
+  or publicly). An admin can be the authority DID itself once it has a
+  repo. Long-term we'll offer a PDS.
+
+**Changes:**
+
+- Our server implements the space host: credentials, write intake,
+  `listRepos`, notify registrations, and revocation.
+- Membership, policies, app access and admins become host state. There are
+  no `putMember` round trips or reconcile, and the round 2 membership records
+  are dropped (the host API publishes membership).
+- Removal now revokes issued credentials.
+- The organization's OAuth session becomes an admin's session. Admins write
+  the public event, sidecar, roles and rules.
+- Derived groups are computed by the host, with no managing-app policy.
+- `space-sync` shrinks to fetching and indexing, since notifications arrive
+  at our host.
+- Status back to `design-review`. The approved test cases need revising
+  for the admin model, host-enforced app access and removal (no reconcile).
 
 ## Test cases
 
