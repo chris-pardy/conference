@@ -1214,6 +1214,21 @@ the red tests chose them, and the implementation follows them:
   - a conference's theme sets `--g-color-primary` (and the other tokens) on
     `:root`
 
+**Red-test gate (2026-10-06):** the user approved the red tests and the
+surfaces they pin (see Build notes), with these contract changes:
+
+- TC-52 now reads "Pim, a staff admin, and Kees, an owner", matching the
+  design (only owners and the super admin can ban).
+- TC-10 uses the super admin's DID and handle, since a minted authority has
+  no handle.
+- TC-19 is manual (vivarium can't make an unconfirmed email).
+- TC-54 and TC-55 simulate an unreachable PDS by deactivating the account.
+- A new conference route, `app.eventside.conference.listRecords
+  {conference, collection}`, serves members the conference's records with
+  membership periods and the rules applied (403 for non-members).
+- CLI additions: `org show`, and `member add` (an admin admitting someone
+  directly).
+
 ## Test cases
 
 The cast:
@@ -1298,9 +1313,9 @@ Dropped in design review round 3: see TC-45, for admins.
 
 ### TC-10: The public page works by DID or by handle
 
-- **Given** AtmosphereConf's public page link uses Atmosphere's DID
-- **When** someone opens the same page using Atmosphere's handle in place of
-  the DID
+- **Given** AtmosphereConf's public page link uses its super admin's DID
+- **When** someone opens the same page using the super admin's handle in
+  place of the DID
 - **Then** they see the same conference
 
 ### Joining
@@ -1611,7 +1626,7 @@ Dropped in design review round 3: joining no longer writes to the organization's
 
 ### TC-52: Between other admins, a ban wins and otherwise the latest decision stands
 
-- **Given** Pim and another staff admin, Kees
+- **Given** Pim, a staff admin, and Kees, an owner
 - **When** Pim admits Bram and Kees then bans him
 - **Then** Bram is banned
 - **When** Kees removes Ana and Pim later admits her again
