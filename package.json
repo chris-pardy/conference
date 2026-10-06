@@ -19,6 +19,8 @@
     "test:tooling": "node scripts/with-vivarium.ts vitest run --project tooling",
     "test:e2e": "cargo build -p conference-server --locked && pnpm --filter @conference/web build && node scripts/with-vivarium.ts playwright test",
     "lint:fix": "cargo fmt --all && biome check --write .",
+    "dev:server": "PUBLIC_URL=http://127.0.0.1:5173 ALLOW_PRIVATE_NETWORK=true cargo run -p conference-server",
+    "dev:web": "pnpm --filter @conference/web dev",
     "lex:gen": "node scripts/lexicons.ts gen"
   },
   "devDependencies": {

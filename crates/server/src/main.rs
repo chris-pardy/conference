@@ -1,28 +1,40 @@
 use std::io::Write;
+use std::process::ExitCode;
 
-use conference_server::{AppState, router};
+use conference_server::config::Config;
+use conference_server::{AppState, auth, router};
 use tokio::net::TcpListener;
 
 #[tokio::main]
-async fn main() {
-    let port: u16 = std::env::var("PORT")
-        .ok()
-        .map(|p| p.parse().expect("PORT must be a port number"))
-        .unwrap_or(3100);
-    // Unset or empty means a vivarium on its default port.
-    let atproto_url = std::env::var("ATPROTO_URL")
-        .ok()
-        .filter(|url| !url.trim().is_empty())
-        .unwrap_or_else(|| "http://localhost:2580".into());
+async fn main() -> ExitCode {
+    let config = match Config::from_env() {
+        Ok(config) => config,
+        Err(err) => {
+            eprintln!("conference-server: {err}");
+            return ExitCode::from(2);
+        }
+    };
 
-    let listener =
-        TcpListener::bind(("127.0.0.1", port)).await.expect("failed to bind the listening port");
+    let listener = TcpListener::bind(("127.0.0.1", config.port))
+        .await
+        .expect("failed to bind the listening port");
     let addr = listener.local_addr().expect("a bound listener has an address");
+    let public_url = config.public_url.clone().unwrap_or_else(|| format!("http://{addr}"));
+
+    let state = match AppState::build(config, public_url).await {
+        Ok(state) => state,
+        Err(err) => {
+            eprintln!("conference-server: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
+    auth::renew::spawn(state.clone());
 
     // Tests and tooling wait for this exact line to learn the port.
     let mut stdout = std::io::stdout();
     writeln!(stdout, "listening on http://{addr}").ok();
     stdout.flush().ok();
 
-    axum::serve(listener, router(AppState::new(atproto_url))).await.expect("server error");
+    axum::serve(listener, router(state)).await.expect("server error");
+    ExitCode::SUCCESS
 }

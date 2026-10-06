@@ -1,9 +1,9 @@
 ---
-status: ready
+status: complete
 impact: cross-cutting
 depends-on: [ci-pipeline]
-branch:
-tests-commit:
+branch: feature/attendee-sign-in
+tests-commit: 24a32a9cafbe056c159318ef49b0c4542a640736
 ---
 
 # Attendee sign-in
@@ -702,6 +702,155 @@ For later features:
 - Updated the tests for renewal, refresh refused and scopes grown, and the
   impact on `space-sync` (organizer scopes) and `block-actions`.
 
+### Build notes
+
+Where the build refined the approved design:
+
+- **The OAuth protocol is hand-rolled** in `crates/server/src/oauth.rs` and
+  `keys.rs` (ES256 JWS, DPoP with nonce retry, PAR, token, refresh and
+  revoke), not built on `atproto-oauth`. This is the fallback the design
+  named. On reading the crate:
+  - Its token and refresh calls parse the body without checking the HTTP
+    status. That loses the `invalid_grant` vs. `5xx` distinction the
+    renewer depends on.
+  - Its `oauth_refresh` rediscovers the authorization server from the DID
+    document on every refresh.
+- **The client ID carries the scope list once it grows past `atproto`**
+  (`…/oauth-client-metadata.json?scope=…`). Authorization servers cache
+  client metadata. Vivarium caches it for 60 s and ignores cache headers,
+  and production servers cache too. Without a new client ID, a server keeps
+  refusing scopes that the cached metadata doesn't list. With `atproto`
+  alone, the ID is the plain metadata URL.
+- **Every grant is used as the client ID it was issued to.** A pending
+  request (`oauth_requests.client_id`) records the client ID its PAR was
+  pushed as, and the callback redeems the code as that client, whichever
+  instance answers. A session (`sessions.client_id`) keeps that client ID,
+  and every refresh and revocation, from any instance, is made as it. So
+  instances on different scope lists, sharing one database during a
+  rolling deploy, never use each other's grants as the wrong client. The
+  callback checks the grant against the scopes that client ID names (the
+  ones the request was pushed with), not the answering instance's list. If
+  that instance asks for more, `session::outdated` sends the person back
+  through sign-in on their next request to it.
+- **The metadata route serves any well-formed scope list.**
+  `/oauth-client-metadata.json` is `atproto` alone; `?scope=S` is served
+  for any list of RFC 6749 scope tokens that includes `atproto`, has no
+  duplicates and is at most 2 KB, and describes the client ID that is that
+  exact URL. Only the exact spelling a client ID uses is served: the raw
+  query must be `scope=` and the list percent-encoded as the client ID
+  encodes it. `?scope=atproto`, malformed lists, other encodings (`+`,
+  lowercase hex, unencoded `:`) and extra or repeated parameters are
+  `404`, so a served document's `client_id` is always the URL it was
+  fetched from. The server
+  refuses to start (exit 2) if `OAUTH_SCOPES` fails that check, so its own
+  list is always one the route serves. A grant from
+  another instance's scope list may make the authorization server fetch
+  that client's metadata again, from any instance, so an allow-list of this
+  instance's own list (or one compiled into the binary) would break
+  rolling deploys. Serving any list grants nothing: the client is
+  confidential, and every PAR, token and revocation request as any of these
+  client IDs needs an assertion signed with this client's key.
+- **A session ends for a missing scope, and nothing else about its grant.**
+  `session::outdated` is true only when the granted scopes lack one this
+  instance asks for at sign-in. A grant with more scopes, or issued to
+  another client ID, stays live and is refreshed as its own client.
+- **`getSession` renews the session cookie on every answer**, not only when
+  it moves `last_seen_at` (at most hourly). Other routes move
+  `last_seen_at` without renewing the cookie, so renewing only on a touch
+  could let a heavily used PWA's cookie run out while its row was live.
+- **SQLite runs in WAL mode** (`PRAGMA journal_mode = WAL` on connect, kept
+  in the file). In the default rollback mode, a reader of the file outside
+  the server (the tests' `storedTokens`) failed with `database is locked`
+  while the renewer was writing.
+- **The schema is one migration, `0001_auth.sql`.** The branch's three
+  migrations were squashed before merging, since they reach `main`
+  together. A local `data/` database created from this branch before
+  round 9 has the old migration checksums and has to be deleted.
+- **The session cookie lives for the idle timeout plus 30 days** (the
+  tombstone), not just the idle timeout. An idle session has to still send
+  its cookie for the PWA to hear `SessionExpired`. An ended row is kept for
+  the idle timeout plus 30 days after it ended, which is never before its
+  cookie runs out.
+- **Bad settings exit 2, before anything starts.** `Config::from_env`
+  checks `PUBLIC_URL` (a bare `http` or `https` origin with no path,
+  query, fragment or credentials, since the client ID, redirect URI,
+  cookies and same-origin checks are built on it; it's normalized as the
+  browser serializes an origin, so `https://App.Example:443` becomes
+  `https://app.example` and a non-ASCII host becomes punycode, and the
+  normalized value is the one used everywhere), `DATABASE_URL`
+  (a supported scheme, and not in-memory SQLite) and `OAUTH_SIGNING_KEY`
+  (a P-256 private JWK). A database that can't be reached or migrated
+  still exits 1.
+- **The PWA reads only the appview's own refusals as signed out.**
+  `fetchSession` is signed out for a 401 `AuthRequired` and expired for a
+  401 `SessionExpired`; any other status (a proxy's 429 or 408, say) is
+  `unavailable`. `api()` shows the signed-out state when a request is
+  refused with `AuthRequired`, as after a sign-out in another window.
+- **The default database** is `sqlite://data/eventside.db?mode=rwc`,
+  relative to the working directory. `data/` is git-ignored.
+- **In-memory SQLite is refused.** sqlx shares an in-memory database
+  (`sqlite::memory:`, `mode=memory`, `vfs=memdb`) between the pool's
+  connections, but it vanishes when they all close, which the pool does to
+  idle ones, silently dropping every session and the generated signing key.
+  The server refuses it at startup. `file:` URIs are refused too, since
+  SQLite reads their own parameters; a plain path names any real file.
+- **Signing out of an ended or unknown session needs no CSRF token**, since
+  it holds no tokens, and clears the cookie, but only a cookie the request
+  carried. A cross-site form POST carries no cookie (`SameSite=Lax`), so it
+  gets a `200` with no `Set-Cookie` and can't strand a live session the
+  person could no longer reach to sign out. A live session always needs
+  its CSRF token.
+- **TC-24's IP rules are covered by a Rust unit test.** Vivarium serves
+  plain `http://localhost`, so the frozen integration test is refused by
+  the `https` check before the private-address guard runs. The guard's
+  rules (loopback, private, link-local and the rest, refused unless
+  `ALLOW_PRIVATE_NETWORK`) are covered by
+  `net::tests::private_addresses_are_refused_unless_allowed`.
+- **Only the request that ends a session revokes its grant.** `session::end`
+  and the renewer's `session::end_revoking` wipe the row first and revoke
+  only if they were the one to end it, so requests racing on a just-idled
+  session revoke once, and a failed wipe revokes nothing.
+- **What's revoked is what was removed.** Sign-out and replacing a
+  browser's session delete the row with `DELETE … RETURNING` and revoke the
+  tokens that came back. `session::wipe` clears the tokens only if they're
+  still the ones it read (re-reading up to three times if a renewal saved
+  new ones in between) and returns that row for `end` and `end_revoking` to
+  revoke. So a renewal landing between the read and the delete or wipe
+  never leaves its new grant live with no row holding it.
+- **Authorization servers must advertise what atproto requires.**
+  `auth_server` refuses one whose metadata lacks
+  `authorization_response_iss_parameter_supported`,
+  `require_pushed_authorization_requests`,
+  `client_id_metadata_document_supported`, `private_key_jwt`, ES256 for
+  client assertions and DPoP, or the `atproto` scope, and logs which. The
+  PWA shows `server_unsupported` for it, not "couldn't be reached".
+  `create` in `prompt_values_supported` isn't required for sign-up:
+  vivarium 0.0.1 doesn't advertise it but does sign people up with it.
+- **The generated signing key is a single row.** `client_keys` has a
+  `slot` primary key that is always `1`, next to the `kid`, private JWK and
+  `created_at`. Every instance tries to insert its own new key with
+  `ON CONFLICT (slot) DO NOTHING` and then reads `slot = 1`, so instances
+  starting together on a fresh database all use the one key that was
+  stored, and a restart never switches to another.
+- **Where the design's interfaces ended up.** Later features use these
+  names:
+  - `CurrentUser` is `auth::CurrentUser` (`crates/server/src/auth/mod.rs`),
+    with `did`, `handle` and `scopes` as designed.
+  - `LOGIN_SCOPES` is `config::LOGIN_SCOPES` (`crates/server/src/config.rs`).
+    `OAUTH_SCOPES` overrides it at run time.
+  - `user.pds_client().await?` is `user.pds_client(&state).await?`, taking
+    the `AppState`, and returns an `auth::pds::PdsClient`.
+  - `ClientKeys` is `state.oauth.key`, one `keys::EcKey` (the configured
+    `OAUTH_SIGNING_KEY` or the generated row), with its `kid` set.
+  - `AppState::db()` is the field `state.db` (an `sqlx::AnyPool`, through
+    `AppState`'s `Deref` to `Inner`).
+  - The CSRF middleware is `auth::require_csrf`, layered over the router in
+    `lib.rs`.
+  - The design's `oauth/` and `xrpc/auth.rs` modules are the single files
+    `crates/server/src/oauth.rs` and `crates/server/src/auth/routes.rs`.
+  - Test helpers: `signIn` and `signUp` are in `tests/support/auth.ts`,
+    `signInAs` in `e2e/support/auth.ts`.
+
 ## Test cases
 
 Ana and Bram are attendees with vivarium accounts. Mallory is an attacker
@@ -941,3 +1090,709 @@ scopes are the default (`atproto` only).
   shell, and the flow completes
 
 ## Review log
+
+### Round 1
+
+The reviewer found 0 blocking, 0 major, 7 minor and 2 nits. `pnpm check`
+was green and the frozen files unchanged. Every finding was fixed.
+
+1. **[minor] An expired session could never be signed out, so its cookie
+   stuck for 30 days.**
+   - Fixed: the CSRF layer now lets `/oauth/logout` through for an ended
+     session, which holds no tokens.
+   - The expired banner has a "Not you? Sign out" button.
+2. **[minor] Sessions ended by idle timeout or grown scopes weren't
+   revoked.**
+   - Fixed: `session::end` now revokes the grant in the background before
+     wiping it.
+   - `session::wipe` (no revoke) is kept only for grants the server has
+     already refused.
+3. **[minor] The renewer refreshed sessions granted under an older scope
+   list, using the new client ID.**
+   - Fixed: a refresh first checks the scopes, and ends and revokes the
+     session if any are missing. That covers the renewer and on-demand
+     refreshes alike.
+4. **[minor] `pds_client()` spun for 10 s on a session with no refresh
+   token.**
+   - Fixed: once the access token is stale and there's no refresh token,
+     the session ends and the client returns `SessionExpired`.
+5. **[minor] A `handle.invalid` session couldn't be signed back in.**
+   - Fixed: `SessionExpired` now carries the DID too, and the PWA uses it
+     when the handle didn't verify.
+   - `/oauth/login` accepts a DID, skipping handle resolution.
+6. **[minor] A refresh could outlast its 30 s lease.**
+   - Fixed: the lease is now 90 s, and each refresh is cut off at 60 s.
+7. **[minor] `discover` didn't check the protected-resource `resource`
+   field.**
+   - Fixed: it must equal the PDS URL.
+8. **[nit] `iss` was checked after `error` on the callback.**
+   - Fixed: it's checked first (RFC 9207). Vivarium sends `iss` on denials,
+     and TC-5 still passes.
+9. **[nit] Sign-out failures were silent, and a network error went
+   unhandled.**
+   - Fixed: `signOut` catches errors and reports whether it worked, and the
+     account menu shows a message when it didn't.
+
+### Round 2
+
+The reviewer found 0 blocking, 1 major, 5 minor and 3 nits. `pnpm check`
+was green, and every round 1 fix was confirmed. All findings were fixed;
+one suggestion within finding 1 (per-IP rate limiting) was declined.
+
+1. **[major] Unbounded response bodies from attacker-chosen hosts.**
+   - Fixed: `net::read_capped` and `net::read_json` cap every body read
+     from another service at 64 KiB. They check `Content-Length` first,
+     then stop reading in chunks once past the cap. They cover DID
+     documents, `resolveHandle`, PDS and authorization-server metadata,
+     profiles, and PAR, token and revocation responses.
+   - Declined: per-IP rate limiting on `/oauth/login` and `/oauth/signup`.
+     The appview binds 127.0.0.1 and runs behind whatever serves its
+     public origin, so the peer address is the proxy's. A per-IP limit
+     belongs at that edge, which the production topology (an open risk in
+     the design) will decide. Pending requests are swept on every renewal
+     run.
+2. **[minor] A sign-out during a refresh left the new grant unrevoked.**
+   - Fixed: when the save after a refresh matches no row, the new grant is
+     revoked. That covers a session signed out, ended or replaced
+     mid-refresh. A failed save revokes it too.
+3. **[minor] No backoff for unreachable authorization servers.**
+   - Fixed: an issuer whose metadata fetch fails, or whose refresh is
+     `Unavailable`, is left alone for 30 s. `cached_auth_server` fails fast
+     until then, so one run costs at most one timeout per issuer, not one
+     per session.
+4. **[minor] DIDs typed at `/oauth/login` went into the PLC URL
+   unvalidated.**
+   - Fixed: `identity::is_valid_did` requires `did:plc:` with 24 base32
+     characters, or a host-level `did:web:`.
+   - It's checked at login (a bad DID is `handle_not_found`), in
+     `resolve_did`, and on `resolveHandle` results and callback `sub`
+     values.
+5. **[minor] Most error codes had no message.**
+   - Fixed: the sign-in page now has a message for each of the 11 codes.
+     The generic fallback covers only codes it doesn't know.
+6. **[minor] A refresh's `sub` wasn't checked.**
+   - Fixed: a refresh that comes back for a different DID revokes the new
+     grant, wipes the session, and ends it.
+7. **[nit] `displayName` wasn't limited.**
+   - Fixed: it's truncated to 64 characters and 640 bytes on a character
+     boundary, inside the lexicon's limits.
+8. **[nit] `touch`'s comment promised cookie renewal that only `getSession`
+   does.**
+   - Fixed: the comment now says so. The PWA calls `getSession` on every
+     load.
+9. **[nit] `PdsClient` didn't share DPoP nonces.**
+   - Fixed: it reads and updates the OAuth client's per-origin nonce cache.
+
+### Round 3
+
+The reviewer found 0 blocking, 0 major, 3 minor and 4 nits. `pnpm check`
+was green. The reviewer confirmed the earlier fixes, and two suspected
+races turned out not to happen. Every finding was fixed.
+
+1. **[minor] The issuer backoff also blocked revocation, and every other
+   session on the same issuer.**
+   - Fixed: `cached_auth_server` no longer checks the backoff. Only the
+     renewer does: it skips sessions on a backing-off issuer.
+   - Revocation, the callback and `pds_client()` always try.
+   - Failed metadata fetches and `Unavailable` refreshes still mark the
+     issuer down.
+2. **[minor] Temporary resolver failures were treated as final.**
+   - Fixed: only a 400 or 404 from `resolveHandle` means "no such handle",
+     so a 429 or 5xx is `Unresolvable`.
+   - `resolve_did` uses `handle.invalid` only when the handle definitely
+     doesn't point back. A resolver that can't answer fails the
+     resolution, so the callback reports `resolution_failed` and stores
+     nothing.
+3. **[minor] The PWA showed the person as signed out whenever `getSession`
+   failed.**
+   - Fixed: network errors and 5xx answers read as a new `unavailable`
+     state. The header shows neither control, and an already-known state is
+     kept.
+   - The provider asks again on `online` and when the app becomes visible.
+   - The "never throws" comment now matches what the code does.
+4. **[nit] Token responses weren't checked for `token_type` or `sub`.**
+   - Fixed: every token response must be `DPoP` and carry `sub`. A refresh
+     must come back for the session's own DID, and a missing `sub` counts
+     as a mismatch.
+5. **[nit] Issuers were normalized inconsistently.**
+   - Fixed: an issuer is compared exactly everywhere: metadata `issuer`,
+     the stored issuer, and the callback's `iss`. A trailing slash is
+     refused rather than trimmed, since an atproto issuer is a bare origin.
+6. **[nit] State-changing routes looked the session up twice.**
+   - Fixed: the CSRF layer passes the session it checked to `CurrentUser`
+     through request extensions.
+7. **[nit] `serde_json` was listed under both dependencies and
+   dev-dependencies.**
+   - Fixed: the dev-dependency entry is gone.
+
+### Round 4
+
+The reviewer found 0 blocking, 0 major, 3 minor and 2 nits. `pnpm check`
+was green. The reviewer confirmed the earlier fixes, and a scratch test
+showed that grants ended by grown scopes are revoked. Every finding was
+fixed.
+
+1. **[minor] Sign-out waited on the authorization server before deleting
+   the session.**
+   - Fixed: `logout` deletes the row (and so clears the cookie) first.
+   - It then revokes in a spawned task, and waits at most 3 s so the grant
+     is usually gone by the time sign-out returns.
+   - Dropping the request can no longer leave the person signed in.
+2. **[minor] `pds_client()` re-refreshed whenever the server's tokens
+   didn't outlive the skew.**
+   - Fixed: the skew now only decides when to start a refresh. After a
+     refresh, its own or another instance's, the client uses the token as
+     long as it hasn't expired.
+3. **[minor] One shared pre-auth cookie broke concurrent sign-ins.**
+   - Fixed: each sign-in's cookie is named after the start of its `state`
+     (`oauth_preauth_<id>`).
+   - A callback reads and clears only its own, so two tabs, or a stray
+     callback link, can't disturb another sign-in.
+4. **[nit] The renewer loaded every due session at once.**
+   - Fixed: it pages through due sessions 500 at a time (keyset on
+     `id_hash`), finishing each batch before loading the next.
+5. **[nit] `touch` ran more often than the design's "at most once an
+   hour".**
+   - Fixed: it's capped at once an hour. Only idle timeouts shorter than
+     10 hours (as in tests) touch more often, every tenth of the timeout.
+
+### Round 5
+
+The reviewer found 0 blocking, 0 major, 3 minor and 2 nits. `pnpm check`
+was green. Every finding was fixed after the review, and `pnpm check` is
+green again. No reviewer has seen these fixes yet.
+
+1. **[minor] The guarded client honored `HTTP(S)_PROXY`, so a proxy would
+   bypass the private-network guard.**
+   - Fixed: both clients use `.no_proxy()`.
+   - An egress proxy, if one is ever needed, has to be configured
+     explicitly and enforce the address policy itself.
+2. **[minor] The DPoP nonce cache could grow without bound, keyed by
+   attacker-chosen origins.**
+   - Fixed: nonces over 512 bytes are ignored, and the cache starts over
+     when it reaches 1024 origins. Nonces are only an optimization.
+3. **[minor] A failed session insert left the person signed out, with the
+   new grant unrevoked.**
+   - Fixed: the callback now creates the new session before retiring the
+     browser's old one, and revokes the new grant if the insert fails.
+4. **[nit] IPv6 forms that embed an IPv4 address passed as public, and the
+   DNS filter had no test.**
+   - Fixed: NAT64 (`64:ff9b::/96`) and 6to4 (`2002::/16`) are judged by
+     their embedded IPv4 address, and IPv4-compatible `::a.b.c.d` is
+     refused.
+   - The filter is now a function with its own unit test.
+5. **[nit] `pds_endpoint` accepted any `…#atproto_pds` service.**
+   - Fixed: it accepts only `#atproto_pds` or `<did>#atproto_pds`, with
+     `type: AtprotoPersonalDataServer`.
+
+### Blocked after round 5
+
+The pipeline allows five review rounds. None came back clean, so this needs
+a human decision before shipping.
+
+**What the rounds found:**
+- No round found anything blocking, and only round 2 found a major issue
+  (unbounded response bodies, now fixed).
+- Every finding was fixed except one suggestion, declined in round 2 with a
+  reason that hasn't been disputed.
+- The findings don't recur. Each round went one layer deeper into new edge
+  cases, mostly around the network boundary (SSRF, resource limits) and
+  races between renewal, sign-out and re-sign-in. The earlier fixes held
+  in every later round.
+- Two findings were follow-ups on earlier fixes: round 3 found the round 2
+  backoff blocked revocation, and round 4 found the round 1 lease could be
+  outlived by the PDS client's own refresh loop.
+
+**Current state:** all 30 test cases pass, the frozen tests are unchanged,
+and `pnpm check` is green with the round 5 fixes.
+
+**The choices:**
+- Accept the branch as it stands and ship it.
+- Run a sixth round to review the round 5 fixes.
+
+**Decision (2026-10-02):** the user raised the review limit to 10 rounds
+(PR #5), so the review loop resumes at round 6.
+
+### Round 6
+
+The reviewer found 0 blocking, 0 major, 4 minor and 2 nits. `pnpm check`
+was green. Every finding was fixed after the review, and `pnpm check` is
+green again. No reviewer has seen these fixes yet.
+
+1. **[minor] `TOKEN_RENEW_INTERVAL=0` panicked the renewal task, and huge
+   durations could overflow.**
+   - Fixed: a zero `TOKEN_RENEW_INTERVAL` or `SESSION_IDLE_TIMEOUT` is a
+     startup error (exit 2).
+   - `parse_duration` uses `checked_mul` and refuses anything over ten
+     years, so the idle timeout plus the tombstone period can't overflow.
+2. **[minor] The expired banner on `/signin` sent people back to the
+   sign-in page.**
+   - Fixed: the banner uses `useReturnTo()`, like the account control, so
+     on `/signin` it keeps the page's own `return_to`.
+3. **[minor] Sign-in through `vite dev` failed, because `PUBLIC_URL`
+   defaulted to the backend's own address.**
+   - Fixed: `pnpm dev:server` starts the backend with
+     `PUBLIC_URL=http://127.0.0.1:5173`, and `pnpm dev:web` starts Vite.
+   - Vite's dev server is pinned to `127.0.0.1:5173` (`strictPort`), with
+     a comment saying why.
+4. **[minor] The CSRF layer covered only routes registered before it.**
+   - Fixed: `routes()` holds every route, and `router()` wraps the finished
+     set in the CSRF check, so a feature adding a route there gets it.
+   - A Rust test adds a dummy non-GET `/xrpc/` route and checks it
+     returns 401 without a session, 403 without the right token, and 200
+     with it.
+5. **[nit] Sign-out looked the session up again.**
+   - Fixed: it uses the session the CSRF layer checked, and looks up only
+     for an ended session, which the layer lets through.
+6. **[nit] The renewal query scanned every live session.**
+   - Fixed: idle sessions and due tokens are now two queries, each paged
+     by its own column on its own index, `(ended_at, last_seen_at, id_hash)`
+     and `(ended_at, token_expires_at, id_hash)`.
+   - SQLite plans both as index range searches with no temp B-tree.
+   - The indexes are a new migration, `0002_renewal_indexes.sql`, rather
+     than an edit to `0001_auth.sql`: a database that already ran 0001 (a
+     local run of this branch) would refuse its changed checksum.
+
+### Round 7
+
+The reviewer found 0 blocking, 0 major, 3 minor and 4 nits. `pnpm check`
+was green. Every finding was fixed after the review, and `pnpm check` is
+green again. No reviewer has seen these fixes yet.
+
+1. **[minor] One renewal run could refresh the same session twice.**
+   - Fixed: a refresh moves the row's `token_expires_at`, possibly to a key
+     still ahead of the cursor and due. The run keeps the `id_hash` of every
+     session it has handled and skips one it meets again; the cursor still
+     moves past it, so the run ends.
+2. **[minor] Revocations from the renewer escaped its concurrency limit.**
+   - Fixed: the renewer (idle expiry, and a grant missing a scope) uses a
+     new `session::end_revoking`, which wipes the session and then awaits
+     the revocation, for at most 15 seconds, while holding its permit.
+   - Request-path callers keep `session::end`'s background revocation.
+3. **[minor] A stale CSRF token, after a sign-out and sign-in in another
+   window, failed every write until a reload.**
+   - Fixed: on `403 InvalidCsrfToken`, `api()` fetches the session again
+     and hands it to the `SessionProvider`, so the shell shows who is
+     signed in now. It retries once with the new token if it's the same
+     account, and doesn't for a different one.
+   - Sign-out still refused after that means another account signed in
+     elsewhere and the shell now shows it, so it's not reported as a
+     connection problem.
+   - Two unit tests cover the retry and the different-account case.
+4. **[nit] `expires_in` from the authorization server was unbounded.**
+   - Fixed: `TokenSet::expires_at` clamps it to 30 seconds–1 day (5
+     minutes when missing) with saturating addition. Sign-in and renewal
+     both use it, and a unit test covers the bounds.
+5. **[nit] `currentPath()` was dead code.**
+   - Fixed: deleted.
+6. **[nit] The Rust CSRF test read the environment and left its temp
+   directory behind.**
+   - Fixed: it builds `Config` explicitly, and a guard removes the
+     directory when the test ends, pass or fail.
+7. **[nit] `oauth_requests.kind` was written but never read.**
+   - Fixed: a comment where it's written says it's diagnostic only; the
+     callback treats both flows alike.
+
+### Round 8
+
+The reviewer found 0 blocking, 0 major, 4 minor and 3 nits. `pnpm check`
+was green. Every finding was fixed after the review, and `pnpm check` is
+green again. No reviewer has seen these fixes yet.
+
+1. **[minor] Sign-out reported success on any 403, even when the appview
+   couldn't be asked.**
+   - Fixed: on a 403 that `api()` couldn't resolve, `signOut` asks for the
+     session itself. It succeeds only if that shows the session over
+     (signed out, expired, or another account), and fails if the appview
+     can't be asked or the same account is still signed in.
+   - Three unit tests in `SessionProvider.test.tsx` cover the cases.
+2. **[minor] Refresh and revocation used the current client ID, not the
+   one the grant was issued to.**
+   - Fixed: a session stores its client ID (new migration
+     `0003_session_client_id.sql`; NULL means the current one).
+     `session::outdated` ends a session issued to another client ID, as it
+     does one whose scopes grew, so a shrunk or reordered scope list no
+     longer leads to a refresh as the wrong client. Revocation is skipped
+     for such a grant, since the server would refuse it. Recorded in the
+     build notes.
+   - A Rust test covers the check.
+3. **[minor] Ended rows were swept 30 days after ending, while their
+   cookie could live the idle timeout plus 30 days.**
+   - Fixed: the sweeper keeps both ended and idle rows until the idle
+     timeout plus the tombstone has passed since `ended_at` or
+     `last_seen_at`, never before the cookie runs out. A Rust test covers
+     a row ended 40 days ago (kept) and 61 days ago (gone).
+4. **[minor] Ending idle sessions ignored the issuer backoff, and a
+   hanging revocation endpoint could stall renewal.**
+   - Fixed: `end_revoking` wipes without revoking when the issuer is
+     backing off, and marks the issuer down when a revocation times out.
+     `session::revoke` marks it down when the revocation POST is
+     unavailable. A hanging issuer now costs one timeout per backoff
+     period, not one per session.
+5. **[nit] The CSRF retry would re-send a spent stream body.**
+   - Fixed: `api()` doesn't retry when the body is a `ReadableStream`.
+6. **[nit] The run's `handled` set grew with every session it touched.**
+   - Fixed in part: only the refresh job remembers sessions, since an
+     ended session can't come back into the idle query. The refresh set
+     stays: it lasts one run, at roughly 100 bytes per due session, which
+     at conference scale is well under a megabyte.
+7. **[nit] An issuer with a path was accepted.**
+   - Fixed: `auth_server` refuses an issuer that isn't a bare origin
+     (its URL's origin must serialize to the issuer exactly), with a unit
+     test.
+
+### Round 9
+
+The reviewer found 0 blocking, 1 major, 1 minor and 3 nits. `pnpm check`
+was green. Every finding was fixed after the review, and `pnpm check` is
+green again. No reviewer has seen these fixes yet.
+
+1. **[major] Round 8's client ID check ended healthy sessions across
+   instances, and a callback could redeem a code as the wrong client.**
+   - Fixed: `oauth_requests` records the client ID each PAR was pushed as,
+     and the callback exchanges the code (and revokes an unused grant) as
+     it. Sessions store it too, and `exchange_code`, `refresh` and
+     `revoke` take the client ID, so every call for a row is made as that
+     row's client from any instance. The skipped revocation for "another
+     client" is gone.
+   - `session::outdated` checks only for a missing scope again, so a
+     superset grant or another client ID no longer ends a session.
+   - `/oauth-client-metadata.json?scope=S` serves metadata for any
+     well-formed scope list containing `atproto`, at its exact client ID,
+     and `404`s anything else (this instance's own list is always served).
+     Why not an allow-list is in the build notes.
+   - Rust tests cover the metadata rule, `outdated`, and a session issued
+     to another client ID being refreshed and revoked as that client,
+     against a stand-in authorization server that records the client ID.
+2. **[minor] The cookie was renewed only when `getSession` itself moved
+   `last_seen_at`.**
+   - Fixed: `getSession` renews the cookie on every successful answer, and
+     `touch` no longer reports whether it wrote. A Rust test checks two
+     answers in a row both set the cookie.
+3. **[nit] The expired banner's "Not you? Sign out" ignored a failure.**
+   - Fixed: a `useSignOut` hook and `SignOutFailed` alert, shared with the
+     account menu. A unit test in `Shell.test.tsx` covers the banner.
+4. **[nit] A refused sign-out fetched the session twice.**
+   - Fixed: `api()` keeps the session it fetched while handling an
+     `InvalidCsrfToken` refusal, by response, behind `sessionLearned(res)`.
+     `signOut` uses it, and only asks itself when `api()` didn't. A unit
+     test counts one fetch.
+5. **[nit] The first schema shipped as three migrations, with NULL
+   handling no deployment would need.**
+   - Fixed: squashed into `0001_auth.sql`, with `client_id NOT NULL` on
+     `sessions` and `oauth_requests`, and the NULL handling removed. The
+     worktree's local `data/` database was deleted; see the build notes.
+   - Also while running the gate: TC-11 failed every time, on this round's
+     code and on round 8's, with `database is locked` when the test read
+     the SQLite file during a renewal. The server now puts SQLite in WAL
+     mode, so readers don't wait on writers (build notes).
+
+### Round 10
+
+The reviewer found 0 blocking, 0 major, 3 minor and 2 nits. `pnpm check`
+was green. Every finding was fixed after the review, and `pnpm check` is
+green again. No reviewer has seen these fixes yet.
+
+1. **[minor] `OAUTH_SCOPES` was never validated, and the metadata route
+   served this instance's own list however it was configured.**
+   - Fixed: the server refuses to start (exit 2) unless the list is
+     distinct, valid scope names including `atproto` (the same
+     `well_formed_scope` rule the metadata route uses). The route's "own
+     list is always served" exception and its unit test are gone. A unit
+     test in `config.rs` covers the check.
+2. **[minor] `DATABASE_URL=sqlite::memory:` started, but each pooled
+   connection was its own empty database.**
+   - Fixed: in-memory and temporary SQLite URLs (`:memory:`, an empty
+     path, `file:` URIs, `mode=memory`) are refused at startup, replacing
+     the `:memory:` special case. A unit test in `db.rs` covers them.
+3. **[minor] Nothing tested that a code is redeemed as the pending
+   request's client ID.**
+   - Fixed: a Rust test stores a pending request pushed as another scope
+     list's client ID and runs the callback against the recording
+     authorization server. It checks the token request and the unused
+     grant's revocation were both made as that client ID. It fails if
+     `complete` uses the instance's own client ID.
+4. **[nit] Signing out with a cookie that names no session got
+   `401 AuthRequired`, so the dead cookie wasn't cleared.**
+   - Fixed: the CSRF layer lets `/oauth/logout` through for an unknown
+     session as well as an ended one. Nothing is revoked or deleted, and
+     the handler clears the cookie. A live session still needs its CSRF
+     token. A Rust test covers both.
+5. **[nit] `session::end` spawned a revocation even when another request
+   had already ended the session.**
+   - Fixed: `wipe` reports whether it ended the session, and `end` spawns
+     the revocation only then. A Rust test ends the same session twice and
+     sees one revocation.
+
+**Decision (2026-10-05):** the user approved an 11th review round to check the round 10 fixes.
+
+### Round 11
+
+The reviewer found 0 blocking, 0 major, 2 minor and 2 nits, so the round
+isn't clean. `pnpm check` was green. Every finding was fixed after the
+review, and `pnpm check` is green again. No reviewer has seen the round 11
+fixes yet.
+
+1. **[minor] `session::end_revoking` revoked a grant even when it didn't
+   end the session.** It ignored `wipe`'s result, so it revoked after
+   another request had already ended the session, and also when `wipe`
+   failed, leaving a live row on a revoked grant. Round 10 #5 fixed only
+   `end`.
+   - Fixed: `end_revoking` returns `wipe`'s error, and returns without
+     revoking when `wipe` reports the session was already ended. A Rust
+     test runs `end_revoking`, `end` and `end_revoking` on one session and
+     sees one revocation.
+2. **[minor] The stored handle was the DID document's raw `alsoKnownAs`
+   text, lowercased, not the normalized handle that was checked.** With
+   `at://@ana.test`, `resolve_handle` checked `ana.test` but `@ana.test`
+   went into the session, the header, `SessionExpired` and the banner's
+   `login_hint`.
+   - Fixed: `claimed_handle` returns the entry run through
+     `normalize_handle`, so the stored handle is the one checked. An entry
+     that can't be a handle gives `handle.invalid`. A unit test in
+     `identity.rs` covers it.
+3. **[nit] The reason given for refusing in-memory SQLite was wrong, and
+   `vfs=memdb` got through.** sqlx 0.8.6 shares an in-memory database
+   between the pool's connections. The real hazard is that it vanishes
+   when they all close, taking every session and the signing key with it.
+   - Fixed: the comment, the startup error and the build note give the
+     real reason. `vfs=memdb` is refused, and query parameters are
+     percent-decoded before they're checked, as sqlx does. `file:` URIs
+     are still refused: SQLite reads their own parameters (`file::memory:`
+     and the like), and a plain path names any real file. The `db.rs`
+     unit test covers the new cases.
+4. **[nit] The scope list was validated only in `Config::from_env`, and a
+   list over 2048 bytes failed with a message that didn't mention
+   length.** `OAuthClient::metadata` assumed startup had checked the list,
+   but a `Config` built directly (as tests do) could give a client whose
+   own client ID `metadata` refused.
+   - Fixed: `OAuthClient::new` returns an error for a list `metadata`
+     wouldn't serve, and `AppState::build` passes it on. A new
+     `scope_problem` names the rule that failed (length, token syntax,
+     missing `atproto`, a duplicate), and both errors use it. Unit tests
+     in `oauth.rs` and `config.rs` cover it.
+
+**Decision (2026-10-05):** the user allowed up to 15 review rounds for this build.
+
+### Round 12
+
+The reviewer found 0 blocking, 0 major, 3 minor and 3 nits, so the round
+isn't clean. `pnpm check` was green. Every finding was fixed after the
+review, and `pnpm check` is green again. No reviewer has seen the round 12
+fixes yet.
+
+1. **[minor] The callback checked the grant against the answering
+   instance's scope list, not the one the request was pushed with.**
+   During a rolling deploy, a sign-in pushed by an `atproto` instance and
+   answered by one asking for more was revoked and sent to
+   `scope_missing`, though the person granted everything asked.
+   - Fixed: `oauth::client_scopes` recovers the scope list from the
+     pending request's client ID, and the callback checks the grant
+     against it. If the answering instance asks for more,
+     `session::outdated` sends the person back through sign-in on their
+     next request. No schema change was needed. A Rust unit test covers
+     `client_scopes`, and an integration test pushes on one instance,
+     answers the callback on another with a grown list, and sees no error
+     and then `SessionExpired`.
+2. **[minor] `api()` ignored a 401 `AuthRequired`.** After a sign-out in
+   another window, a refused request left the shell showing the person
+   signed in.
+   - Fixed: `api()` reports `AuthRequired` to the `SessionProvider` as
+     signed out. A unit test sits next to the CSRF retry tests.
+3. **[minor] `PUBLIC_URL` wasn't checked.** A value with a path published
+   a client ID and redirect URI the routes don't serve, and a scheme-less
+   one started with non-`Secure` cookies and an unusable client ID.
+   - Fixed: `Config::from_env` requires a bare `http` or `https` origin
+     (the rule `bare_origin` uses) and exits 2 otherwise. A trailing slash
+     is still trimmed. Unit and integration tests cover it.
+4. **[nit] The metadata route served documents whose `client_id` wasn't
+   the fetched URL** (`+` for spaces, extra or repeated parameters).
+   - Fixed: the route reads the raw query and serves only the exact
+     spelling `client_id` produces. The bare URL and the canonical
+     `?scope=…` URL still answer 200. Unit and integration tests cover
+     both sides.
+5. **[nit] Config errors found in `AppState::build` exited 1, others 2.**
+   - Fixed: `DATABASE_URL` (scheme, in-memory SQLite) and
+     `OAUTH_SIGNING_KEY` are checked in `Config::from_env`, so they exit 2.
+     `db::connect` still runs the same check for a `Config` built
+     directly. An integration test checks the exit codes.
+6. **[nit] `fetchSession` read any 4xx other than `SessionExpired` as
+   signed out**, so a proxy's 429 or 408 showed "Sign in" to a signed-in
+   person.
+   - Fixed: only a 401 `AuthRequired` is signed out. Every other status is
+     `unavailable`. A unit test covers both.
+
+### Round 13
+
+The reviewer found 0 blocking, 0 major, 1 minor and 3 nits, so the round
+isn't clean. `pnpm check` was green. Every finding was fixed after the
+review, and `pnpm check` is green again. No reviewer has seen the round 13
+fixes yet.
+
+1. **[minor] A cross-site form POST to `/oauth/logout` cleared the
+   person's session cookie while the session stayed live.** The POST
+   carries no `SameSite=Lax` cookie, so the CSRF layer saw no session and
+   let it through (round 10 #4), and the handler always cleared the
+   cookie. The grant stayed live and kept being refreshed, out of the
+   person's reach.
+   - Fixed: `logout` sends the clearing `Set-Cookie` only when the
+     request carried a session cookie. With none, it answers `200` with no
+     `Set-Cookie`. Live sessions still need the CSRF token, and an ended or
+     unknown cookie that was sent is still cleared. The Rust test
+     `signing_out_a_session_that_is_gone_clears_its_cookie` now also posts
+     with no cookie and no token and checks there's no `Set-Cookie`.
+2. **[nit] A `PUBLIC_URL` with an uppercase or non-ASCII host was refused**
+   with a message about path, query or port.
+   - Fixed: `public_url` accepts any `http` or `https` URL with no path,
+     query, fragment or credentials and returns its origin as the browser
+     serializes it (lowercase, punycode, no default port). `Config` holds
+     the normalized value, so the client ID, redirect URI and cookies all
+     use it. The config unit test covers the normalization and the new
+     refusals.
+3. **[nit] TC-24 passes without reaching the private-address guard**,
+   since vivarium is plain `http://localhost` and the `https` check
+   refuses first. The test is frozen.
+   - Fixed: the build notes record that the Rust unit test
+     `private_addresses_are_refused_unless_allowed` covers the IP rules.
+4. **[nit] The callback fell back to this instance's scope list when the
+   client ID had none.** The fallback couldn't run, and if it had, it would
+   have brought back the round 11/12 bug.
+   - Fixed: a client ID with no recoverable scope list revokes the grant,
+     logs, and fails the sign-in with `server_error`.
+
+### Round 14
+
+The reviewer found 0 blocking, 0 major, 3 minor and 1 nit, so the round
+isn't clean. `pnpm check` was green. Every finding was fixed after the
+review, and `pnpm check` is green again. No reviewer has seen the round 14
+fixes yet.
+
+1. **[minor] `/signin?error=__proto__` unmounted the whole app.** The
+   message lookup indexed a plain object with the URL's `error`, so
+   inherited keys matched: `__proto__` rendered `Object.prototype` as a
+   React child and threw, and `constructor` or `toString` showed an empty
+   alert.
+   - Fixed: the lookup counts only the object's own keys
+     (`Object.hasOwn`) and falls back otherwise. The new unit test
+     `web/src/routes/signin.test.tsx` checks a known code and four
+     inherited keys. No other lookup in `web/src` indexes an object
+     literal with a URL- or server-provided string unguarded: the block
+     registry, fixture markers and bindings already use `Object.hasOwn`.
+2. **[minor] Instances generating the signing key at once could each use
+   a different one.** The insert's `ON CONFLICT (kid)` used a random
+   `kid`, so it never conflicted, and an instance could read back its own
+   key before an older one landed.
+   - Fixed: `client_keys` holds one row, keyed by a `slot` that is always
+     `1`. Every instance inserts with `ON CONFLICT (slot) DO NOTHING` and
+     reads that row back. The `kid` is still stored in the row. The Rust
+     test `instances_generating_the_signing_key_at_once_agree_on_it` races
+     four calls through two pools on a fresh database and checks they agree
+     and one row exists. It failed against the old code.
+3. **[minor] The design's interfaces for later features don't exist under
+   those names**, and the build notes didn't say so.
+   - Fixed: a build-notes entry maps each one (`CurrentUser`,
+     `LOGIN_SCOPES`, `pds_client`, `ClientKeys`, `AppState::db()`, the CSRF
+     middleware, the module paths and the test helpers) to the real one.
+4. **[nit] A session check in flight during sign-out could sign the
+   header back in** with a dead CSRF token when it answered late.
+   - Fixed: `SessionProvider` keeps a generation count, bumped whenever
+     sign-out, a change or an expiry sets the session, and drops a
+     `getSession` answer that started before the latest bump. A new unit
+     test in `SessionProvider.test.tsx` covers it.
+
+### Round 15
+
+The reviewer found 0 blocking, 0 major, 3 minor and 3 nits, so the round
+isn't clean. `pnpm check` was green. Every finding was fixed after the
+review except one part of #2, and `pnpm check` is green again. No reviewer
+has seen the round 15 fixes.
+
+1. **[minor] Sign-out, replacing a browser's session and ending one revoked
+   the refresh token from a row read earlier, not the one they removed.** A
+   renewal saving R2 between the CSRF layer's read and sign-out's delete
+   left R2 live at the authorization server with no row holding it, while
+   the spent R1 was revoked.
+   - Fixed: `session::delete` is `DELETE … RETURNING` and returns the row
+     it deleted; `logout` and `retire` revoke that (and nothing, if another
+     request deleted it first). `session::wipe` clears the tokens only while
+     `refresh_token` is still the one it read, re-reading if a renewal
+     changed it (the third try wipes whatever is there), and returns the
+     row it wiped, which `end` and `end_revoking` revoke. The Rust tests
+     `ending_a_session_revokes_the_tokens_it_wiped_not_the_ones_read` and
+     `deleting_a_session_returns_the_tokens_it_deleted` cover both.
+2. **[minor] Authorization-server metadata was checked only for its issuer
+   and endpoints**, so a server lacking a capability atproto requires
+   failed late, reported as "couldn't be reached".
+   - Fixed: `AuthServer` reads the required capabilities, and
+     `auth_server` refuses a server missing any of them with the new
+     `ServerError::Unsupported`, logging which. Sign-in, sign-up and the
+     callback answer `server_unsupported`, which `signin.tsx` (not frozen)
+     now has a message for. Vivarium's metadata and TC-9's stub both pass.
+     A unit test removes or changes each capability in turn, and a Rust
+     test signs up against a server without `private_key_jwt` and sees
+     `server_unsupported`.
+   - Declined: requiring `create` in `prompt_values_supported` for
+     sign-up. Vivarium 0.0.1 doesn't advertise it (its list is `none`,
+     `login`, `consent`, `select_account`), yet signs people up with
+     `prompt=create`, so requiring it would refuse the server the frozen
+     TC-8 passes against.
+3. **[minor] The callback swallowed database errors loading or consuming
+   the pending request** as `invalid_request`, unlogged.
+   - Fixed: errors are logged and answered `server_error`; `invalid_request`
+     is kept for no such request and for one another request consumed
+     first. A Rust test drops `oauth_requests` and sees `server_error`.
+4. **[nit] `request_expired` was unreachable**: the pre-auth cookie lives
+   exactly as long as the request, and was checked first.
+   - Fixed: the callback checks `expires_at` before the cookie (the request
+     is consumed either way). A Rust test sends a late callback with no
+     cookie and sees `request_expired`, then `invalid_request` on a retry.
+5. **[nit] The account initial split surrogate pairs** ("🦋 Ana" gave a
+   lone surrogate).
+   - Fixed: the initial is the first code point. A unit test in
+     `Shell.test.tsx` covers it.
+6. **[nit] "Sign in" dropped the page's `#fragment` from `return_to`.**
+   - Fixed: `useReturnTo` includes `location.hash`, which the server's
+     `sanitize` accepts. A unit test in `Shell.test.tsx` covers it.
+
+### Blocked after round 15
+
+Round 15 is the last round the limit allows (the decisions after rounds 10
+and 11), and it wasn't clean, so this needs a human decision before
+shipping.
+
+**What the rounds found (blocking / major / minor / nit):**
+
+| Round | Blocking | Major | Minor | Nits |
+|-------|----------|-------|-------|------|
+| 6 | 0 | 0 | 4 | 2 |
+| 7 | 0 | 0 | 3 | 4 |
+| 8 | 0 | 0 | 4 | 3 |
+| 9 | 0 | 1 | 1 | 3 |
+| 10 | 0 | 0 | 3 | 2 |
+| 11 | 0 | 0 | 2 | 2 |
+| 12 | 0 | 0 | 3 | 3 |
+| 13 | 0 | 0 | 1 | 3 |
+| 14 | 0 | 0 | 3 | 1 |
+| 15 | 0 | 0 | 3 | 3 |
+
+- No round of the build found anything blocking. Majors came only in
+  rounds 2 and 9, and round 9's was a regression from round 8's fix.
+- Later rounds find progressively narrower edge cases at configuration,
+  operations and race boundaries (rolling deploys, multiple instances,
+  database and authorization-server failures), plus gaps in the previous
+  round's fixes. The earlier fixes held.
+
+**Current state:** all 30 test cases pass, the frozen tests are unchanged,
+and `pnpm check` is green with the round 15 fixes.
+
+**Before shipping:** for vivarium 0.0.2 (PR #6), the branch needs
+`git merge origin/main` and a green `pnpm check` on the result before the
+PR. Round 15's capability check should be re-run against 0.0.2's metadata
+then.
+
+**The choices:**
+- Ship as is, with the round 15 fixes unreviewed.
+- Run a 16th round that reviews only the round 15 fixes.
+- Something else.
+
+**Decision (2026-10-05):** the user chose to ship as is after round 15, without a 16th round.

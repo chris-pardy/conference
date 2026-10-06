@@ -10,6 +10,66 @@ import {
 import { type $Typed, is$typed, maybe$typed } from './util.js'
 
 export const schemaDict = {
+  AppEventsideAuthGetSession: {
+    lexicon: 1,
+    id: 'app.eventside.auth.getSession',
+    defs: {
+      main: {
+        type: 'query',
+        description:
+          'Who is signed in to the appview, from the session cookie. Never calls the authorization server.',
+        output: {
+          encoding: 'application/json',
+          schema: {
+            type: 'object',
+            required: ['did', 'handle', 'scopes', 'csrfToken'],
+            properties: {
+              did: {
+                type: 'string',
+                format: 'did',
+              },
+              handle: {
+                type: 'string',
+                format: 'handle',
+              },
+              displayName: {
+                type: 'string',
+                maxGraphemes: 64,
+                maxLength: 640,
+              },
+              avatar: {
+                type: 'string',
+                format: 'uri',
+              },
+              scopes: {
+                type: 'array',
+                description: 'The OAuth scopes the session was granted.',
+                items: {
+                  type: 'string',
+                },
+              },
+              csrfToken: {
+                type: 'string',
+                description:
+                  'Sent as X-CSRF-Token on every state-changing request.',
+              },
+            },
+          },
+        },
+        errors: [
+          {
+            name: 'AuthRequired',
+            description: 'Nobody is signed in.',
+          },
+          {
+            name: 'SessionExpired',
+            description:
+              "The session ended (idle, refused renewal, or new sign-in scopes). The body also carries the session's handle and DID, to sign the same person back in.",
+          },
+        ],
+      },
+    },
+  },
   AppEventsideBlockCard: {
     lexicon: 1,
     id: 'app.eventside.block.card',
@@ -1432,6 +1492,7 @@ export function validate(
 }
 
 export const ids = {
+  AppEventsideAuthGetSession: 'app.eventside.auth.getSession',
   AppEventsideBlockCard: 'app.eventside.block.card',
   AppEventsideBlockDefs: 'app.eventside.block.defs',
 } as const

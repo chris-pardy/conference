@@ -1,0 +1,66 @@
+@import "../theme/tokens.css";
+
+.signin {
+  max-width: 26rem;
+  margin: 0 auto;
+  padding: var(--g-space-5) var(--g-space-4);
+  color: var(--g-color-text);
+  font-family: var(--g-font-body);
+}
+
+.signin h1 {
+  margin: 0 0 var(--g-space-2);
+  font-family: var(--g-font-display);
+}
+
+.signin__lede {
+  margin: 0 0 var(--g-space-4);
+  color: var(--g-color-muted);
+}
+
+.signin__error {
+  margin: 0 0 var(--g-space-4);
+  padding: var(--g-space-2) var(--g-space-3);
+  border-radius: var(--g-radius-md);
+  background: var(--g-color-danger-bg);
+  color: var(--g-color-danger);
+}
+
+.signin__form {
+  display: grid;
+  gap: var(--g-space-2);
+}
+
+.signin__form label {
+  font-weight: 600;
+}
+
+.signin__form input {
+  padding: var(--g-space-2) var(--g-space-3);
+  border: 1px solid var(--g-color-border);
+  border-radius: var(--g-radius-md);
+  background: var(--g-color-surface);
+  color: var(--g-color-text);
+  font: inherit;
+}
+
+.signin__form button {
+  margin-top: var(--g-space-2);
+  padding: var(--g-space-2) var(--g-space-3);
+  border: none;
+  border-radius: var(--g-radius-md);
+  background: var(--g-color-primary);
+  color: var(--g-color-on-primary);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.signin__create {
+  margin-top: var(--g-space-4);
+}
+
+.signin__create a {
+  color: var(--g-color-primary);
+  font-weight: 600;
+}
