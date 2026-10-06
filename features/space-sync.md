@@ -1,7 +1,7 @@
 ---
 status: analysis
 impact:
-depends-on: [ci-pipeline, attendee-sign-in]
+depends-on: [ci-pipeline, attendee-sign-in, conference-space]
 branch:
 tests-commit:
 ---
