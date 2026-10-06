@@ -412,8 +412,9 @@ host) could rebuild them. Our database is only an index of those records.
     ballot), with the conference's join methods. Super admin only; owners
     may write them for spaces they create (`groups`, `polls`)
   - `app.eventside.admin.member {space, subject, read, write, since,
-    until?, via}`: one per membership period. Any admin, and our server when
-    it admits someone automatically
+    until?, via}`: a membership an admin decided (an approved request, a
+    pre-assigned speaker, an email match, a removal). Any admin within their
+    role. Automatic admissions aren't written here (see "The intake space")
   - `app.eventside.admin.ban {space, subject}`: owners and the super admin
   - `app.eventside.admin.code {space, codeHash, subject?, expires?,
     maxUses?}` and `app.eventside.admin.listEntry {space, did? | handle?,
@@ -434,7 +435,8 @@ host) could rebuild them. Our database is only an index of those records.
 - **Who writes what, in practice:**
   - The **super admin** connects once (`eventside admin connect`). Our
     server writes the organization-wide records (admins, spaces, policies)
-    and automatic admissions (by code, list or open) as the super admin.
+    as the super admin, and email-matched admissions (the one automatic
+    case that can't be derived; see below).
   - **Other admins** connect the same way. A CLI action taken by them (an
     approval, a removal, a ban) is written to *their* repo, under their
     session.
@@ -444,10 +446,45 @@ host) could rebuild them. Our database is only an index of those records.
   the action fails and is retried. Nothing is reported as done before the
   record exists.
 - **What stays in the database only,** because it's transient or secret:
-  - pending join requests (a requester isn't in the admin space)
   - rate-limit counters, replay caches, and issued credentials (for
     revocation)
   - the HMAC key and the authority keys
+
+**The intake space: joining and leaving as the person's own records.**
+Each conference has an intake space,
+`at://{authority}/space/app.eventside.intake/{conference skey}`, hosted by
+us:
+
+- **Write policy `#publicPolicy`:** anyone signed in can write to it.
+- **Read policy:** a member list with nobody on it, and app access allowing
+  eventside alone. Only the authority passes, so only our host can read it,
+  minting credentials for itself with the authority's key.
+- **Joining:** `join` writes `app.eventside.intake.join {code?}` into the
+  person's own repo in the intake space. The code can be in plain text,
+  because only the host reads it. **Leaving** writes
+  `app.eventside.intake.leave {}`.
+- **Automatic admissions are derived, not written.** The indexer admits
+  someone whose join record (judged by its commit `repoRev`) matches a rule
+  in the admin space: a valid `code` record (with expiry and uses counted
+  in commit order), a `listEntry` by DID or handle, or the space being open.
+  So a registration rush is the attendees' own writes, not writes to the
+  super admin's PDS.
+- **Requests** are join records that no rule admits. They're pending until
+  an admin writes a `member` record for them in the admin space, or denies
+  them with a `ban` (or an explicit `app.eventside.admin.deny {space,
+  subject}`, which doesn't block future requests).
+- **Email matches can't be derived,** because only our host saw the verified
+  email at sign-in. When the email step matches a `listEntry`, our server
+  writes a `member` record as the super admin.
+- **Who can see it:** only our host. Admins' apps see derived memberships
+  through our host API (which publishes every membership, derived or
+  written, with its periods), not by reading intake.
+- **Scope:** attendees need
+  `space:app.eventside.intake?authority=*&action=create&action=delete&collection=app.eventside.intake.join&collection=app.eventside.intake.leave`
+  in `LOGIN_SCOPES`, one more line on everyone's consent screen. This
+  feature adds it.
+- **Abuse:** anyone can write, so intake notifications are rate-limited per
+  DID before we fetch anything, as on the other host endpoints.
 
 **Admins, the super admin, and the conference's own records.**
 
@@ -691,7 +728,8 @@ from other apps are ignored for now.
 | Item | Where | Written by | Read by |
 |---|---|---|---|
 | Authority DID document (`#atproto_space_host`, `#atproto_space` key) | PLC, or the organization's `did.json` | our server (minted) or the organization (adopted) | everyone |
-| `app.eventside.admin.admin`, `.space`, `.member`, `.ban`, `.code`, `.listEntry` | admins' repos in the organization's admin space | the super admin and admins (our server, under their sessions) | admins' apps; our host (crawled) |
+| `app.eventside.admin.admin`, `.space`, `.member`, `.ban`, `.deny`, `.code`, `.listEntry` | admins' repos in the organization's admin space | the super admin and admins (our server, under their sessions) | admins' apps; our host (crawled) |
+| `app.eventside.intake.join {code?}`, `.leave` | each person's own repo in the conference's intake space | the person (through eventside) | our host only |
 | `community.lexicon.calendar.event` + `app.eventside.conference` sidecar (space, visibility, join flags, app access mode, super admin, theme) | the super admin's public repo (public) or inside the conference space (invite-only) | our server as the super admin | anyone, or members |
 | `app.eventside.conference.role {subject, role}`, `app.eventside.conference.rules` | the super admin's repo inside the conference space | our server as the super admin | members' apps, trusted only from the super admin |
 
@@ -701,7 +739,7 @@ from other apps are ignored for now.
 |---|---|---|
 | `admins`, `spaces` (policies, app access), `members` (periods, last accepted `repoRev`), `bans`, `codes`, `list_entries`, `conferences` | host DB | crawled from the admin space; read by every check |
 | `writers` (`repoRev`, `hash`, `spaceRev`), the space-wide `spaceRev` sequence | host DB | `notifyWrite` intake; `listRepos` |
-| `join_requests`, rate-limit counters, delegation and attestation replay caches, `credentials_issued` | host DB | join; credential checks; revocation |
+| rate-limit counters, delegation and attestation replay caches, `credentials_issued` | host DB | credential checks; revocation |
 | `sessions.kind`, `oauth_requests.purpose` | sign-in tables | sign-in, renewer |
 
 #### Interfaces
@@ -802,10 +840,11 @@ from other apps are ignored for now.
 - **Rust implementations to build carefully:** RFC 9421 verification,
   ES256 JWT minting and verification, PLC genesis operations.
 - **Rules are enforced by readers.** Other apps may ignore them.
-- **Every permission change is a PDS write**, on the acting admin's PDS
-  (usually the super admin's). If that PDS is down, joins and admin actions
-  fail until it's back. Automatic admissions are many writes during
-  registration rushes; they're batched with `applyWrites` (up to 200).
+- **Admin actions are PDS writes** on the acting admin's PDS. If it's down,
+  those actions fail until it's back. Automatic joins don't depend on it:
+  they're the attendee's own write to the intake space.
+- **An attendee's PDS being down** means they can't join or leave until it's
+  back.
 - **Admin sessions are powerful:** the super admin's session writes every
   automatic admission. Scopes are limited to the admin collections.
 - **Single-PDS tests** (vivarium): attendees on other PDSes go untested.
@@ -990,6 +1029,13 @@ description and round 2 design), now repaired, and these problems:
   caches, issued credentials, and keys.
 - Role and rules records for members stay in the conference space,
   written by the conference's super admin.
+- Follow-up in the same round: an **intake space** per conference (anyone
+  writes, only our host reads). Join and leave are the person's own
+  records there. Automatic admissions (code, list, open) are derived from
+  them, not written. Requests are join records awaiting an admin's
+  `member` (or `deny`) record. Email-matched admissions are still written
+  by the super admin. Attendees get an intake write scope in
+  `LOGIN_SCOPES`.
 
 ## Test cases
 
