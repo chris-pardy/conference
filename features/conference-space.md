@@ -1,5 +1,5 @@
 ---
-status: implementing
+status: blocked
 impact: cross-cutting
 depends-on: [attendee-sign-in]
 branch: feature/conference-space
@@ -1683,3 +1683,28 @@ Dropped in design review round 3: joining no longer writes to the organization's
 - **Then** both work as before
 
 ## Review log
+
+### Blocked during implementation (2026-10-06)
+
+The implementation is complete in the build worktree, but uncommitted:
+every conference-space test passes, and only four frozen
+**attendee-sign-in** tests fail. They contradict this feature's approved
+design, and a human has to decide.
+
+- Joining writes `app.eventside.intake.join` into the attendee's repo in the
+  intake space. Vivarium refuses that write unless the attendee's grant
+  includes a `space:app.eventside.intake?…` scope. So `LOGIN_SCOPES` must
+  include it, as the design says ("This feature adds it").
+- attendee-sign-in's frozen tests assume the default scope list is exactly
+  `atproto`:
+  - `tests/integration/sign-in.test.ts`: TC-7 (`getSession` scopes equal
+    `['atproto']`) and TC-9 (the sign-up PAR uses the bare client ID and
+    `scope=atproto`)
+  - `tests/integration/session.test.ts`: TC-18 (the initial scopes are
+    `['atproto']`)
+  - `e2e/sign-in.spec.ts`: TC-8. With a grown scope list, the client ID
+    carries `?scope=…`, and vivarium's sign-up page doesn't wrap it, so
+    "Continue" can't be clicked.
+- attendee-sign-in's own design anticipated this ("When a later feature
+  needs more, it adds its scopes to that list"). Its tests pinned the
+  `atproto`-only default.
