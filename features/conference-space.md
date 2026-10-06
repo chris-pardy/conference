@@ -1,9 +1,9 @@
 ---
-status: ready
+status: implementing
 impact: cross-cutting
 depends-on: [attendee-sign-in]
 branch: feature/conference-space
-tests-commit:
+tests-commit: c6e7d413c8c84d283f6767b85f4834b10ff5b6c7
 ---
 
 # Conference space
