@@ -110,8 +110,10 @@ organizations, are seeded by the script.
   - one space per conference
   - the conference's sessions, plans, chat and everything else inside it
     are records in that space
-  - the app allow-list admits only the appview, and members get
-    `read_self` (from `space-sync`)
+  - which apps can read it is the organizer's choice (a curated allow-list
+    or open), and every member can read everything in it through those apps
+    (revised in design review round 2; this replaced "only the appview reads,
+    members get `read_self`")
 - **Membership and roles** are the space's member list, plus a role for each
   member, recorded by the organization.
 - **Attendee lists, codes, requests and bans** are kept by the organization,
@@ -182,7 +184,8 @@ organizations, are seeded by the script.
   `event-profile`.
 - Configuring branding: [`event-branding`](event-branding.md).
 - Signing up on our own PDS at registration.
-- Sub-gatherings with their own spaces: one space per conference.
+- Group, plan and ballot spaces themselves: this feature sets the model
+  (one space per audience), and `groups`, `plans` and `polls` build them.
 
 ## Open questions
 
@@ -364,6 +367,16 @@ conference space for the whole conference, or a group's space for a
 group. A plan for picked people gets a small group space of its own
 (`plans` and `groups` settle the details).
 
+**Derived groups are the one exception to "rules live in the space".**
+Their policy is `#managingAppPolicy`, so the PDS asks eventside's
+`checkUserAccess` (with the asking app's client ID, for reads). That puts
+the decision back in our code, makes derived groups unavailable to every app
+while eventside is down (failures and the 5-second timeout mean "denied"),
+and needs the appview's `did:web` to publish a service endpoint for it. To
+keep it inspectable, the group space carries a record describing the
+derivation (e.g. "going to `at://…`"), so other apps can see what the rule
+is. `groups` designs it.
+
 **Anonymous polls** use the ballot pattern: voters are write-only members
 (`putMember {read: false, write: true}`), or anyone can write under
 `#publicPolicy`. No voter, and no voter's app, can read anyone else's
@@ -376,21 +389,41 @@ votes and Q&A (see Impact).
 organizer's choice, applied to all of the conference's spaces:
 
 - **curated** (the default): `#allowList`, starting with eventside's bare
-  client ID; `eventside admin apps add|remove <client-id>` edits it
-- **open**: `#open`, so any app a member authorizes can read
+  client ID; `eventside admin apps add|remove <client-id>` edits it. Until
+  the organizer adds another app, only eventside can read, so other apps get
+  nothing by default. That's deliberate: opening up is the organizer's
+  decision.
+- **open**: `#open`, so any app a member authorizes can read everything in
+  the conference's spaces, including an invite-only conference's event and
+  sidecar inside the space. The CLI warns before switching.
 
-**The conference space's member list is the source of truth.** Other apps
-decide access from it, so it has to be right:
+Switching mode calls `updateSpace` on every space the organization owns for
+that conference.
 
-1. Join, leave, remove and ban call `putMember {read: true, write: true}`
-   or `removeMember` as the organization **first**. If the call fails, the
-   join or removal fails and is retried. Nothing is reported as done until
-   the PDS has it.
-2. The appview's `members` table is an **index** of that list, written
-   after the PDS call succeeds, so our own checks don't need a network round
-   trip.
-3. `eventside admin members reconcile` rebuilds the index from
-   `listMembers` (owner session).
+**The conference space's member list is the source of truth for access,
+and membership records make it visible.** The PDS uses the member list to
+decide who gets credentials and whose writes it records. But only the owner
+can call `listMembers`, and a removed member stays in `listRepos`, so other
+apps can't see the list or its history. The organization therefore also
+writes **membership records** into the space:
+`app.eventside.conference.member {subject, since, until?}`, one per
+membership period. Any reader honors them: a record is shown only if its
+author had a membership period covering the moment the space host recorded
+it (its `spaceRev`).
+
+Both are written on every change, in this order:
+
+1. `putMember {read: true, write: true}` or `removeMember`, as the
+   organization. If it fails, the join or removal fails and is retried.
+   Nothing is reported as done until the PDS has it.
+2. The membership record: created on join, given its `until` on leave,
+   removal or ban.
+3. The appview's `members` and `member_periods` tables, an **index** of the
+   two, so our own checks need no network round trip.
+
+`eventside admin members reconcile` (also run at startup) rebuilds the
+index from `listMembers` and the membership records, and repairs a missing
+record or `until`.
 
 Codes, attendee lists, requests and bans stay in the appview's database:
 they're secrets, or decisions about who to add, not rules other apps need.
@@ -407,6 +440,7 @@ conference space, so every member's app sees the same rules:
 
 - `app.eventside.conference.role {subject: did, role: owner | staff |
   speaker}`, one record per person with a role. Attendees have none.
+  Removing or banning someone deletes their role record.
 - `app.eventside.conference.rules`, one record (rkey `self`), which says
   for each record type who may write it in this space, e.g.:
   - cards and announcements: `owner`, `staff`
@@ -416,7 +450,17 @@ conference space, so every member's app sees the same rules:
   Spaces can't restrict writes by collection, so these rules are enforced
   by readers: an app that honors them ignores records that break them, as
   our appview does at ingest. The rules record makes that explicit and the
-  same for every app.
+  same for every app. Reader rules:
+  - roles, rules and membership records count only from the space owner's
+    repo
+  - a record is judged by the rules, roles and membership in force when the
+    space host recorded it (its `spaceRev`), never by its own `createdAt`,
+    which the author sets; later rule changes don't retroactively hide it
+  - the rules and membership lexicons are published with the others
+  - finer rules, such as `block-actions`' middleware (one vote each, closing
+    times), aren't in the rules record. They're eventside's own, and other
+    apps may count actions eventside rejected. A card can say which
+    middleware applies; that's for `block-actions` to decide.
 
 Owners and staff of the organization get a role record in each of its
 conferences and are added as members.
@@ -543,9 +587,9 @@ conference. That's how an invite-only conference's link works. The link is
 
 **Leaving, removing, banning:**
 
-- **Leave or remove:** `removeMember` runs first, then the index row ends.
-  If the PDS call fails, the request fails and can be retried; our appview
-  already stops serving the person.
+- **Leave or remove:** `removeMember` runs first, then the membership record
+  gets its `until`, then the index row ends. If the PDS call fails, the
+  request fails and is retried, and nothing changes until it succeeds.
 - **Ban:** remove, plus a ban row keyed by DID.
 - **What a former member sees:** nothing from any conference endpoint, from
   the next request on.
@@ -643,6 +687,7 @@ from other apps are ignored for now.
 | `app.eventside.conference` sidecar: `space`, `visibility`, `appAccess` (`curated` or `open`), `join {code, list, request, open}`, `theme?` | next to the event, same rkey | the appview as the org | anyone if public; any app |
 | The space, its policies, app access and member list (**the source of truth**) | the org's PDS | the appview as the org | the PDS; every app on the app list |
 | `app.eventside.conference.role {subject, role}` | org repo, inside the space | the appview as the org | every member's apps |
+| `app.eventside.conference.member {subject, since, until?}` | org repo, inside the space | the appview as the org | every member's apps (whose records to show) |
 | `app.eventside.conference.rules` (rkey `self`): per collection, who may write | org repo, inside the space | the appview as the org | every member's apps (enforced at ingest) |
 | `conferences`: space URI, event URI, org DID, settings | appview DB | CLI | everything (no cache) |
 | `org_members`: org DID, DID, `owner` or `staff` | appview DB | CLI | role checks |
@@ -694,7 +739,10 @@ from other apps are ignored for now.
   - the `email` callback path
   - its existing tests keep passing: `login` behaves exactly as now
 - **[`space-sync`](space-sync.md)** (`analysis`): the dependency is
-  reversed, so **space-sync depends on conference-space**. Its inputs from
+  reversed, so **space-sync depends on conference-space**. Its premise
+  changes: the appview is no longer "the only client allowed to hold space
+  credentials", and members no longer get only `read_self`. It's one reader
+  among several, and it honors membership and rules records. Its inputs from
   here:
   - the list of spaces, from `conferences`
   - the organization session, which holds `action=read` for delegation
@@ -729,6 +777,13 @@ from other apps are ignored for now.
   - "whole conference" means the conference space; narrower audiences
     write into a group space (`groups`)
   - plans' `childOf` points at the event URI
+  - **`plans` needs revising:** "who sees what is enforced by the appview"
+    no longer holds; a picked-people audience needs its own space; and its
+    per-RSVP "public or private attendance" means nothing when every member
+    can read every RSVP in the space (it becomes "which space the RSVP is
+    written into", or is dropped)
+  - **`block-actions`:** its accepted-actions table is eventside's
+    judgement, not a rule other apps see
 - **Not yet specced:**
   - `program-import` uses `org_client` and `preassign`
   - `event-branding` writes the sidecar's `theme`, with `blob:` already in
@@ -746,9 +801,10 @@ from other apps are ignored for now.
   in our code. Superseded in round 2: other apps must be able to read, so
   the rules have to live in the space.
 - **`#managingAppPolicy` for the conference space**: always current, but
-  other apps couldn't see who's a member, and every policy check would
-  depend on our appview being up. Kept for derived groups only, where
-  membership can't be listed ahead of time.
+  the decision would live in our code, and every policy check would depend
+  on our appview being up. Kept for derived groups only, where membership
+  can't be listed ahead of time. (Neither policy lets other apps list
+  members; that's what membership records are for.)
 - **One space for everything, with visibility by convention:** other apps
   wouldn't honor it. One space per audience puts the boundary in the
   protocol.
