@@ -1042,6 +1042,178 @@ description and round 2 design), now repaired, and these problems:
 
 **Round 4 approved** by the user on 2026-10-06.
 
+### Build notes
+
+Written at the start of the build (2026-10-06). Nothing landed on `main`
+after the spec was approved, so these check the design against the merged
+`attendee-sign-in` code and vivarium 0.0.2's source.
+
+**The sign-in code, as merged:**
+
+- `crates/server/src/auth/` (`cookies`, `pds`, `renew`, `return_to`,
+  `routes`, `session`) and `oauth.rs`, `config.rs` at the crate root are as
+  the design assumes.
+- `LOGIN_SCOPES` (`config.rs`) is `["atproto"]`. `OAUTH_SCOPES` overrides
+  it, and that one list is `state.config.scopes`, which `session::outdated`
+  compares every session against. Per-kind `outdated()` means admin sessions
+  compare against `ADMIN_SCOPES` instead. The tests override that list with
+  `ADMIN_OAUTH_SCOPES`, named after `OAUTH_SCOPES`.
+- `oauth_requests` already has a `kind` column (`login` or `signup`),
+  documented as "diagnostic only". The design's `purpose` can be that
+  column, but the callback then has to branch on it.
+- `sessions` has no `kind`. The renewer (`auth/renew.rs`) ends idle sessions
+  by `last_seen_at`, and `refresh_leased` checks `outdated()`. Both need
+  the admin exemption, not only `session::lookup`.
+- `CurrentUser` finds sessions by cookie, and admin sessions never get one,
+  so refusing them there is a backstop.
+- **Client IDs:** `client_id()` is the bare metadata URL only for the scope
+  list `atproto`. Any other list gets `…/oauth-client-metadata.json?scope=…`,
+  and the metadata route serves every well-formed list. `ADMIN_SCOPES` and
+  the email step's list need no route change. Once `LOGIN_SCOPES` gains the
+  intake scope, eventside's own attendee client ID isn't the bare URL any
+  more. So an app allow-list "starting with eventside's bare client ID" has
+  to match eventside by its metadata URL whatever the query.
+- `scope_problem` accepts `space:…?authority=*&action=…` scopes. The longest
+  list (`ADMIN_SCOPES`) stays far below its 2048-byte limit.
+
+**Vivarium 0.0.2, as its source behaves:**
+
+- Accounts sign with **secp256k1** (ES256K). Delegation tokens and
+  `notifyWrite` service JWTs from members' PDSes are ES256K. Our host has to
+  verify ES256K as well as ES256 (the `k256` crate isn't a dependency yet).
+- Delegation tokens: `typ: atproto-space-delegation+jwt`, `kid: #atproto`,
+  `aud: {authority}#atproto_space_host`, 60 s, single use. A PDS issues one
+  for a session, or for an OAuth grant with a `read` action on that space
+  (`read_self` isn't enough).
+- `getSpaceCredential`: body `{space, clientAttestation?}`,
+  `Authorization: Bearer <delegation>`, and signature label `atproto-space`
+  over `("authorization");keyid="did:key:…"`. The signature is
+  ecdsa-p256-sha256, 64-byte r‖s. Vivarium's refusals are 400
+  `AppNotAuthorized` and `UserNotAuthorized`, and 401 `JwtReplayed`. The
+  tests expect the same names from our host.
+- Client attestation: `typ: atproto-client-attestation+jwt`, `iss = sub =`
+  the client ID, `aud: {authority}#atproto_space_host`, at most 60 s,
+  single use. It's signed by a key in the client's `jwks` (or `jwks_uri`),
+  chosen by `kid`.
+- Using a credential: `Authorization: Atproto-Space <credential>`, an
+  `atproto-space-audience` header, and a signature over
+  `("authorization" "atproto-space-audience")`. The audience is the
+  authority's DID for host methods (`listRepos`, and our `app.eventside.space.*`
+  API in the tests), and the repo's DID for reads at a writer's PDS. Vivarium
+  checks a credential's `kid` header against the authority's DID document,
+  and honors `#atproto_space`.
+- `notifyWrite`: vivarium retries 408, 425, 429, 5xx and network errors for
+  24 h with backoff, drops anything else, and times out after 5 s. A sealed
+  box still reaches our host, because loopback and `--app-host` URLs bypass
+  its upstream gate.
+- `listRepos` answers `{cursor, repos: [{did, repoRev, hash: {$bytes}, spaceRev}]}`,
+  and its cursor is an exclusive `spaceRev`.
+- `notifyCredentialRevoked`: `{space, credentials: [1–100 jtis]}`. The
+  service JWT has `iss` = the authority, `aud` = a DID hosted on that PDS,
+  and `lxm`. Revocations are kept about 3,610 s. A revoked credential is
+  refused with 401 `CredentialRevoked`.
+- Minting on vivarium's PLC: `POST {PLC_URL}/{did}` with a signed genesis
+  operation, checked by `@did-plc/lib`. A DID minted there counts as local,
+  so vivarium reads its document without the upstream gate. It serves the
+  document with `Multikey` methods (`{did}#atproto_space`) and services as
+  `#atproto_space_host`. `/{did}/data` has the rotation keys.
+- A writer's PDS finds us through `#atproto_space_host`, falling back to
+  `#atproto_pds`. It accepts writes into spaces whose authority isn't one of
+  its accounts.
+- **No unconfirmed emails:** an account's email is set only by
+  `com.atproto.server.createAccount {email}`, and `emailConfirmed` is `true`
+  whenever there is one. `getSession` returns it whatever the grant's scopes.
+  So TC-19 can't be automated against vivarium 0.0.2, and is manual (see
+  TC-19).
+- **No way to take one PDS down:** every test account shares one vivarium.
+  TC-54 and TC-55 deactivate the admin's account instead
+  (`com.atproto.server.deactivateAccount`), so their PDS refuses their repo
+  (`RepoDeactivated`), and then reactivate it.
+- `RepoNotFound` answers 400, not 404.
+
+**The surfaces the tests pin.** Nothing in the design spelled these out, so
+the red tests chose them, and the implementation follows them:
+
+- **CLI:** `conference-server admin <command>`. It runs with the server's
+  environment (`DATABASE_URL`, `PUBLIC_URL`, `ATPROTO_URL`, and so on) while
+  the server runs. It exits non-zero with the reason on stderr when it
+  refuses or fails, and with `--json` it prints one JSON object as its last
+  line of stdout. The commands:
+  - `org create --super-admin <handle> --recovery-key <did:key>` → `{did}`
+  - `org show --org <did>` → `{admins: [{did, role, connected}]}`
+  - `org admin add|remove <handle> --org <did> [--role owner|staff]`
+  - `connect <handle>`: it prints a URL to open, and when the browser
+    finishes, the page says "Connected, you can close this tab" and the CLI
+    exits 0. `ADMIN_OAUTH_SCOPES` overrides `ADMIN_SCOPES`. An outdated grant
+    gets a message containing "reconnect" and `connect <handle>`.
+  - `reindex --org <did>`
+  - `conference create --org <did> (--name … --starts … --ends … --city …
+    [--description …] | --event <at-uri>) [--invite-only] [--theme <json>]
+    [--super-admin <handle>]` → `{space, intake, event?}`. The theme is
+    tokens without the `--g-` prefix, e.g. `{"color-primary": "#b0306a"}`.
+  - `join set --conference <space> --methods code,request,list,open`
+  - `codes issue --conference <space> (--shared <code> | --personal)
+    [--expires <iso>] [--max-uses <n>]` → `{codes: […]}`. Codes are unique
+    across conferences, since a code identifies its conference.
+  - `list import <csv> --conference <space>`, with columns `handle,email,role`
+  - `requests list --conference <space>` → `{requests: [{did}]}`, and
+    `requests approve|deny <handle> --conference <space>`
+  - `member add|remove|ban <handle> --conference <space>`, and
+    `member role <handle> --role owner|staff|speaker|none --conference <space>`.
+    `member add` (an admin admitting someone with no pending request) is
+    new: TC-29, 51, 52 and 53 need it.
+  - `apps add|remove <client-id> (--conference <space> | --org <did>)`.
+    `--org` means the admin space, whose app access the intake spaces share.
+    `apps open --conference <space>` warns with "any app" and exits non-zero
+    unless given `--yes`. `apps curate` switches back to the list.
+  - every action takes `--as <handle>`, defaulting to the super admin
+  - `AUTHORITY_KEY_SECRET` has to be optional for tests and the e2e
+    server. Without it, the server generates and stores a key, as it does
+    for `OAUTH_SIGNING_KEY`.
+- **Conference XRPC** (cookie; POSTs also need CSRF):
+  - `getConference?conference=<event at-uri | space uri>`. It answers
+    signed out for public conferences, and 404 for an invite-only one to
+    non-members. The body is `{space, name, startsAt, endsAt, locations?,
+    description?, theme?, viewer?: {member, role?, request?}}`, and never a
+    denial reason.
+  - `join {conference?, code?, request?}` → `{status: joined | pending |
+    refused | emailNeeded, role?, canRequest?, verifyUrl?}`. An invalid,
+    expired or used-up code is a 400 `InvalidCode`, whatever other methods
+    are on, and creates nothing. `request: true` asks to join without the
+    email step. Past the rate limit, it's a 429 `RateLimitExceeded`. A
+    refused join writes no intake record.
+  - `leave {conference}`, and `listMyConferences`
+  - **New: `listRecords?conference=&collection=`**, the records members are
+    served. It applies membership periods and the rules, and answers 403 to
+    non-members. TC-25, 27, 29, 34 and 35 need it. It's an addition to the
+    design's "Unchanged" XRPC list, so it needs approval.
+- **Host API:** `app.eventside.space.listMembers` → `{members: [{did, read,
+  write, periods: [{since, until?}]}]}`, past members included. And
+  `app.eventside.space.getSpace` → `{readPolicy, writePolicy, appAccess,
+  admins}`. Both take a credential, with the authority as audience.
+- **Records:**
+  - the sidecar `app.eventside.conference` has `space` and `superAdmin`
+  - `app.eventside.conference.role` is `{subject, role}`, one per person
+    with a role
+  - `app.eventside.conference.rules` (rkey `self`) is `{rules: [{collection,
+    writers: admins | members}]}`. It covers `app.eventside.block.card` and
+    `app.eventside.conference.announcement` for admins, and
+    `community.lexicon.calendar.event` (plans) and `app.eventside.chat.message`
+    (chat, reserved for `chat`) for members.
+  - `app.eventside.intake.join` is `{code?}`
+- **PWA:**
+  - routes: `/c/{actor}/{rkey}`, `/join/{code}`, and `/conferences` (the
+    list of your conferences)
+  - non-members see a code field labelled "code" (or an "Enter a code"
+    button that shows it), "Join", and "Request to join"
+  - members see a "Leave" button, which is how the tests know they're
+    inside
+  - the email step offers "Verify my email" and "Request to join"
+  - a pending request says "pending", and a denial says the person "wasn't
+    admitted"
+  - a conference's theme sets `--g-color-primary` (and the other tokens) on
+    `:root`
+
 ## Test cases
 
 The cast:
@@ -1192,12 +1364,16 @@ Dropped in design review round 3: see TC-45, for admins.
 - **Then** he's a member
 - **And** his email isn't stored or shown anywhere in the app
 
-### TC-19: An unconfirmed email doesn't match
+### TC-19: An unconfirmed email doesn't match (manual)
 
 - **Given** the attendee list has an email that Mallory's account uses but
   hasn't confirmed
 - **When** Mallory verifies her email to join
 - **Then** she isn't admitted from the list
+
+Manual: vivarium 0.0.2 reports every email it holds as confirmed
+(`emailConfirmed: true`), and has no way to give an account an unconfirmed
+one. Check it against a PDS that does, or automate it once vivarium can.
 
 ### TC-20: Requesting to join, then being approved
 
