@@ -1,5 +1,5 @@
 ---
-status: blocked
+status: implementing
 impact: cross-cutting
 depends-on: [ci-pipeline]
 branch: feature/attendee-sign-in
@@ -1794,3 +1794,5 @@ then.
 - Ship as is, with the round 15 fixes unreviewed.
 - Run a 16th round that reviews only the round 15 fixes.
 - Something else.
+
+**Decision (2026-10-05):** the user chose to ship as is after round 15, without a 16th round.
