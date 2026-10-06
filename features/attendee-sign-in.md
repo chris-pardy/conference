@@ -1,5 +1,5 @@
 ---
-status: implementing
+status: complete
 impact: cross-cutting
 depends-on: [ci-pipeline]
 branch: feature/attendee-sign-in
