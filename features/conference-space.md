@@ -383,59 +383,124 @@ of ours**, so a breach of our server is recoverable within PLC's 72-hour
 window. With "bring your own", the organization keeps its rotation
 key, and we only hold the space key they published.
 
-**Admins, the super admin, and organization records.**
+**Permissions are records in an admin space, crawled from the super admin.**
+Every permission is a record that an admin writes, so any app (or another
+host) could rebuild them. Our database is only an index of those records.
 
-- An organization's **admins** (owners and staff) are DIDs, kept as host
-  state. They're members of each of the organization's conferences.
-- Each conference has exactly **one super admin**: the one DID that writes
-  all of the conference's organization records. There's no tiebreak to
-  design, because there's only ever one author:
+- **The only state we must keep** for an organization is its authority's
+  keys and its **super admin's DID**. Everything else can be rebuilt by
+  crawling from there (`eventside admin reindex <org>`).
+- **The admin space:** each organization has one,
+  `at://{authority}/space/app.eventside.admin/self`, hosted by us. Its
+  members are the organization's admins (read and write). Other apps can be
+  allow-listed into it like any space.
+- **The crawl:**
+  1. From the authority, find its super admin (our stored state).
+  2. Read the super admin's repo in the admin space (with a credential we
+     mint for ourselves). Their records name the organization's **admins**
+     (`app.eventside.admin.admin {subject, role: owner | staff}`), its
+     **spaces** and their **policies and app access**, and any membership
+     decisions they made themselves.
+  3. Read each admin's repo in the admin space. Their records count within
+     their role.
+  4. Index the result. Every host check (credentials, write intake, the
+     host API) and every feature's membership check reads the index.
+- **Records in the admin space** (lexicons published with the others):
+  - `app.eventside.admin.admin {subject, role}`: super admin only
+  - `app.eventside.admin.space {space, type, readPolicy, writePolicy,
+    appAccess, allowList?, join?}`: one per space (conference, group,
+    ballot), with the conference's join methods. Super admin only; owners
+    may write them for spaces they create (`groups`, `polls`)
+  - `app.eventside.admin.member {space, subject, read, write, since,
+    until?, via}`: one per membership period. Any admin, and our server when
+    it admits someone automatically
+  - `app.eventside.admin.ban {space, subject}`: owners and the super admin
+  - `app.eventside.admin.code {space, codeHash, subject?, expires?,
+    maxUses?}` and `app.eventside.admin.listEntry {space, did? | handle?,
+    emailHmac?, role?}`: owners and the super admin. Codes are hashed, and
+    emails are HMAC'd with a server key, so neither is readable even inside
+    the admin space.
+- **Precedence, so no tiebreak is needed:**
+  - Admins write only to their own repos, so nobody can edit anyone else's
+    records.
+  - **The super admin's records always win.** No other admin's record can
+    contradict them. For example, a staff member can't admit someone the
+    super admin banned, or change a space's policy.
+  - Among other admins, a ban beats an admission, and otherwise the most
+    recent record (by commit `repoRev`) for the same space and person
+    stands.
+  - A record counts only while its author is an admin, and only within
+    their role.
+- **Who writes what, in practice:**
+  - The **super admin** connects once (`eventside admin connect`). Our
+    server writes the organization-wide records (admins, spaces, policies)
+    and automatic admissions (by code, list or open) as the super admin.
+  - **Other admins** connect the same way. A CLI action taken by them (an
+    approval, a removal, a ban) is written to *their* repo, under their
+    session.
+- **Latency:** a permission change takes effect when it reaches the index.
+  Our server indexes its own writes as soon as the PDS accepts them, and the
+  `notifyWrite` from that PDS confirms it. If an admin's PDS is unreachable,
+  the action fails and is retried. Nothing is reported as done before the
+  record exists.
+- **What stays in the database only,** because it's transient or secret:
+  - pending join requests (a requester isn't in the admin space)
+  - rate-limit counters, replay caches, and issued credentials (for
+    revocation)
+  - the HMAC key and the authority keys
+
+**Admins, the super admin, and the conference's own records.**
+
+- An organization's **admins** are the subjects of the super admin's
+  `admin` records. They're members of each of the organization's
+  conferences.
+- Each conference has exactly **one super admin** (set by
+  `conference create --super-admin <handle>`, and the organization's
+  super admin by default). That DID writes the conference's public-facing
+  records:
   - the **public calendar event** and its `app.eventside.conference`
     sidecar, in the super admin's public repo (public conferences), or inside
-    the space (invite-only)
+    the conference space (invite-only)
   - **role** and **rules** records, in the super admin's repo inside the
-    conference space
-- The super admin is set when the conference is created
-  (`conference create --super-admin <handle>`), and is recorded in host
-  state and in the sidecar. Readers trust role and rules records **only**
-  from that DID. Records from anyone else, including other admins, have no
-  effect.
+    conference space, where every member's apps can read them. Readers
+    trust them **only** from that DID.
 - The authority DID itself can be the super admin, once it has a repo
   (bring your own account, or our reference PDS later).
-- **Admin sessions:** each admin connects once through
-  `eventside admin connect <handle>`, an OAuth sign-in with
-  `ADMIN_SCOPES`. That gives a cookieless session of kind `admin` that never
-  idles out. Other admins act through the CLI, which writes as the super
-  admin using the super admin's session. Changing a conference's super admin
-  (and re-issuing its records) is out of scope for now.
+- **Admin sessions:** each admin connects once, through
+  `eventside admin connect <handle>`. That's an OAuth sign-in with
+  `ADMIN_SCOPES`, giving a cookieless session of kind `admin` that never
+  idles out.
 - **`ADMIN_SCOPES`**, written out:
   - `atproto`
   - `repo:community.lexicon.calendar.event` and
     `repo:app.eventside.conference`, for the public records
   - `space:app.eventside.conference?authority=*&action=create&action=update&action=delete&collection=app.eventside.conference&collection=app.eventside.conference.role&collection=app.eventside.conference.rules&collection=community.lexicon.calendar.event`
+  - `space:app.eventside.admin?authority=*` with `read`, `create`,
+    `update`, `delete` and the `app.eventside.admin.*` collections
   - `blob:*/*`, for `event-branding`
   - When `ADMIN_SCOPES` grows, admins are told to reconnect (as in
     round 1's "reconnect needed"). A real PDS may cap refresh-token
     lifetimes; the CLI reports an expired admin session the same way.
-- **Bootstrapping:** `org create --owner <handle>` records the first owner.
-  The CLI refuses to remove the last owner.
+- **Bootstrapping:** `org create --super-admin <handle>` mints the
+  authority, creates the admin space, and stores the super admin. The
+  super admin connects, and the CLI writes their first records (themselves
+  as owner, the admin space's own record).
 
-**Membership is host state.**
+**Membership, as the index sees it.**
 
-- Joining puts a member row in our database, with `read: true, write:
-  true` and a start time. Leaving, removal and bans give it an end time.
-- That's the member list our credential endpoint and write-notification
-  intake check. Nothing is copied to another server.
-- **Other apps see membership** through our host API: members with their
-  periods, and admins, for credential holders. The membership records of
-  round 2 aren't needed, because the host is the authority on membership.
+- A member is someone with a current `member` record in the admin space,
+  and no ban that wins over it.
+- **Other apps see membership** in one of two ways: admins' apps read the
+  admin space, and any credential holder for a conference space can call
+  our host API, which publishes members with their periods, admins, and
+  space policies (derived from the records, so nothing new).
 - **Which records count.** A host sees one `notifyWrite` per repo state,
   not per record, and a removed member's own PDS keeps accepting their
   writes. When they rejoin, their next accepted `repoRev` carries every
   commit they made while out. So the host can't refuse individual records.
   Readers judge each record by its **commit's `repoRev`** (a TID timestamp)
-  against the author's membership periods, which the host API publishes as
-  `{since, until, lastAcceptedRepoRev}`. A record counts only if its commit
+  against the author's membership periods (`since`, `until`, and the last
+  `repoRev` accepted inside the period). A record counts only if its commit
   falls inside a period. Our appview applies this at ingest, and other apps
   are expected to.
 - **Removal takes effect at once, everywhere:**
@@ -459,11 +524,11 @@ key, and we only hold the space key they published.
 - keep the delegation and attestation replay caches bounded
 - limit `listRepos` per credential key (`cnf.kid`), as the proposal suggests
 
-**App access is host state too:** per conference, curated (an allow-list
-of client IDs, starting with eventside's bare client ID) or open. We
-enforce it in `getSpaceCredential`, so it holds for every app.
-`eventside admin apps add|remove|open|curate` edits it. Switching to open
-warns first.
+**App access** is part of each space's `space` record: curated (an
+allow-list of client IDs, starting with eventside's bare client ID) or
+open. We enforce it in `getSpaceCredential`, so it holds for every app.
+`eventside admin apps add|remove|open|curate` rewrites the record. Switching
+to open warns first.
 
 **One space per audience, all hosted by us.** The types from round 2 stand:
 
@@ -560,9 +625,14 @@ conference. That's how an invite-only conference's link works. The link is
 
 **Admin CLI** (a subcommand of the server binary):
 
-- `org create --owner <handle>` (mints the authority) and `org adopt <did>`
-- `org admin add|remove <handle> --role owner|staff`, and
-  `admin connect <handle>`
+- `org create --super-admin <handle>` (mints the authority and creates the
+  admin space) and `org adopt <did>`
+- `admin connect <handle>`, and `org admin add|remove <handle> --role
+  owner|staff` (super admin only)
+- `reindex <org>`, which rebuilds the index by crawling from the super
+  admin
+- every action runs as the admin named by `--as <handle>` (default: the
+  super admin) and is written to that admin's repo
 - `conference create --super-admin <handle> [--event <at-uri>]
   [--invite-only]`
 - `join set`, `codes issue`, `list import <csv>`, `requests
@@ -587,6 +657,10 @@ from other apps are ignored for now.
   - `repos.rs`: `listRepos`
   - `api.rs`: our host API (membership, admins, policies, for credential
     holders)
+  - `index.rs`: the crawler and indexer. It follows the admin space from the
+    super admin, applies the precedence rules, and keeps the index up to date
+    from `notifyWrite` (our own admin space included). `reindex` rebuilds it
+    from scratch.
   - `authority.rs`: minting the `did:plc` (genesis operation), adopting a
     DID, key custody, DID-document checks
 - **`crates/server/src/conference/`** (new): the conference model, join
@@ -605,30 +679,44 @@ from other apps are ignored for now.
 
 #### Data
 
+**Kept by us, and needed to rebuild everything else:**
+
+| Item | Where |
+|---|---|
+| Each authority's DID, its encrypted rotation and signing keys, and its super admin's DID | host DB |
+| The HMAC key for emails, and the server's encryption key | server config |
+
+**Records, the source of truth:**
+
 | Item | Where | Written by | Read by |
 |---|---|---|---|
-| Authority DID document (`#atproto_space_host`, `#atproto_space`/`#atproto` key) | PLC (or the organization's `did.json`) | our server (minted) or the organization (adopted) | everyone |
-| `authorities`: DID, encrypted rotation and signing keys, minted or adopted | host DB | CLI | the host |
-| `spaces`: URI, type, read and write policy, app access, allow-list | host DB | CLI, `groups`, `polls` | the host |
-| `admins`: authority, DID, `owner` or `staff`, since, until | host DB | CLI | the host; the host API |
-| `conferences`: space URI, event URI, super admin DID | host DB (also in the sidecar) | CLI | everything |
-| `members`: space, DID, `read`, `write`, joined via, since, until, last accepted `repoRev` | host DB, the source of truth | join, leave, CLI, `notifyWrite` | the host; the host API; every feature's checks |
-| `writers`: space, DID, `repoRev`, `hash`, `spaceRev`; plus a space-wide `spaceRev` sequence | host DB | `notifyWrite` intake | `listRepos`; `space-sync` |
-| `notify_registrations`, `credentials_issued` (`jti`, delegating DID, app key, expiry), delegation replay cache | host DB | the host | the host |
-| `community.lexicon.calendar.event` + `app.eventside.conference` sidecar | the super admin's public repo (public) or inside the space (invite-only) | our server as the super admin | anyone, or members |
-| `app.eventside.conference.role {subject, role}`, `app.eventside.conference.rules` | the super admin's repo inside the space | our server as the super admin | members' apps, trusted only from the super admin |
-| `invite_codes`, `attendee_list`, `join_requests`, `bans`, `preassigned` | host DB | CLI, join | join |
-| `sessions.kind`, `oauth_requests.purpose` | sign-in tables | sign-in | sign-in, renewer |
+| Authority DID document (`#atproto_space_host`, `#atproto_space` key) | PLC, or the organization's `did.json` | our server (minted) or the organization (adopted) | everyone |
+| `app.eventside.admin.admin`, `.space`, `.member`, `.ban`, `.code`, `.listEntry` | admins' repos in the organization's admin space | the super admin and admins (our server, under their sessions) | admins' apps; our host (crawled) |
+| `community.lexicon.calendar.event` + `app.eventside.conference` sidecar (space, visibility, join flags, app access mode, super admin, theme) | the super admin's public repo (public) or inside the conference space (invite-only) | our server as the super admin | anyone, or members |
+| `app.eventside.conference.role {subject, role}`, `app.eventside.conference.rules` | the super admin's repo inside the conference space | our server as the super admin | members' apps, trusted only from the super admin |
+
+**The index and operational state** (rebuildable or disposable):
+
+| Item | Where | Built from or used by |
+|---|---|---|
+| `admins`, `spaces` (policies, app access), `members` (periods, last accepted `repoRev`), `bans`, `codes`, `list_entries`, `conferences` | host DB | crawled from the admin space; read by every check |
+| `writers` (`repoRev`, `hash`, `spaceRev`), the space-wide `spaceRev` sequence | host DB | `notifyWrite` intake; `listRepos` |
+| `join_requests`, rate-limit counters, delegation and attestation replay caches, `credentials_issued` | host DB | join; credential checks; revocation |
+| `sessions.kind`, `oauth_requests.purpose` | sign-in tables | sign-in, renewer |
 
 #### Interfaces
 
 - **The protocol host endpoints:** `getSpaceCredential`, `listRepos`,
   `registerNotify`, `unregisterNotify`, and receiving `notifyWrite`, at our
   `PUBLIC_URL`, in vivarium 0.0.2's wire format.
+- **The admin space's lexicons** (`app.eventside.admin.*`), published, so
+  any app an organization allows into its admin space can read its
+  permissions directly.
 - **Our host API** (credential-authenticated, `app.eventside.space.*`):
   `getSpace` (policies, app access, the authority's admins with periods)
-  and `listMembers` (members with `read`, `write` and their periods).
-  Published lexicons, so other apps can apply the reader rules.
+  and `listMembers` (members with `read`, `write` and their periods). These
+  are views derived from the admin space, for apps that can read a
+  conference space but not the admin space.
 - **Conference XRPC** (cookie and CSRF): `getConference`, `join`, `leave`,
   `listMyConferences`. Unchanged.
 - **Rust, for later features:**
@@ -680,6 +768,9 @@ from other apps are ignored for now.
 - **`#atproto_pds` pointing at us** (the fallback some alpha clients use
   instead of `#atproto_space_host`): that would make us the authority's
   PDS of record. Left out until we run the reference PDS.
+- **Permissions as host state** (round 3's first draft): simpler, but only
+  we could see or rebuild them. Records in an admin space, crawled from the
+  super admin, make the host a cache.
 - **Host-state roles and rules** (served only by our API): no repo needed,
   but they wouldn't be records.
 - **Records from any admin:** two admins' records could conflict, and
@@ -711,6 +802,12 @@ from other apps are ignored for now.
 - **Rust implementations to build carefully:** RFC 9421 verification,
   ES256 JWT minting and verification, PLC genesis operations.
 - **Rules are enforced by readers.** Other apps may ignore them.
+- **Every permission change is a PDS write**, on the acting admin's PDS
+  (usually the super admin's). If that PDS is down, joins and admin actions
+  fail until it's back. Automatic admissions are many writes during
+  registration rushes; they're batched with `applyWrites` (up to 200).
+- **Admin sessions are powerful:** the super admin's session writes every
+  automatic admission. Scopes are limited to the admin collections.
 - **Single-PDS tests** (vivarium): attendees on other PDSes go untested.
 - **The real network for November 1:** attendees and admins need PDSes that
   implement permissioned repos. The demo assumes vivarium (or the spaces
@@ -864,6 +961,35 @@ description and round 2 design), now repaired, and these problems:
   - `ADMIN_SCOPES` written out
   - the real-network assumption for November 1
   - stale description text fixed
+
+### Round 4
+
+**Feedback:**
+
+- Membership, policies, app access and admins should be written into an
+  **admin space** that we host, so we can crawl out from the super admin's
+  account (the only state we need) to find every permission.
+- Other admins write to their own repos, and can't edit the super admin's
+  records.
+
+**Changes:**
+
+- New `app.eventside.admin` space per organization, hosted by us. Records:
+  `admin`, `space` (policies, app access, join methods), `member`, `ban`,
+  `code`, `listEntry`.
+- **The state we keep** is reduced to each authority's keys and its super
+  admin's DID. Everything else is an index rebuilt by crawling from the
+  super admin (`reindex`).
+- **Precedence:** each admin writes only to their own repo; the super
+  admin's records always win; among other admins, a ban beats an admission,
+  and otherwise the latest commit stands; a record counts only while its
+  author is an admin, and within their role.
+- Automatic admissions are written as the super admin. CLI actions are
+  written as the acting admin.
+- What stays database-only: pending join requests, rate limits, replay
+  caches, issued credentials, and keys.
+- Role and rules records for members stay in the conference space,
+  written by the conference's super admin.
 
 ## Test cases
 
