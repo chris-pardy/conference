@@ -359,8 +359,8 @@ boundary, so people see what an app wants to read or write:
 | Space type | Audience | Owner | Policies | Specced in |
 |---|---|---|---|---|
 | `app.eventside.conference` | everyone admitted to the conference | the organization | read and write: `#memberListPolicy` | this feature |
-| `app.eventside.group` | a group: an organizer's list (speakers, volunteers), an attendee's own list, or a derived group (going to X, my connections) | whoever made the group | explicit lists: `#memberListPolicy`; derived groups: `#managingAppPolicy` pointing at eventside | `groups` |
-| `app.eventside.ballot` | an anonymous poll's voters: they can write their ballot, and only the poll's owner can read | the poll's owner | write: the voters' audience (a conference's members, or `#publicPolicy` at a public event); read: `#memberListPolicy` with only the owner | `polls` (later) |
+| `app.eventside.group` | a group: an organizer's list (speakers, volunteers), a plan's audience, a derived group (going to X, my connections), or an attendee's personal list ("cool cats I've met") | the organization, except personal lists, which the attendee owns | explicit lists: `#memberListPolicy`; derived groups: `#managingAppPolicy` pointing at eventside | `groups` |
+| `app.eventside.ballot` | an anonymous poll's voters: they can write their ballot, and only the organization can read | always the organization | write: the voters (synced `putMember {read: false, write: true}` or `#managingAppPolicy`; `#publicPolicy` at a public event); read: the owner only | `polls` (later) |
 
 A plan, a chat or a card is written into the space of its audience: the
 conference space for the whole conference, or a group's space for a
@@ -377,7 +377,30 @@ keep it inspectable, the group space carries a record describing the
 derivation (e.g. "going to `at://…`"), so other apps can see what the rule
 is. `groups` designs it.
 
-**Anonymous polls** use the ballot pattern: voters are write-only members
+**Who owns which spaces** (decided in round 2: split by kind):
+
+- **The organization owns** the conference space, organizer lists, plan
+  audiences, derived groups and every ballot space. Eventside creates them
+  with the organization's session, so `ORG_SCOPES` covers
+  `app.eventside.group` and `app.eventside.ballot` (`manage=create`,
+  `manage=update`, `action=read`, and writes). The conference's app-access
+  setting applies to all of them, except ballots (below).
+- **Attendees own their personal lists.** A "cool cats I've met" list is an
+  `app.eventside.group` space on the attendee's own PDS, so it's private from
+  the organizer. That adds `space:app.eventside.group?manage=create` and
+  `?manage=update` (with the default `authority=self`, so only their own
+  spaces) to `LOGIN_SCOPES`, which every attendee is asked for. Their PDS has
+  to host spaces, and the organizer's app-access setting doesn't reach these
+  spaces: they're allow-listed to eventside by default, and changing that is
+  the attendee's choice (a later feature). `groups` designs the details.
+
+**Anonymous polls** use the ballot pattern. "Anonymous" means **hidden from
+other participants**, not from the organization or eventside: the ballot
+space's owner can see who voted what, because a ballot is a record in the
+voter's repo. So ballot spaces are always owned by the organization and
+allow-listed to eventside alone, whatever the conference's app-access
+setting. Readers count one ballot per DID. In small polls, comparing tallies
+over time can reveal votes; polls should say so. The rest is for `polls`: voters are write-only members
 (`putMember {read: false, write: true}`), or anyone can write under
 `#publicPolicy`. No voter, and no voter's app, can read anyone else's
 ballot. The owner's app tallies the ballots and publishes only the result,
@@ -947,6 +970,16 @@ Asked and answered in this round:
 - **Derived audiences** (going to X, my connections): `#managingAppPolicy`.
 - **Roles and posting rules:** records in the space.
 
+**After the critique, two more decisions:**
+
+- **Space ownership, split by kind:** organizer lists, plan audiences,
+  derived groups and ballots are org-owned; personal lists are attendee-owned
+  spaces (attendees get `manage=` scopes for groups only, on their own
+  spaces).
+- **"Anonymous" means hidden from other participants**, not from the
+  organization or eventside. Ballot spaces are always org-owned and
+  allow-listed to eventside alone.
+
 **Changes:**
 
 - New principle: access control lives in the space (which space, its
@@ -964,6 +997,12 @@ Asked and answered in this round:
 - Impact: ui-blocks' and block-actions' "members `read_self`, only the
   appview reads" privacy model is superseded; anonymous votes and Q&A move
   to ballot spaces.
+- From the critique: membership records (`app.eventside.conference.member`)
+  so other apps can see who was a member when; reader rules judged by
+  `spaceRev`, owner-repo only; derived groups called out as the exception;
+  the curated default means only eventside reads until the organizer adds
+  apps; impacts on `plans`, `space-sync` and `block-actions` spelled out;
+  round 1 contradictions removed.
 
 ## Test cases
 
