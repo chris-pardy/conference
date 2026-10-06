@@ -1,5 +1,5 @@
 ---
-status: design-review
+status: test-cases
 impact: cross-cutting
 depends-on: [attendee-sign-in]
 branch:
@@ -1003,6 +1003,8 @@ Asked and answered in this round:
   the curated default means only eventside reads until the organizer adds
   apps; impacts on `plans`, `space-sync` and `block-actions` spelled out;
   round 1 contradictions removed.
+
+**Approved** by the user on 2026-10-05.
 
 ## Test cases
 
