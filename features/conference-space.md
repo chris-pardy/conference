@@ -1,5 +1,5 @@
 ---
-status: test-cases
+status: ready
 impact: cross-cutting
 depends-on: [attendee-sign-in]
 branch:
