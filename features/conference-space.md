@@ -189,19 +189,20 @@ organizations, are seeded by the script.
 
 ## Open questions
 
-- Should a public `community.lexicon.calendar.rsvp` of "going" to the
-  conference's event, written from any calendar app, count as a way to join
-  (when the conference is open), or as a request?
-- When the conference attaches to an event record that someone else
-  published, is that record's author the organization, or can an
-  organization adopt an event it didn't write?
-- How does the appview get and keep the organization account's session? An
-  owner signs in as the organization once, as `space-sync`'s "organizers
-  connect once" assumes, or the script provisions it.
-- Where do attendee lists, codes, requests and bans live: in the space as
-  organization records, or in the appview's database?
-- How does an organization's owner list change hands safely, e.g. stopping
-  the last owner from removing themselves?
+None. Each one was settled in the design review:
+
+- **RSVPs from other calendar apps as a way to join:** deferred. They're
+  ignored for now.
+- **Attaching an existing event:** allowed only for an event in the
+  organization's own repo (`conference create --event`).
+- **The organization's session:** an operator who can sign in as the
+  organization runs `eventside admin org connect` once. The session has no
+  cookie and never idles out.
+- **Where lists, codes, requests and bans live:** in the appview's database,
+  because they're secrets or decisions about whom to admit. Membership,
+  roles and rules live in the space.
+- **The last owner:** the CLI refuses to remove the last owner. The operator
+  is trusted, so this is a safety check, not a security boundary.
 
 ## Architecture analysis
 
@@ -1007,5 +1008,351 @@ Asked and answered in this round:
 **Approved** by the user on 2026-10-05.
 
 ## Test cases
+
+The cast:
+
+- **Atmosphere** is an organization account. Its operator has connected it,
+  and Olga is its owner.
+- **Ana and Bram** are attendees with atproto accounts.
+- **Mallory** is a signed-in stranger.
+- **AtmosphereConf** (Amsterdam, 29 April–2 May) is Atmosphere's public
+  conference.
+- **"Sanne & Joost's wedding"** is an invite-only conference run by a second
+  organization, **Bruiloft**, with a different theme.
+
+"The CLI" is the admin command line. "Another app" is a second atproto
+client on the conference's app list, used in tests to read the space the
+way any other app would.
+
+### Organizations and conferences
+
+### TC-1: Connecting an organization leaves no way to act as it in the browser
+
+- **Given** the operator can sign in as Atmosphere at its PDS
+- **When** they run the CLI's connect command and complete sign-in in a
+  browser
+- **Then** the browser shows "Connected, you can close this tab"
+- **And** the browser isn't signed in to the app as Atmosphere
+- **And** the CLI reports Atmosphere as connected
+
+### TC-2: A connected organization stays connected while idle
+
+- **Given** Atmosphere was connected and nobody has used the app as it for
+  longer than the attendee idle timeout
+- **When** the operator runs any CLI command for Atmosphere
+- **Then** it works without connecting again
+
+### TC-3: An organization missing newly required permissions is reported, not dropped
+
+- **Given** Atmosphere was connected before the organization permissions
+  grew
+- **When** the operator runs a CLI command for Atmosphere
+- **Then** the CLI says Atmosphere needs to reconnect, naming the command
+- **And** nothing it already set up stops working
+
+### TC-4: Creating a public conference publishes an event other calendar apps can read
+
+- **Given** Atmosphere is connected
+- **When** the operator creates AtmosphereConf as a public conference
+- **Then** a public calendar event for it exists in Atmosphere's repository,
+  with its name, dates and city
+- **And** anyone can open its public page by that event's link
+
+### TC-5: A conference can adopt an event the organization already published
+
+- **Given** Atmosphere already published a calendar event for AtmosphereConf
+  through another calendar app
+- **When** the operator creates the conference from that event
+- **Then** the public page shows that event, and no second event is created
+
+### TC-6: A conference can't adopt someone else's event
+
+- **Given** an event published by Mallory's account
+- **When** the operator tries to create an Atmosphere conference from it
+- **Then** the CLI refuses, saying the event must be in Atmosphere's own
+  repository
+
+### TC-7: An invite-only conference publishes nothing
+
+- **Given** Bruiloft is connected
+- **When** the operator creates "Sanne & Joost's wedding" as invite-only
+- **Then** no public event or settings record for it exists in Bruiloft's
+  public repository
+- **And** opening it by its address without being a member shows nothing
+  about it
+
+### TC-8: The last owner can't be removed
+
+- **Given** Olga is Atmosphere's only owner
+- **When** the operator tries to remove her as owner
+- **Then** the CLI refuses
+- **And** after a second owner is added, removing Olga works
+
+### Finding a conference
+
+### TC-9: A non-member sees the public page and how to get in
+
+- **Given** AtmosphereConf is public, with invite codes and requests turned
+  on
+- **When** Mallory opens its public page
+- **Then** she sees its name, dates, city and description
+- **And** she's offered "Enter a code" and "Request to join"
+- **And** nothing from inside the conference is shown
+
+### TC-10: The public page works by DID or by handle
+
+- **Given** AtmosphereConf's public page link uses Atmosphere's DID
+- **When** someone opens the same page using Atmosphere's handle in place of
+  the DID
+- **Then** they see the same conference
+
+### Joining
+
+### TC-11: Ana joins with a shared invite code
+
+- **Given** AtmosphereConf has the shared code "atmosphere27"
+- **When** Ana signs in, opens the public page and enters the code
+- **Then** she's a member and sees the inside of the conference
+- **And** the space's member list includes her, with read and write access
+- **And** a membership record for her, starting now, is in the space
+
+### TC-12: A wrong code doesn't admit anyone
+
+- **When** Mallory enters a code that doesn't exist
+- **Then** she's told the code isn't valid, and isn't a member
+
+### TC-13: Expired and used-up shared codes stop working
+
+- **Given** one shared code expired yesterday, and another was limited to
+  two uses and has been used twice
+- **When** Bram enters either code
+- **Then** he's told the code isn't valid, and isn't a member
+
+### TC-14: A personal code belongs to the first person who uses it
+
+- **Given** a personal code issued for AtmosphereConf
+- **When** Ana uses it, leaves, and uses it again
+- **Then** she's admitted both times
+- **And** when Bram tries the same code, it's refused
+
+### TC-15: An invite link opens an invite-only conference
+
+- **Given** Ana has the invite link for "Sanne & Joost's wedding"
+- **When** she opens it and signs in
+- **Then** she joins the wedding and sees its inside, with Bruiloft's theme
+- **And** she never had to know or type the conference's address
+
+### TC-16: Being on the attendee list by handle admits you on sign-in
+
+- **Given** Atmosphere imported an attendee list that includes Ana's handle
+- **When** Ana signs in and opens AtmosphereConf
+- **Then** she joins with one tap, without a code
+
+### TC-17: A handle on the list stays with the account it first named
+
+- **Given** the list was imported with the handle `ana.example`, which then
+  belonged to Ana
+- **And** Ana later changed handles, and Mallory took `ana.example`
+- **When** Mallory tries to join AtmosphereConf
+- **Then** she isn't admitted from the list
+
+### TC-18: Being on the list by email asks for a verified email, once
+
+- **Given** the attendee list has Bram's email, and requests are turned on
+- **When** Bram, signed in, tries to join
+- **Then** he's offered "Verify my email" and "Request to join"
+- **When** he chooses to verify and approves sharing his email at his PDS
+- **Then** he's a member
+- **And** his email isn't stored or shown anywhere in the app
+
+### TC-19: An unconfirmed email doesn't match
+
+- **Given** the attendee list has an email that Mallory's account uses but
+  hasn't confirmed
+- **When** Mallory verifies her email to join
+- **Then** she isn't admitted from the list
+
+### TC-20: Requesting to join, then being approved
+
+- **Given** AtmosphereConf has requests turned on and no other way in for
+  Bram
+- **When** Bram taps "Request to join"
+- **Then** he sees that his request is pending, and isn't a member
+- **When** the operator approves his request
+- **Then** the next time he opens the conference, he's a member
+
+### TC-21: A denied request
+
+- **Given** Bram's request is pending
+- **When** the operator denies it
+- **Then** he isn't a member, and sees he wasn't admitted, with no reason
+  given
+
+### TC-22: An open conference admits anyone signed in
+
+- **Given** AtmosphereConf is open
+- **When** Mallory taps "Join"
+- **Then** she's a member
+
+### TC-23: A conference with no way in for you refuses
+
+- **Given** AtmosphereConf only admits people on its attendee list
+- **When** Mallory tries to join
+- **Then** she's told she can't join, and nothing is created for her
+
+### TC-24: Too many join attempts are slowed down
+
+- **Given** Mallory has tried 10 wrong codes in the last minute
+- **When** she tries another
+- **Then** she's told to wait, and the code isn't checked
+
+### Inside, leaving, removal and bans
+
+### TC-25: Non-members can't see inside
+
+- **Given** Ana is a member of AtmosphereConf and Mallory isn't
+- **When** Mallory asks for anything inside the conference
+- **Then** she gets nothing
+- **And** the space's own access rules refuse her too
+
+### TC-26: Ana leaves, and can come back
+
+- **Given** Ana is a member
+- **When** she leaves AtmosphereConf
+- **Then** she no longer sees its inside
+- **And** she's gone from the space's member list, and her membership record
+  has an end time
+- **And** she can rejoin with any method that admits her, which starts a new
+  membership record
+
+### TC-27: A removed member loses access at once
+
+- **Given** Bram is a member
+- **When** the operator removes him
+- **Then** his very next request for anything inside the conference gets
+  nothing
+- **And** he's gone from the space's member list, and his membership record
+  has an end time
+
+### TC-28: A banned person can't get back in by any method
+
+- **Given** Bram is banned from AtmosphereConf
+- **When** he tries a valid shared code, is on the attendee list, and asks
+  to join
+- **Then** every attempt is refused
+- **And** he never reappears in the space's member list
+
+### TC-29: Records written while not a member are never shown
+
+- **Given** Bram wrote a record into the conference space while he was
+  removed, and was later let back in
+- **When** the conference's records are listed for members
+- **Then** that record isn't included, but his records from while he was a
+  member are
+
+### Roles and rules
+
+### TC-30: Owners and staff are members with a role others can see
+
+- **Given** Olga is Atmosphere's owner and Pim is its staff
+- **When** AtmosphereConf is created
+- **Then** both are members
+- **And** another app reading the space sees Olga as owner and Pim as staff
+
+### TC-31: A speaker assigned before joining gets the role on joining
+
+- **Given** Ana's handle is assigned the speaker role for AtmosphereConf
+  before she has joined
+- **When** she joins
+- **Then** she's admitted without a code, as a speaker
+- **And** another app reading the space sees her as a speaker
+
+### TC-32: Changing and removing roles
+
+- **Given** Ana is a speaker
+- **When** the operator makes her staff, and later removes her from the
+  conference
+- **Then** another app first sees her as staff, then sees no role for her
+
+### TC-33: The conference's rules say who may post what
+
+- **When** AtmosphereConf is created
+- **Then** another app reading the space finds its rules: cards and
+  announcements only by owners and staff, plans and chat by any member
+- **And** the rules can only come from Atmosphere
+
+### TC-34: Records that break the rules aren't shown
+
+- **Given** Ana, an attendee with no role, wrote an announcement into the
+  space
+- **When** the conference's records are listed for members
+- **Then** her announcement isn't included
+
+### TC-35: Roles, rules and memberships from anyone but the organization are ignored
+
+- **Given** Mallory, a member, wrote a record into the space claiming she's
+  an owner, and another claiming new rules
+- **When** roles and rules are read
+- **Then** neither of her records has any effect
+
+### Which apps can read
+
+### TC-36: By default, only eventside can read the space
+
+- **Given** AtmosphereConf has the default (curated) app setting
+- **When** another app, signed in as Ana, a member, asks to read the space
+- **Then** it's refused
+- **When** the operator adds that app to the conference's list
+- **Then** it can read the space, as Ana
+
+### TC-37: An open conference lets any app a member uses read
+
+- **Given** the operator switched AtmosphereConf to open, after the CLI
+  warned what that means
+- **When** another app, not on any list, signed in as Ana, asks to read the
+  space
+- **Then** it can read it
+- **And** it still can't read anything as Mallory, who isn't a member
+
+### Keeping things in step
+
+### TC-38: Reconciling repairs a membership left half-done
+
+- **Given** Bram was added to the space's member list, but the app stopped
+  before recording it
+- **When** the server starts, or the operator runs reconcile
+- **Then** Bram is a member everywhere, with a membership record
+
+### TC-39: A failed membership change isn't reported as done
+
+- **Given** Atmosphere's PDS is unreachable
+- **When** Ana tries to join with a valid code
+- **Then** she's told to try again, and isn't shown as a member
+- **When** the PDS is back and she tries again
+- **Then** she joins
+
+### Two conferences, one person
+
+### TC-40: Ana is in two differently branded conferences with one account
+
+- **Given** Ana is a member of AtmosphereConf and of "Sanne & Joost's
+  wedding"
+- **When** she opens her list of conferences
+- **Then** she sees both, each with its own name and theme
+- **And** opening each shows its own inside and nothing from the other
+
+### Regressions
+
+### TC-41: Signing in still works the same for attendees
+
+- **Given** the organization sign-in has been added
+- **When** Ana signs in, signs out, and her session expires as before
+- **Then** every attendee sign-in case behaves exactly as it did
+
+### TC-42: The block gallery still works signed out
+
+- **When** someone opens the home page and the block gallery without signing
+  in
+- **Then** both work as before
 
 ## Review log
