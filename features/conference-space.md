@@ -456,12 +456,14 @@ Each conference has an intake space,
 us:
 
 - **Write policy `#publicPolicy`:** anyone signed in can write to it.
-- **Read policy:** a member list with nobody on it, and app access allowing
-  eventside alone. Only the authority passes, so only our host can read it,
-  minting credentials for itself with the authority's key.
+- **Read policy:** a member list of the organization's admins (read only),
+  kept in step with the admin space's `admin` records, and the same app
+  access as the admin space. So our host (as the authority) and the admins,
+  through their allowed apps, can read it. Attendees can't read each other's
+  join records.
 - **Joining:** `join` writes `app.eventside.intake.join {code?}` into the
-  person's own repo in the intake space. The code can be in plain text,
-  because only the host reads it. **Leaving** writes
+  person's own repo in the intake space. The code is in plain text, which
+  only our host and the admins can read. **Leaving** writes
   `app.eventside.intake.leave {}`.
 - **Automatic admissions are derived, not written.** The indexer admits
   someone whose join record (judged by its commit `repoRev`) matches a rule
@@ -476,9 +478,10 @@ us:
 - **Email matches can't be derived,** because only our host saw the verified
   email at sign-in. When the email step matches a `listEntry`, our server
   writes a `member` record as the super admin.
-- **Who can see it:** only our host. Admins' apps see derived memberships
-  through our host API (which publishes every membership, derived or
-  written, with its periods), not by reading intake.
+- **Who can see it:** our host and the organization's admins. So an admin's
+  app can derive every membership itself, from the admin space plus the
+  intake spaces, the same way our indexer does. Other members' apps use our
+  host API, which publishes every membership with its periods.
 - **Scope:** attendees need
   `space:app.eventside.intake?authority=*&action=create&action=delete&collection=app.eventside.intake.join&collection=app.eventside.intake.leave`
   in `LOGIN_SCOPES`, one more line on everyone's consent screen. This
@@ -729,7 +732,7 @@ from other apps are ignored for now.
 |---|---|---|---|
 | Authority DID document (`#atproto_space_host`, `#atproto_space` key) | PLC, or the organization's `did.json` | our server (minted) or the organization (adopted) | everyone |
 | `app.eventside.admin.admin`, `.space`, `.member`, `.ban`, `.deny`, `.code`, `.listEntry` | admins' repos in the organization's admin space | the super admin and admins (our server, under their sessions) | admins' apps; our host (crawled) |
-| `app.eventside.intake.join {code?}`, `.leave` | each person's own repo in the conference's intake space | the person (through eventside) | our host only |
+| `app.eventside.intake.join {code?}`, `.leave` | each person's own repo in the conference's intake space | the person (through eventside) | our host and the admins |
 | `community.lexicon.calendar.event` + `app.eventside.conference` sidecar (space, visibility, join flags, app access mode, super admin, theme) | the super admin's public repo (public) or inside the conference space (invite-only) | our server as the super admin | anyone, or members |
 | `app.eventside.conference.role {subject, role}`, `app.eventside.conference.rules` | the super admin's repo inside the conference space | our server as the super admin | members' apps, trusted only from the super admin |
 
@@ -1030,7 +1033,7 @@ description and round 2 design), now repaired, and these problems:
 - Role and rules records for members stay in the conference space,
   written by the conference's super admin.
 - Follow-up in the same round: an **intake space** per conference (anyone
-  writes, only our host reads). Join and leave are the person's own
+  writes; our host and, at the user's request, the admins read). Join and leave are the person's own
   records there. Automatic admissions (code, list, open) are derived from
   them, not written. Requests are join records awaiting an admin's
   `member` (or `deny`) record. Email-matched admissions are still written
