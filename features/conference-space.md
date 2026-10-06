@@ -1,5 +1,5 @@
 ---
-status: design-review
+status: test-cases
 impact: cross-cutting
 depends-on: [attendee-sign-in]
 branch:
@@ -1040,18 +1040,21 @@ description and round 2 design), now repaired, and these problems:
   by the super admin. Attendees get an intake write scope in
   `LOGIN_SCOPES`.
 
+**Round 4 approved** by the user on 2026-10-06.
+
 ## Test cases
 
 The cast:
 
-- **Atmosphere** is an organization account. Its operator has connected it,
-  and Olga is its owner.
+- **Atmosphere** is an organization: a space authority DID our server
+  minted. **Olga** is its super admin (and an owner), and **Pim** is staff.
+  Both have connected their accounts as admins.
 - **Ana and Bram** are attendees with atproto accounts.
 - **Mallory** is a signed-in stranger.
 - **AtmosphereConf** (Amsterdam, 29 April–2 May) is Atmosphere's public
   conference.
 - **"Sanne & Joost's wedding"** is an invite-only conference run by a second
-  organization, **Bruiloft**, with a different theme.
+  organization, **Bruiloft** (super admin: Sanne), with a different theme.
 
 "The CLI" is the admin command line. "Another app" is a second atproto
 client on the conference's app list, used in tests to read the space the
@@ -1059,41 +1062,30 @@ way any other app would.
 
 ### Organizations and conferences
 
-### TC-1: Connecting an organization leaves no way to act as it in the browser
+### ~~TC-1: Connecting an organization leaves no way to act as it in the browser~~
 
-- **Given** the operator can sign in as Atmosphere at its PDS
-- **When** they run the CLI's connect command and complete sign-in in a
-  browser
-- **Then** the browser shows "Connected, you can close this tab"
-- **And** the browser isn't signed in to the app as Atmosphere
-- **And** the CLI reports Atmosphere as connected
+Dropped in design review round 3: the organization has no session any more; see TC-43.
 
-### TC-2: A connected organization stays connected while idle
+### ~~TC-2: A connected organization stays connected while idle~~
 
-- **Given** Atmosphere was connected and nobody has used the app as it for
-  longer than the attendee idle timeout
-- **When** the operator runs any CLI command for Atmosphere
-- **Then** it works without connecting again
+Dropped in design review round 3: admins, not the organization, connect; see TC-44.
 
-### TC-3: An organization missing newly required permissions is reported, not dropped
+### ~~TC-3: An organization missing newly required permissions is reported, not dropped~~
 
-- **Given** Atmosphere was connected before the organization permissions
-  grew
-- **When** the operator runs a CLI command for Atmosphere
-- **Then** the CLI says Atmosphere needs to reconnect, naming the command
-- **And** nothing it already set up stops working
+Dropped in design review round 3: see TC-45, for admins.
 
 ### TC-4: Creating a public conference publishes an event other calendar apps can read
 
-- **Given** Atmosphere is connected
+- **Given** Olga has connected as Atmosphere's super admin
 - **When** the operator creates AtmosphereConf as a public conference
-- **Then** a public calendar event for it exists in Atmosphere's repository,
-  with its name, dates and city
+- **Then** a public calendar event for it exists in Olga's repository, with
+  its name, dates and city, plus a settings record naming its space and Olga
+  as its super admin
 - **And** anyone can open its public page by that event's link
 
 ### TC-5: A conference can adopt an event the organization already published
 
-- **Given** Atmosphere already published a calendar event for AtmosphereConf
+- **Given** Olga already published a calendar event for AtmosphereConf
   through another calendar app
 - **When** the operator creates the conference from that event
 - **Then** the public page shows that event, and no second event is created
@@ -1102,14 +1094,14 @@ way any other app would.
 
 - **Given** an event published by Mallory's account
 - **When** the operator tries to create an Atmosphere conference from it
-- **Then** the CLI refuses, saying the event must be in Atmosphere's own
-  repository
+- **Then** the CLI refuses, saying the event must be in the super admin's
+  own repository
 
 ### TC-7: An invite-only conference publishes nothing
 
-- **Given** Bruiloft is connected
+- **Given** Sanne has connected as Bruiloft's super admin
 - **When** the operator creates "Sanne & Joost's wedding" as invite-only
-- **Then** no public event or settings record for it exists in Bruiloft's
+- **Then** no public event or settings record for it exists in Sanne's
   public repository
 - **And** opening it by its address without being a member shows nothing
   about it
@@ -1146,8 +1138,10 @@ way any other app would.
 - **Given** AtmosphereConf has the shared code "atmosphere27"
 - **When** Ana signs in, opens the public page and enters the code
 - **Then** she's a member and sees the inside of the conference
-- **And** the space's member list includes her, with read and write access
-- **And** a membership record for her, starting now, is in the space
+- **And** her join is a record in her own repository, which Olga's
+  repository didn't have to change for
+- **And** another app asking our server who the members are sees her, with
+  read and write access, from now
 
 ### TC-12: A wrong code doesn't admit anyone
 
@@ -1253,10 +1247,9 @@ way any other app would.
 - **Given** Ana is a member
 - **When** she leaves AtmosphereConf
 - **Then** she no longer sees its inside
-- **And** she's gone from the space's member list, and her membership record
-  has an end time
+- **And** another app asking our server sees her membership ended now
 - **And** she can rejoin with any method that admits her, which starts a new
-  membership record
+  membership period
 
 ### TC-27: A removed member loses access at once
 
@@ -1264,8 +1257,9 @@ way any other app would.
 - **When** the operator removes him
 - **Then** his very next request for anything inside the conference gets
   nothing
-- **And** he's gone from the space's member list, and his membership record
-  has an end time
+- **And** another app asking our server sees his membership ended
+- **And** an app that already held access through Bram can no longer read
+  anyone's records in the space
 
 ### TC-28: A banned person can't get back in by any method
 
@@ -1290,7 +1284,8 @@ way any other app would.
 - **Given** Olga is Atmosphere's owner and Pim is its staff
 - **When** AtmosphereConf is created
 - **Then** both are members
-- **And** another app reading the space sees Olga as owner and Pim as staff
+- **And** another app reading the space sees Olga as owner and Pim as staff,
+  from records Olga wrote
 
 ### TC-31: A speaker assigned before joining gets the role on joining
 
@@ -1321,12 +1316,12 @@ way any other app would.
 - **When** the conference's records are listed for members
 - **Then** her announcement isn't included
 
-### TC-35: Roles, rules and memberships from anyone but the organization are ignored
+### TC-35: Roles and rules from anyone but the super admin are ignored
 
-- **Given** Mallory, a member, wrote a record into the space claiming she's
-  an owner, and another claiming new rules
+- **Given** Ana, a member, and Pim, a staff admin, each wrote a record into
+  the conference space claiming new roles and new rules
 - **When** roles and rules are read
-- **Then** neither of her records has any effect
+- **Then** none of their records has any effect
 
 ### Which apps can read
 
@@ -1349,20 +1344,13 @@ way any other app would.
 
 ### Keeping things in step
 
-### TC-38: Reconciling repairs a membership left half-done
+### ~~TC-38: Reconciling repairs a membership left half-done~~
 
-- **Given** Bram was added to the space's member list, but the app stopped
-  before recording it
-- **When** the server starts, or the operator runs reconcile
-- **Then** Bram is a member everywhere, with a membership record
+Dropped in design review round 3: there is no copy to reconcile; the index is rebuilt from records (TC-50).
 
-### TC-39: A failed membership change isn't reported as done
+### ~~TC-39: A failed membership change isn't reported as done~~
 
-- **Given** Atmosphere's PDS is unreachable
-- **When** Ana tries to join with a valid code
-- **Then** she's told to try again, and isn't shown as a member
-- **When** the PDS is back and she tries again
-- **Then** she joins
+Dropped in design review round 3: joining no longer writes to the organization's PDS; see TC-54 and TC-55.
 
 ### Two conferences, one person
 
@@ -1373,6 +1361,121 @@ way any other app would.
 - **When** she opens her list of conferences
 - **Then** she sees both, each with its own name and theme
 - **And** opening each shows its own inside and nothing from the other
+
+### Our server as the space host
+
+### TC-43: Connecting as an admin leaves no way to act as an admin in the browser
+
+- **Given** Olga is Atmosphere's super admin
+- **When** she runs the CLI's connect command and completes sign-in in a
+  browser
+- **Then** the browser shows "Connected, you can close this tab"
+- **And** the browser isn't signed in to the app as Olga
+- **And** the CLI reports Olga as a connected admin
+
+### TC-44: A connected admin stays connected while idle
+
+- **Given** Olga connected and hasn't used the app for longer than the
+  attendee idle timeout
+- **When** the operator runs a CLI command as Olga
+- **Then** it works without connecting again
+
+### TC-45: An admin missing newly required permissions is told to reconnect
+
+- **Given** Pim connected before the admin permissions grew
+- **When** the operator runs a CLI command as Pim
+- **Then** the CLI says Pim needs to reconnect, naming the command
+- **And** nothing Pim already wrote stops counting
+
+### TC-46: Creating an organization gives it an identity that points at our server
+
+- **When** the operator creates Atmosphere with Olga as super admin
+- **Then** Atmosphere's DID document names our server as its space host and
+  publishes a space key
+- **And** the operator's recovery key comes before our server's in its
+  rotation keys
+- **And** Atmosphere's admin space exists, with Olga as owner
+
+### TC-47: Another app reads a member's records with access from our server
+
+- **Given** AtmosphereConf allows another app, and Ana has written a plan
+  into the conference space
+- **When** that app, signed in as Bram (a member), asks our server for
+  access and reads the space
+- **Then** it lists Ana among the space's writers and reads her plan from
+  her own PDS
+
+### TC-48: A non-member's writes don't enter the space
+
+- **Given** Mallory isn't a member of AtmosphereConf
+- **When** she writes a record into the conference space from her own PDS
+- **Then** our server refuses her PDS's write notice
+- **And** she doesn't appear among the space's writers
+
+### TC-49: An app can't get access to a space for someone who isn't a member
+
+- **When** another app, signed in as Mallory, asks our server for access to
+  the AtmosphereConf space
+- **Then** it's refused
+
+### TC-50: Every permission can be rebuilt from the super admin
+
+- **Given** AtmosphereConf has admins, codes, an attendee list, members who
+  joined each way, a removal and a ban
+- **When** the operator wipes the server's index and runs reindex
+- **Then** every member, admin, ban, code, policy and app setting is the
+  same as before
+
+### TC-51: Staff can't override the super admin
+
+- **Given** Olga banned Bram from AtmosphereConf
+- **When** Pim, a staff admin, admits Bram, and also tries to switch the
+  conference to open
+- **Then** Bram is still banned, and the conference isn't open
+
+### TC-52: Between other admins, a ban wins and otherwise the latest decision stands
+
+- **Given** Pim and another staff admin, Kees
+- **When** Pim admits Bram and Kees then bans him
+- **Then** Bram is banned
+- **When** Kees removes Ana and Pim later admits her again
+- **Then** Ana is a member
+
+### TC-53: A former admin's decisions stop counting
+
+- **Given** Pim admitted Bram while he was staff
+- **When** Olga removes Pim as an admin
+- **Then** Bram is no longer a member, unless another rule admits him
+
+### TC-54: Joining doesn't depend on the super admin's PDS
+
+- **Given** Olga's PDS is unreachable, and AtmosphereConf has the shared
+  code "atmosphere27"
+- **When** Ana joins with the code
+- **Then** she's a member
+
+### TC-55: An admin action fails while that admin's PDS is down
+
+- **Given** Pim's PDS is unreachable
+- **When** the operator approves Bram's request as Pim
+- **Then** the CLI reports that it failed, and Bram isn't a member
+- **When** Pim's PDS is back and the approval is retried
+- **Then** Bram is a member
+
+### TC-56: Admins can read join records, attendees can't
+
+- **Given** Ana and Bram joined AtmosphereConf with codes
+- **When** an app signed in as Pim reads the conference's intake
+- **Then** it sees both join records, with their codes
+- **When** an app signed in as Ana tries the same
+- **Then** it's refused
+
+### TC-57: A denied request can be made again; a ban can't
+
+- **Given** Bram's request was denied
+- **When** he asks to join again
+- **Then** his new request is pending
+- **And** if he had been banned instead, it would be refused
 
 ### Regressions
 
