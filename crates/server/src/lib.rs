@@ -120,6 +120,38 @@ fn routes() -> Router<AppState> {
         .route("/oauth/callback", get(routes::callback))
         .route("/oauth/logout", post(routes::logout))
         .route("/xrpc/app.eventside.auth.getSession", get(routes::get_session))
+        .merge(conference_stubs())
+}
+
+/// Conference-space's routes, not implemented yet: each answers 501.
+fn conference_stubs() -> Router<AppState> {
+    use axum::http::StatusCode;
+    use axum::response::Response;
+    async fn not_implemented() -> Response {
+        auth::xrpc_error(StatusCode::NOT_IMPLEMENTED, "NotImplemented", "not implemented")
+    }
+    let mut router = Router::new();
+    for method in [
+        "app.eventside.conference.getConference",
+        "app.eventside.conference.listMyConferences",
+        "app.eventside.conference.listRecords",
+        "app.eventside.space.getSpace",
+        "app.eventside.space.listMembers",
+        "com.atproto.space.listRepos",
+    ] {
+        router = router.route(&format!("/xrpc/{method}"), get(not_implemented));
+    }
+    for method in [
+        "app.eventside.conference.join",
+        "app.eventside.conference.leave",
+        "com.atproto.space.getSpaceCredential",
+        "com.atproto.space.registerNotify",
+        "com.atproto.space.unregisterNotify",
+        "com.atproto.space.notifyWrite",
+    ] {
+        router = router.route(&format!("/xrpc/{method}"), post(not_implemented));
+    }
+    router
 }
 
 /// Wraps a finished set of routes in the CSRF check. `Router::layer` covers

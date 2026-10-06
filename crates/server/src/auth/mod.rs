@@ -106,7 +106,10 @@ pub struct CheckedSession(SessionRow);
 pub async fn require_csrf(State(state): State<AppState>, mut req: Request, next: Next) -> Response {
     let path = req.uri().path();
     let changes_state = !matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS);
-    if !(changes_state && (path.starts_with("/xrpc/") || path == "/oauth/logout")) {
+    // The space host's protocol methods are called by apps and PDSes with
+    // their own credentials, never with a browser's cookie.
+    let space_host = path.starts_with("/xrpc/com.atproto.space.");
+    if space_host || !(changes_state && (path.starts_with("/xrpc/") || path == "/oauth/logout")) {
         return next.run(req).await;
     }
     let row = match session::lookup(&state, req.headers()).await {
