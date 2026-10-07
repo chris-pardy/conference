@@ -71,8 +71,24 @@ impl EcKey {
     /// A compact JWS of `claims` with this key.
     pub fn sign(&self, header: Value, claims: &Value) -> String {
         let input = format!("{}.{}", b64(header.to_string()), b64(claims.to_string()));
-        let signature: Signature = SigningKey::from(&self.secret).sign(input.as_bytes());
-        format!("{input}.{}", b64(signature.to_bytes()))
+        format!("{input}.{}", b64(self.sign_bytes(input.as_bytes())))
+    }
+
+    /// A 64-byte `r||s` ES256 signature over `message`, with a low S, which
+    /// atproto's verifiers (PLC operations, service auth) insist on.
+    pub fn sign_bytes(&self, message: &[u8]) -> Vec<u8> {
+        let signature: Signature = SigningKey::from(&self.secret).sign(message);
+        signature.normalize_s().unwrap_or(signature).to_bytes().to_vec()
+    }
+
+    /// The public key, as a `did:key`.
+    pub fn did_key(&self) -> String {
+        crate::crypto::PublicKey::p256_did_key(&self.secret.public_key())
+    }
+
+    /// The public key, for checking what this key signed.
+    pub fn verifying_key(&self) -> crate::crypto::PublicKey {
+        crate::crypto::PublicKey::P256(p256::ecdsa::VerifyingKey::from(&self.secret.public_key()))
     }
 }
 

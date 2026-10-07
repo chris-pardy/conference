@@ -71,6 +71,8 @@ impl FromRequestParts<AppState> for CurrentUser {
             None => session::lookup(state, &parts.headers).await,
         };
         match lookup {
+            // A backstop: admin sessions never have a cookie.
+            Ok(Lookup::Live(row)) if row.is_admin() => Err(auth_required()),
             Ok(Lookup::Live(row)) => {
                 if let Err(err) = session::touch(state, &row).await {
                     eprintln!("could not record session use: {err}");

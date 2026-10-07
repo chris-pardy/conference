@@ -6,12 +6,15 @@ use axum::routing::{get, post};
 use axum::{Json, Router, extract::State, middleware};
 
 pub mod auth;
+pub mod conference;
 pub mod config;
+pub mod crypto;
 pub mod db;
 pub mod identity;
 pub mod keys;
 pub mod net;
 pub mod oauth;
+pub mod spacehost;
 
 pub mod health {
     use serde::Serialize;
@@ -50,6 +53,10 @@ pub struct Inner {
     pub http: net::Http,
     pub oauth: oauth::OAuthClient,
     pub resolver: identity::Resolver,
+    /// The space host's caches and limits.
+    pub host: spacehost::Host,
+    /// The key-encryption and HMAC secrets.
+    pub secrets: spacehost::authority::Secrets,
     probe: reqwest::Client,
 }
 
@@ -67,6 +74,9 @@ impl AppState {
     pub async fn build(config: Config, public_url: String) -> Result<Self, String> {
         let db = db::connect(&config.database_url).await?;
         let key = oauth::signing_key(&db, config.signing_key.as_deref()).await?;
+        let secrets =
+            spacehost::authority::Secrets::load(&db, config.authority_key_secret.as_deref())
+                .await?;
         let http = net::Http::new(config.allow_private_network);
         let oauth = oauth::OAuthClient::new(&public_url, &config.scopes, key, http.clone())?;
         let resolver = identity::Resolver {
@@ -78,7 +88,16 @@ impl AppState {
             .timeout(ATPROTO_PROBE_TIMEOUT)
             .build()
             .expect("the HTTP client has a valid static configuration");
-        Ok(Self(Arc::new(Inner { config, db, http, oauth, resolver, probe })))
+        Ok(Self(Arc::new(Inner {
+            config,
+            db,
+            http,
+            oauth,
+            resolver,
+            host: spacehost::Host::default(),
+            secrets,
+            probe,
+        })))
     }
 
     /// Cookies are `Secure` and `__Host-` prefixed when the app is served over HTTPS.
@@ -118,40 +137,12 @@ fn routes() -> Router<AppState> {
         .route("/oauth/login", get(routes::login))
         .route("/oauth/signup", get(routes::signup))
         .route("/oauth/callback", get(routes::callback))
+        .route("/oauth/connect", get(routes::connect))
+        .route("/oauth/email", get(routes::email))
         .route("/oauth/logout", post(routes::logout))
         .route("/xrpc/app.eventside.auth.getSession", get(routes::get_session))
-        .merge(conference_stubs())
-}
-
-/// Conference-space's routes, not implemented yet: each answers 501.
-fn conference_stubs() -> Router<AppState> {
-    use axum::http::StatusCode;
-    use axum::response::Response;
-    async fn not_implemented() -> Response {
-        auth::xrpc_error(StatusCode::NOT_IMPLEMENTED, "NotImplemented", "not implemented")
-    }
-    let mut router = Router::new();
-    for method in [
-        "app.eventside.conference.getConference",
-        "app.eventside.conference.listMyConferences",
-        "app.eventside.conference.listRecords",
-        "app.eventside.space.getSpace",
-        "app.eventside.space.listMembers",
-        "com.atproto.space.listRepos",
-    ] {
-        router = router.route(&format!("/xrpc/{method}"), get(not_implemented));
-    }
-    for method in [
-        "app.eventside.conference.join",
-        "app.eventside.conference.leave",
-        "com.atproto.space.getSpaceCredential",
-        "com.atproto.space.registerNotify",
-        "com.atproto.space.unregisterNotify",
-        "com.atproto.space.notifyWrite",
-    ] {
-        router = router.route(&format!("/xrpc/{method}"), post(not_implemented));
-    }
-    router
+        .merge(spacehost::routes())
+        .merge(conference::routes())
 }
 
 /// Wraps a finished set of routes in the CSRF check. `Router::layer` covers
@@ -198,6 +189,8 @@ mod tests {
             database_url: format!("sqlite://{}/eventside.db?mode=rwc", dir.0.display()),
             signing_key: None,
             scopes: vec!["atproto".into()],
+            admin_scopes: config::ADMIN_SCOPES.iter().map(|s| (*s).to_owned()).collect(),
+            authority_key_secret: None,
             signup_pds_url: signup_pds_url.to_owned(),
             plc_url: local.clone(),
             handle_resolver_url: local,
@@ -267,6 +260,7 @@ mod tests {
                 token_expires_at: i64::MAX,
                 scopes: "atproto",
                 client_id: &state.oauth.client_id,
+                kind: session::ATTENDEE,
             },
         )
         .await
@@ -299,6 +293,7 @@ mod tests {
                 token_expires_at: i64::MAX,
                 scopes: "atproto",
                 client_id: &state.oauth.client_id,
+                kind: session::ATTENDEE,
             },
         )
         .await
@@ -350,6 +345,7 @@ mod tests {
                 token_expires_at: i64::MAX,
                 scopes,
                 client_id,
+                kind: session::ATTENDEE,
             },
         )
         .await

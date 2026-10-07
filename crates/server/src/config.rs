@@ -4,7 +4,28 @@ use std::time::Duration;
 
 /// The scopes asked for at sign-in. A feature that needs more adds them here;
 /// sessions granted fewer are asked to sign in again.
-pub const LOGIN_SCOPES: &[&str] = &["atproto"];
+///
+/// conference-space: joining and leaving a conference are the person's own
+/// records in its intake space.
+pub const LOGIN_SCOPES: &[&str] = &["atproto", INTAKE_SCOPE];
+
+/// Writing your own join and leave records into any conference's intake space.
+pub const INTAKE_SCOPE: &str = "space:app.eventside.intake?authority=*&action=create&action=delete&collection=app.eventside.intake.join&collection=app.eventside.intake.leave";
+
+/// What the email step adds to the sign-in scopes, for one sign-in.
+pub const EMAIL_SCOPE: &str = "transition:email";
+
+/// The scopes an admin connects with (`admin connect`): the conference's
+/// public records, its role and rules records, the admin space, and blobs for
+/// branding. Admins whose grant lacks one are told to reconnect.
+pub const ADMIN_SCOPES: &[&str] = &[
+    "atproto",
+    "repo:community.lexicon.calendar.event",
+    "repo:app.eventside.conference",
+    "space:app.eventside.conference?authority=*&action=create&action=update&action=delete&collection=app.eventside.conference&collection=app.eventside.conference.role&collection=app.eventside.conference.rules&collection=community.lexicon.calendar.event",
+    "space:app.eventside.admin?authority=*&action=read&action=create&action=update&action=delete&collection=app.eventside.admin.admin&collection=app.eventside.admin.space&collection=app.eventside.admin.member&collection=app.eventside.admin.ban&collection=app.eventside.admin.deny&collection=app.eventside.admin.code&collection=app.eventside.admin.listEntry",
+    "blob:*/*",
+];
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -18,6 +39,12 @@ pub struct Config {
     /// An ES256 private JWK. Without it, a key is generated and kept in the database.
     pub signing_key: Option<String>,
     pub scopes: Vec<String>,
+    /// The scopes admins connect with: `ADMIN_OAUTH_SCOPES`, or `ADMIN_SCOPES`.
+    pub admin_scopes: Vec<String>,
+    /// The secret the authorities' keys are encrypted under, and emails and
+    /// codes are HMAC'd with. Without it, one is generated and kept in the
+    /// database (dev and tests).
+    pub authority_key_secret: Option<String>,
     pub signup_pds_url: String,
     pub plc_url: String,
     pub handle_resolver_url: String,
@@ -41,7 +68,9 @@ impl Config {
             Some(v) => parse_duration(&v).map_err(|e| format!("{name}: {e}")),
             None => Ok(default),
         };
-        let scopes = scopes(var("OAUTH_SCOPES").as_deref())?;
+        let admin_scopes =
+            scopes("ADMIN_OAUTH_SCOPES", var("ADMIN_OAUTH_SCOPES").as_deref(), ADMIN_SCOPES)?;
+        let scopes = scopes("OAUTH_SCOPES", var("OAUTH_SCOPES").as_deref(), LOGIN_SCOPES)?;
         let public_url = var("PUBLIC_URL").map(|u| public_url(&u)).transpose()?;
         let database_url =
             var("DATABASE_URL").unwrap_or_else(|| "sqlite://data/eventside.db?mode=rwc".into());
@@ -56,6 +85,8 @@ impl Config {
             database_url,
             signing_key,
             scopes,
+            admin_scopes,
+            authority_key_secret: var("AUTHORITY_KEY_SECRET"),
             signup_pds_url: trim_url(&var("SIGNUP_PDS_URL").unwrap_or_else(|| atproto_url.clone())),
             plc_url: trim_url(&var("PLC_URL").unwrap_or_else(|| atproto_url.clone())),
             handle_resolver_url: trim_url(
@@ -77,17 +108,17 @@ impl Config {
     }
 }
 
-/// The scopes to ask for: `OAUTH_SCOPES`, or `LOGIN_SCOPES` when it's unset.
-/// The list is this instance's client ID, so it must be one the metadata
-/// route serves: valid, distinct scope names, `atproto` among them.
-fn scopes(value: Option<&str>) -> Result<Vec<String>, String> {
+/// The scopes to ask for: the variable `name`, or `default` when it's unset.
+/// The list is a client ID, so it must be one the metadata route serves:
+/// valid, distinct scope names, `atproto` among them.
+fn scopes(name: &str, value: Option<&str>, default: &[&str]) -> Result<Vec<String>, String> {
     let scopes: Vec<String> = match value {
         Some(s) => s.split_whitespace().map(str::to_owned).collect(),
-        None => LOGIN_SCOPES.iter().map(|s| (*s).to_owned()).collect(),
+        None => default.iter().map(|s| (*s).to_owned()).collect(),
     };
     match crate::oauth::scope_problem(&scopes.join(" ")) {
         None => Ok(scopes),
-        Some(problem) => Err(format!("OAUTH_SCOPES {problem}")),
+        Some(problem) => Err(format!("{name} {problem}")),
     }
 }
 
@@ -164,7 +195,8 @@ mod tests {
 
     #[test]
     fn the_scope_list_must_include_atproto_once() {
-        assert_eq!(scopes(None), Ok(vec!["atproto".to_owned()]));
+        let scopes = |value| scopes("OAUTH_SCOPES", value, LOGIN_SCOPES);
+        assert_eq!(scopes(None), Ok(LOGIN_SCOPES.iter().map(|s| (*s).to_owned()).collect()));
         assert_eq!(
             scopes(Some(" atproto  transition:generic ")),
             Ok(vec!["atproto".to_owned(), "transition:generic".to_owned()])
@@ -175,6 +207,13 @@ mod tests {
         assert!(scopes(Some("atproto \"quoted\"")).is_err());
         let long = format!("atproto {}", "x".repeat(2048));
         assert!(scopes(Some(&long)).unwrap_err().contains("2048"));
+    }
+
+    #[test]
+    fn the_admin_and_email_scope_lists_are_well_formed() {
+        assert!(crate::oauth::well_formed_scope(&ADMIN_SCOPES.join(" ")));
+        let email = [LOGIN_SCOPES, &[EMAIL_SCOPE]].concat().join(" ");
+        assert!(crate::oauth::well_formed_scope(&email));
     }
 
     #[test]

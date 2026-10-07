@@ -72,8 +72,10 @@ async fn refresh_leased(state: &AppState, id_hash: &str) -> Renewal {
         Err(err) => return Renewal::Failed(err.to_string()),
     };
     // Missing a scope this instance asks for: the person signs in again
-    // rather than renewing a grant that's no longer enough.
-    if session::outdated(state, &row) {
+    // rather than renewing a grant that's no longer enough. An admin's grant
+    // is kept: the CLI tells them to reconnect, and what they wrote with it
+    // still counts.
+    if !row.is_admin() && session::outdated(state, &row) {
         return match session::end_revoking(state, &row).await {
             Ok(()) => Renewal::Ended,
             Err(err) => Renewal::Failed(err.to_string()),
@@ -204,7 +206,7 @@ pub async fn run_once(state: &AppState) {
 async fn run_job(state: &AppState, job: Job, bound: i64) {
     let sql = match job {
         Job::EndIdle => {
-            "SELECT id_hash, last_seen_at, issuer FROM sessions WHERE ended_at IS NULL \
+            "SELECT id_hash, last_seen_at, issuer FROM sessions WHERE ended_at IS NULL AND kind <> 'admin' \
              AND last_seen_at < $1 AND last_seen_at >= $2 AND (last_seen_at, id_hash) > ($2, $3) \
              ORDER BY last_seen_at, id_hash LIMIT $4"
         }

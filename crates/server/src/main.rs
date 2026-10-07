@@ -9,8 +9,8 @@ use tokio::net::TcpListener;
 async fn main() -> ExitCode {
     // `conference-server admin …`: the operator's CLI (conference-space).
     if std::env::args().nth(1).as_deref() == Some("admin") {
-        eprintln!("conference-server admin: not implemented");
-        return ExitCode::FAILURE;
+        let args: Vec<String> = std::env::args().skip(2).collect();
+        return conference_server::conference::cli::main(args).await;
     }
     let config = match Config::from_env() {
         Ok(config) => config,
@@ -40,6 +40,8 @@ async fn main() -> ExitCode {
     writeln!(stdout, "listening on http://{addr}").ok();
     stdout.flush().ok();
 
-    axum::serve(listener, router(state)).await.expect("server error");
+    // The client's address, for the space host's per-IP limits.
+    let app = router(state).into_make_service_with_connect_info::<std::net::SocketAddr>();
+    axum::serve(listener, app).await.expect("server error");
     ExitCode::SUCCESS
 }

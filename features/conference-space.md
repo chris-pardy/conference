@@ -1214,6 +1214,58 @@ the red tests chose them, and the implementation follows them:
   - a conference's theme sets `--g-color-primary` (and the other tokens) on
     `:root`
 
+**Implementation refinements (2026-10-06).** Where the design left room,
+the build chose:
+
+- **Space settings are append-only snapshots.** Each change to a space's
+  join methods, app access or policies adds a snapshot, and a join is
+  judged by the settings in force at the join record's commit, not at the
+  time we happen to process it.
+- **Record timing comes from commit revs.** When a record entered or left a
+  space is read from the writer's `com.atproto.space.listRepoOps` commit
+  revs, not from `createdAt` or our clock.
+- **Admin member records are decisions.** `app.eventside.admin.member`
+  records are append-only decisions with TID rkeys. A removal is a decision
+  with `until`; the latest decision about a person stands (bans aside, see
+  TC-52).
+- **Codes are HMAC'd with the server key.** Join codes are stored only as
+  HMACs under the server's secret (`AUTHORITY_KEY_SECRET`, or the generated
+  one), like emails.
+- **Pre-assigned roles admit people.** A role record from the conference's
+  super admin (`app.eventside.conference.role`) is itself a way in: the
+  person it names is admitted when they join, like a list entry.
+- **Role and rules writes always go through the super admin's session.**
+  Whoever runs `member role` or changes the rules, the CLI writes the record
+  into the super admin's repo with the super admin's connected session, so
+  only those records count (TC-35, TC-51).
+- **Reindex reads writer sets and previously read repos.** `reindex` reads
+  every repo the space's writer set names, plus every repo we've read from
+  that space before, so records from people who have since left are still
+  re-derived.
+- **Rate limits.** `join` is limited per person (10 a minute) and per IP
+  (30 a minute). The per-IP limit is skipped for loopback addresses, which
+  every test and the e2e server share.
+- **Revocation on any lost access.** For each membership, role, ban or app
+  access change, the host computes who can read before and after, and
+  revokes the credentials of everyone who lost access, whatever the cause.
+- **Join panel.** The code field sits behind an "Enter a code" button, with
+  "Join" and "Request to join" beside it (the tests accept either form).
+- **Left for later:**
+  - Lexicon JSON for the new records (`app.eventside.conference.*`,
+    `app.eventside.intake.*`, `app.eventside.admin.*`, `app.eventside.space.*`)
+    isn't in `lexicons/` yet.
+  - `org adopt` (bringing an existing account in as an organization) isn't
+    implemented; `org create` mints a new authority.
+- **Sign-in scopes.** `LOGIN_SCOPES` now includes the intake scope, so the
+  attendee client ID carries `?scope=…`. attendee-sign-in's TC-7, TC-9 and
+  TC-18 were amended to check the default list (`tests/support/scopes.ts`),
+  as the user decided.
+- **Vivarium.** E2e TC-8 needs vivarium's authorize pages to wrap the long
+  client ID. That fix is on vivarium's `fix/wrap-long-client-id` branch,
+  unreleased. CI pins `@vivarium-dev/cli` 0.0.2 from npm, so e2e TC-8 will
+  fail in CI until a vivarium release with the fix is published and pinned
+  here. Locally, `VIVARIUM_BIN` pointing at a build of that branch passes.
+
 **Red-test gate (2026-10-06):** the user approved the red tests and the
 surfaces they pin (see Build notes), with these contract changes:
 

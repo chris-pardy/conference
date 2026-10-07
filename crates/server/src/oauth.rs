@@ -339,18 +339,35 @@ impl OAuthClient {
         crate::net::read_json(res).await
     }
 
+    /// The client ID that asks for `scope`, a well-formed scope list.
+    pub fn client_id_for(&self, scope: &str) -> String {
+        client_id(&self.public_url, scope)
+    }
+
     /// Pushes an authorization request, returning the URL to send the browser to.
     pub async fn par(
         &self,
         server: &AuthServer,
         request: &ParRequest<'_>,
     ) -> Result<String, OAuthError> {
-        let assertion = client_assertion(&self.key, &self.client_id, &server.issuer);
+        self.par_for(server, request, &self.scope).await
+    }
+
+    /// Pushes an authorization request for another scope list (an admin's,
+    /// or the email step's), as the client ID that asks for it.
+    pub async fn par_for(
+        &self,
+        server: &AuthServer,
+        request: &ParRequest<'_>,
+        scope: &str,
+    ) -> Result<String, OAuthError> {
+        let client_id = client_id(&self.public_url, scope);
+        let assertion = client_assertion(&self.key, &client_id, &server.issuer);
         let mut form = vec![
             ("response_type", "code"),
-            ("client_id", self.client_id.as_str()),
+            ("client_id", client_id.as_str()),
             ("redirect_uri", self.redirect_uri.as_str()),
-            ("scope", self.scope.as_str()),
+            ("scope", scope),
             ("state", request.state),
             ("code_challenge", request.code_challenge),
             ("code_challenge_method", "S256"),
@@ -373,7 +390,7 @@ impl OAuthClient {
         let mut url = url::Url::parse(&server.authorization_endpoint)
             .map_err(|e| OAuthError::Rejected(format!("bad authorization endpoint: {e}")))?;
         url.query_pairs_mut()
-            .append_pair("client_id", &self.client_id)
+            .append_pair("client_id", &client_id)
             .append_pair("request_uri", request_uri);
         Ok(url.into())
     }
