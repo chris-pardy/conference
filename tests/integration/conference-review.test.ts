@@ -1033,6 +1033,59 @@ test('TC-32: removing the owner whose list last gave a role hands it to another 
   expect((await asZoe.getConference(conference.space)).body.viewer?.role, 'still staff, by Sem’s list').toBe('staff')
 })
 
+// Regressions from adversarial review round 15.
+
+test('TC-58: re-adding an owner while keeping admissions keeps someone their old ban would take out (review round 15)', async ({
+  viv,
+}) => {
+  const { org, conference } = await seedConference(dep, accountsIn(viv), { methods: ['code'] })
+  const kees = await viv.createAccount(viv.handle('kees'))
+  await addAdmin(dep, org, kees, 'owner')
+  const code = await sharedCode(dep, conference, uniqueCode('atmosphere27'))
+  const bram = await Attendee.signIn(dep, await viv.createAccount(viv.handle('bram')))
+  expect((await bram.join({ conference: conference.space, code })).body.status).toBe('joined')
+  await cliOk(dep, ['member', 'ban', bram.person.handle, '--conference', conference.space, '--as', kees.handle])
+  await cliOk(dep, ['org', 'admin', 'remove', kees.handle, '--org', org.did])
+  expect(await bram.isMember(conference.space)).toBe(true)
+
+  const readded = await cliOk(dep, [
+    'org',
+    'admin',
+    'add',
+    kees.handle,
+    '--org',
+    org.did,
+    '--role',
+    'owner',
+    '--keep-admissions',
+  ])
+  expect(readded.stdout).toContain(bram.person.handle)
+  expect(await bram.isMember(conference.space), 'kept, as the command says').toBe(true)
+})
+
+test('TC-32: demoting an owner hands their list roles on, or they stop counting (review round 15)', async ({ viv }) => {
+  const { org, conference } = await seedConference(dep, accountsIn(viv), { methods: ['list'] })
+  const kees = await viv.createAccount(viv.handle('kees'))
+  const sem = await viv.createAccount(viv.handle('sem'))
+  await addAdmin(dep, org, kees, 'owner')
+  await addAdmin(dep, org, sem, 'owner')
+  const zoe = await viv.createAccount(viv.handle('zoe'))
+  const joost = await viv.createAccount(viv.handle('joost'))
+  const importAs = (as: string, rows: string[]) =>
+    cliOk(dep, ['list', 'import', listFile(rows), '--conference', conference.space, '--as', as])
+  await importAs(sem.handle, [`${zoe.handle},,staff`])
+  await importAs(kees.handle, [`${zoe.handle},,staff`, `${joost.handle},,speaker`])
+
+  const demoted = await cliOk(dep, ['org', 'admin', 'add', kees.handle, '--org', org.did, '--role', 'staff'])
+  const asZoe = await Attendee.signIn(dep, zoe)
+  expect((await asZoe.join({ conference: conference.space })).body.status).toBe('joined')
+  expect((await asZoe.getConference(conference.space)).body.viewer?.role, 'by Sem’s list').toBe('staff')
+  // Joost was on Kees's list only: its speaker role doesn't let him in now.
+  expect(demoted.stdout).not.toContain(zoe.handle)
+  const answer = await (await Attendee.signIn(dep, joost)).join({ conference: conference.space })
+  expect(answer.body.status).not.toBe('joined')
+})
+
 /** An attendee list file with the given `handle,email,role` rows. */
 function listFile(rows: string[]): string {
   const file = join(mkdtempSync(join(tmpdir(), 'eventside-list-')), 'attendees.csv')

@@ -1,5 +1,5 @@
 ---
-status: implementing
+status: blocked
 impact: cross-cutting
 depends-on: [attendee-sign-in]
 branch: feature/conference-space
@@ -1631,7 +1631,7 @@ then review again (rounds 11 to 15). What changed:
   (TC-58).** `org admin remove <handle> --keep-admissions` works out who's
   a member now only on the departing admin's say-so (the organization as
   it would be without their `admin` record, compared with now), writes
-  the remover's own `member` record for each (`via: "kept"`, `keptFrom`
+  the remover's own `member` record for each (`via: "kept"`, `keptThrough`
   the departing admin), and then removes the admin. Those people are then
   members by the super admin's decision, which only she can override. The
   roles the departing admin assigned still go, as before. (Round 12: also on
@@ -1723,6 +1723,20 @@ one question for the PR:
   gave that another current owner's list also gives (the same person and
   role) is rewritten as that owner's, keeping its time, instead of being
   deleted.
+
+**Review round 15 design notes (2026-10-07).**
+
+- **The super admin's admission that lifts a ban admits from then.** Her
+  kept admission is dated from the start of the period it keeps, which can
+  be before an owner's ban it lifts, so the lift itself now opens a period.
+- **A list's roles count only while the owner who imported it is one,** as
+  its rows do (a staff admin's list role no longer admits). Demoting an
+  owner hands their list roles to another owner whose list gives the same
+  person the same role, as removal does.
+- **The reports of an admin change say what changed, not why:** "aren't
+  members any more after this change to {who}", "are members again now",
+  "aren't banned any more", with the super admin's commands as the remedy.
+  The kept record names the admin change in `keptThrough`.
 
 **Red-test gate (2026-10-06):** the user approved the red tests and the
 surfaces they pin (see Build notes), with these contract changes:
@@ -2982,3 +2996,82 @@ green (lint, build, Rust 94 + unit 122 + integration 116 + tooling 33 + e2e
 5. **[nit] The let-back-in report didn't say who was a member again at
    once.** **Fixed:** it reports members again and those only able to join
    again separately (`member` in the JSON).
+
+### Round 15
+
+Reviewer: a fresh subagent following `adversarial-review`. Verdict: not
+clean (0 blocking, 1 major, 3 minor, 1 nit). It confirmed the TC-52 change
+is still the only changed frozen file. After the rework: `pnpm check`
+green (lint, build, Rust 95 + unit 122 + integration 118 + tooling 33 + e2e
+35), and `check:frozen` warns only about
+`tests/integration/conference-admins.test.ts`. No reviewer has seen the
+round 15 fixes.
+
+1. **[major] Re-adding an owner with `--keep-admissions` reported keeping
+   someone their old ban took out, but didn't.** The kept admission was
+   dated before the ban it lifted, and the lift opened no period.
+   **Fixed:** the super admin's ban-lifting admission opens a period at the
+   lift. Integration TC-58 (review round 15).
+2. **[minor] The admin-change reports blamed the wrong admin for
+   promotions and re-adds, and their remedies didn't work for staff.**
+   **Fixed:** they say what changed, and name the super admin's commands;
+   `keptFrom` became `keptThrough`.
+3. **[minor] Demoting an owner dropped list roles another owner's list
+   also gives.** **Fixed:** the round-14 handover is shared with demotion.
+   Integration TC-32 (review round 15).
+4. **[minor] A demoted owner's list-given speaker roles kept admitting.**
+   **Fixed:** a list role counts only while its importer is an owner. Rust
+   test `a_list_role_counts_only_while_its_importer_is_an_owner`;
+   integration TC-32 (review round 15).
+5. **[nit] The handover resolved the conference super admin twice.**
+   **Fixed.**
+
+### Blocked after round 15
+
+The decision after round 10 allowed review rounds through 15. Round 15
+wasn't clean, so this needs a human decision again.
+
+| Round | Blocking | Major | Minor | Nit |
+|-------|----------|-------|-------|-----|
+| 11 | 0 | 2 | 2 | 1 |
+| 12 | 0 | 3 | 1 | 2 |
+| 13 | 0 | 1 | 2 | 1 |
+| 14 | 0 | 2 | 2 | 1 |
+| 15 | 0 | 1 | 3 | 1 |
+
+**What keeps recurring.** The simplification worked for list matching:
+no round since has found a hole in handle resolution or list rows by DID.
+Almost every major since round 12 is one family: **changing an admin's
+role silently changes other people's memberships.** It comes from two
+rules together:
+
+- a record counts only while its author is an admin of the right role:
+  decisions, codes, list rows, bans and list roles;
+- a decision weighs by its author's role now, not when it was made.
+
+So removing, demoting, promoting or re-adding an admin re-derives everyone
+they ever decided about. Rounds 12 to 15 each found another direction
+(taken out, let back in, re-ranked, revived) or another record kind. The
+fixes made `org admin add|remove` diff the organization before and after,
+report both directions, and keep the lost with `--keep-admissions`. Each
+fix exposed the next edge, as with the list claims before.
+
+**Current state:** every frozen test and review regression passes, and
+`pnpm check` is green against the locally built vivarium. CI still needs
+vivarium 0.0.3 for attendee-sign-in's e2e TC-8.
+
+**The choices:**
+- **(a) Ship as is,** with the round 15 fixes unreviewed. The admin-change
+  reports name everyone affected, so nothing changes unannounced.
+- **(b) Decide the rule, then review once more.** For example:
+  - judge each record by its author's role *when it was written*, kept as
+    role periods (like the existing `orgAdmin` marks), so later role
+    changes re-rank nothing;
+  - or make codes, list rows and bans belong to the conference once
+    written, outliving their author's role.
+
+  Either removes the re-derivation that later rounds keep finding edges
+  in, but it changes what TC-53 and TC-58 mean.
+- **(c) Narrow the feature:** only the super admin and owners decide
+  memberships (staff only invite by approving requests), and changing an
+  admin's role takes effect only for new records.

@@ -1077,8 +1077,14 @@ fn derive_conference(
     {
         match rec.collection.as_str() {
             ROLE => {
+                let decider = rec.str("assignedBy").unwrap_or(&conference_super);
                 if let (Some(subject), Some(role)) = (rec.str("subject"), rec.str("role"))
-                    && may_assign(rec.str("assignedBy").unwrap_or(&conference_super), role)
+                    && may_assign(decider, role)
+                    // A list's role counts only while the owner who imported
+                    // the list is one, as the list's rows do.
+                    && (rec.str("via") != Some("list")
+                        || decider == super_admin
+                        || admins.get(decider).is_some_and(|a| a.role == Role::Owner))
                     // Naming someone else as the decider never lifts the
                     // writer's own cap.
                     && may_assign(&conference_super, role)
@@ -1361,7 +1367,15 @@ fn derive_conference(
                     }
                     bans += usize::from(event == Event::Ban);
                 }
-                Event::Unban => bans = bans.saturating_sub(1),
+                // Only the super admin's admission lifts a ban, so she's
+                // admitting them then: a member from there (her kept
+                // admission is dated earlier, before the ban it lifts).
+                Event::Unban => {
+                    bans = bans.saturating_sub(1);
+                    if bans == 0 {
+                        since.get_or_insert(us);
+                    }
+                }
                 Event::Admit | Event::Deny | Event::Request => {}
             }
         }
@@ -1818,6 +1832,23 @@ mod tests {
         kept.value["since"] = json!(iso(90_000));
         let org = org_with(&["code"], false, vec![kept.clone()]);
         assert!(!org.conference(&space(CONFERENCE_TYPE)).unwrap().was_member_at(bram, 20_000));
+    }
+
+    #[test]
+    fn a_list_role_counts_only_while_its_importer_is_an_owner() {
+        let kees = "did:plc:keesaaaaaaaaaaaaaaaaaaaa";
+        let zoe = "did:plc:zoeaaaaaaaaaaaaaaaaaaaaa";
+        let given = role(zoe, "speaker", json!({ "assignedBy": kees, "via": "list" }));
+        let joined = join(zoe, 20, None, json!({}));
+        let member = |kees_role: &str| {
+            let recs = vec![admin_rec(kees, kees_role, 1), given.clone(), joined.clone()];
+            org_with(&["list"], true, recs)
+                .conference(&space(CONFERENCE_TYPE))
+                .unwrap()
+                .is_member(zoe)
+        };
+        assert!(member("owner"));
+        assert!(!member("staff"), "a staff admin's list gives no roles");
     }
 
     #[test]

@@ -347,16 +347,30 @@ async fn org_admin(state: &AppState, args: &Args, add: bool) -> Result<Done, Str
         } else {
             vec![]
         };
-        if let Err(why) = acting
-            .put_in(
-                state,
-                &admin_space,
-                index::ADMIN,
-                &subject,
-                json!({ "subject": subject, "role": role.as_str() }),
-            )
-            .await
-        {
+        // An owner made staff: the list roles they gave stop counting, so
+        // those another owner's list also gives are handed to that owner.
+        let demoted = role == Role::Staff && org.admin_role(&subject) == Some(Role::Owner);
+        let write = async {
+            if demoted {
+                for (conference, writer) in &writers {
+                    for (person, value) in list_role_handovers(conference, &subject, |_| true) {
+                        writer
+                            .put_in(state, conference.space(), index::ROLE, &person, value)
+                            .await?;
+                    }
+                }
+            }
+            acting
+                .put_in(
+                    state,
+                    &admin_space,
+                    index::ADMIN,
+                    &subject,
+                    json!({ "subject": subject, "role": role.as_str() }),
+                )
+                .await
+        };
+        if let Err(why) = write.await {
             return Err(undo_kept(state, &acting, &org, &kept, why).await);
         }
         // Admins are members of every conference, with their role. A new
@@ -436,7 +450,7 @@ async fn org_admin(state: &AppState, args: &Args, add: bool) -> Result<Done, Str
     // A list role they gave that another owner's list also gives (the same
     // person and role) is handed to that owner instead, keeping its time.
     let mut role_deletes = Vec::new();
-    let mut handovers = Vec::new();
+    let mut writers = Vec::new();
     for conference in org.conferences.values() {
         let assigned = conference
             .role_deciders
@@ -450,31 +464,10 @@ async fn org_admin(state: &AppState, args: &Args, add: bool) -> Result<Done, Str
             continue;
         }
         let writer = conference_super_admin(state, conference).await?;
-        let mut handed = Vec::new();
-        for person in gone.clone() {
-            let Some(role) = conference.roles.get(&person) else { continue };
-            let other = conference.list.iter().find(|e| {
-                e.by != subject
-                    && e.did.as_deref() == Some(person.as_str())
-                    && e.role.as_ref() == Some(role)
-            });
-            if let (true, Some(entry)) = (conference.has_list_role(&person), other) {
-                let since = conference.role_since(&person).unwrap_or(now_ms() as u64 * 1000);
-                handed.push((
-                    person.clone(),
-                    json!({ "subject": person, "role": role, "assignedBy": entry.by, "via": "list", "since": index::iso(since) }),
-                ));
-                gone.remove(&person);
-            }
-        }
-        if !handed.is_empty() {
-            handovers.push((
-                conference_super_admin(state, conference).await?,
-                conference.space().to_owned(),
-                handed,
-            ));
-        }
-        role_deletes.push((writer, conference.space().to_owned(), gone));
+        let handed = list_role_handovers(conference, &subject, |_| true);
+        gone.retain(|person| !handed.iter().any(|(p, _)| p == person));
+        role_deletes.push((conference.space().to_owned(), gone, handed));
+        writers.push(writer);
     }
     let now = index::iso(now_ms() as u64 * 1000);
     // Their decisions stop counting once they're not an admin, and so do the
@@ -492,7 +485,7 @@ async fn org_admin(state: &AppState, args: &Args, add: bool) -> Result<Done, Str
     let kept =
         if keep { keep_admissions(state, &acting, &org, &subject, &lost).await? } else { vec![] };
     let removal = async {
-        for (writer, space, handed) in &handovers {
+        for (writer, (space, _, handed)) in writers.iter().zip(&role_deletes) {
             for (person, value) in handed {
                 writer.put_in(state, space, index::ROLE, person, value.clone()).await?;
             }
@@ -520,7 +513,7 @@ async fn org_admin(state: &AppState, args: &Args, add: bool) -> Result<Done, Str
     // They're not an admin now, so the roles they gave count no more; deleting
     // them only tidies up, and one that can't be deleted is reported.
     let mut untidy = Vec::new();
-    for (writer, space, gone) in &role_deletes {
+    for (writer, (space, gone, _)) in writers.iter().zip(&role_deletes) {
         for person in gone {
             if let Err(why) = writer.delete_in(state, space, index::ROLE, person).await {
                 untidy.push(format!("{person} in {space} ({why})"));
@@ -543,6 +536,37 @@ async fn org_admin(state: &AppState, args: &Args, add: bool) -> Result<Done, Str
     )
 }
 
+/// The list roles `admin` gave in a conference (those `which` picks) that
+/// another owner's list also gives, the same person and role: rewritten as
+/// that owner's, keeping the time they took effect, so they don't go with
+/// `admin`'s removal or demotion.
+fn list_role_handovers(
+    conference: &Conference,
+    admin: &str,
+    which: impl Fn(&str) -> bool,
+) -> Vec<(String, Value)> {
+    let mut handed = Vec::new();
+    for (person, decider) in &conference.role_deciders {
+        let Some(role) = conference.roles.get(person) else { continue };
+        if decider != admin || !conference.has_list_role(person) || !which(role) {
+            continue;
+        }
+        let other = conference.list.iter().find(|e| {
+            e.by != admin
+                && e.did.as_deref() == Some(person.as_str())
+                && e.role.as_ref() == Some(role)
+        });
+        if let Some(entry) = other {
+            let since = conference.role_since(person).unwrap_or(now_ms() as u64 * 1000);
+            handed.push((
+                person.clone(),
+                json!({ "subject": person, "role": role, "assignedBy": entry.by, "via": "list", "since": index::iso(since) }),
+            ));
+        }
+    }
+    handed
+}
+
 /// Admits, by `acting`'s own decision, everyone a change to an admin would
 /// otherwise take out (`org admin remove|add --keep-admissions`): a `member`
 /// record each, `via: "kept"`, dated from when the membership it keeps began
@@ -563,7 +587,7 @@ async fn keep_admissions(
                 &admin_space,
                 index::MEMBER,
                 None,
-                json!({ "space": space, "subject": did, "via": index::VIA_KEPT, "keptFrom": subject, "since": index::iso(*since) }),
+                json!({ "space": space, "subject": did, "via": index::VIA_KEPT, "keptThrough": subject, "since": index::iso(*since) }),
             )
             .await;
         match made {
@@ -620,15 +644,16 @@ async fn lost_report(
     let people: BTreeSet<&String> = lost.iter().map(|(_, did, _)| did).collect();
     let mut text = if kept {
         format!(
-            "\nKept {} people who were in only on {who}'s say-so, now on {}'s decision:",
+            "\nKept {} people this change to {who} would have taken out, now on {}'s decision:",
             people.len(),
             acting.handle
         )
     } else {
         format!(
-            "\n{} people were in only on {who}'s say-so (their admissions, codes or list), and \
-             aren't members any more; `member add` can let them back in, and \
-             `--keep-admissions` keeps them next time:",
+            "\n{} people aren't members any more after this change to {who} (an admission, code \
+             or list of theirs stopped counting, or a decision of theirs now outranks another); \
+             the super admin's `member add` can let them back in, and `--keep-admissions` keeps \
+             them next time:",
             people.len()
         )
     };
@@ -648,8 +673,8 @@ async fn lost_report(
 async fn back_report(state: &AppState, who: &str, back: &[(String, String, bool)]) -> String {
     let mut text = String::new();
     for (again, heading) in [
-        (true, format!("are members again now, since {who}'s ban or removal of them")),
-        (false, format!("can join again, since {who}'s ban of them")),
+        (true, "are members again now".to_owned()),
+        (false, "aren't banned any more, and can join again".to_owned()),
     ] {
         let mut by_space: BTreeMap<&str, Vec<String>> = BTreeMap::new();
         for (space, did, member) in back {
@@ -662,8 +687,8 @@ async fn back_report(state: &AppState, who: &str, back: &[(String, String, bool)
         }
         let people: usize = by_space.values().map(Vec::len).sum();
         text.push_str(&format!(
-            "\n{people} {heading} doesn't count any more; `member ban` or `member remove` keeps \
-             them out:"
+            "\n{people} people {heading} after this change to {who}; the super admin's `member \
+             ban` or `member remove` keeps them out:"
         ));
         for (space, names) in by_space {
             text.push_str(&format!("\n  {space}: {}", names.join(", ")));
