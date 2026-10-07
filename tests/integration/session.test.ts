@@ -1,6 +1,7 @@
 import { startVivarium } from '@vivarium-dev/client'
 import { expect, test } from '@vivarium-dev/client/vitest'
 import { getSession, signIn, sleep, storedTokens } from '../support/auth.ts'
+import { SIGN_IN_SCOPES } from '../support/scopes.ts'
 import { freePort, spawnServer, tempDatabase } from '../support/server.ts'
 
 // Renewal settings that make every run refresh: access tokens live an hour,
@@ -174,7 +175,7 @@ test('TC-18: growing the sign-in scopes asks people to sign in again', async ({ 
   let jar: Awaited<ReturnType<typeof signIn>>['jar']
   try {
     jar = (await signIn(server.url, ana.handle)).jar
-    expect((await getSession(server.url, jar)).body.scopes).toEqual(['atproto'])
+    expect((await getSession(server.url, jar)).body.scopes).toEqual(SIGN_IN_SCOPES)
   } finally {
     await server.stop()
   }
