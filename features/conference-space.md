@@ -2717,3 +2717,16 @@ for attendee-sign-in's e2e TC-8.
   claim and binding machinery. And/or drop cross-admin precedence, so only
   owners or the super admin write membership decisions. Either would
   remove most of the code that later rounds found holes in.
+
+**Decision (the user, 2026-10-07):** (b) and (c) together. Up to five more
+review rounds (through round 15), after simplifying:
+- **List handles must resolve at import.** A row whose handle doesn't
+  resolve is reported and skipped, and the operator re-imports it later.
+  Handle-only rows, late binding and list claims go away.
+- **Staff can't override an owner's or the super admin's membership
+  decision,** but staff can invite people, and the people they invite get
+  full membership rights.
+
+Frozen TC-52's last step (Pim, staff, re-admits Ana after Kees, an owner,
+removed her, and she's a member) contradicts the second point. The
+replacement wording needs the user's approval before the build resumes.
