@@ -719,7 +719,7 @@ async fn bind_list_entry(
     did: &str,
     entry: &index::ListEntry,
 ) -> Result<(), String> {
-    give_list_role(state, conference, did, entry).await?;
+    give_list_role(state, org, conference, did, entry).await?;
     write_binding(state, org, conference.space(), did, entry).await
 }
 
@@ -737,6 +737,29 @@ pub async fn keep_list_claim(
         Some(entry) => write_binding(state, org, conference.space(), did, entry).await,
         None => Ok(()),
     }
+}
+
+/// Writes `did`'s role record in a conference, as `writer` (its super
+/// admin). Every role a command or a join writes goes through here, so a
+/// list row `did` holds only by their current role's claim stays theirs:
+/// a list role carries the claim (`listHandle`) on, and any other role is
+/// written only after the row is bound, so it no longer depends on a role.
+pub async fn put_role(
+    state: &AppState,
+    org: &Org,
+    conference: &Conference,
+    writer: &admin::Acting,
+    did: &str,
+    mut value: Value,
+) -> Result<(), String> {
+    if let Some(entry) = conference.claimed_row(did) {
+        if value.get("via").and_then(Value::as_str) == Some("list") {
+            value["listHandle"] = json!(entry.handle);
+        } else {
+            write_binding(state, org, conference.space(), did, entry).await?;
+        }
+    }
+    writer.put_in(state, conference.space(), index::ROLE, did, value).await
 }
 
 /// The binding itself: an entry with the row's handle and the DID, written
@@ -775,6 +798,7 @@ async fn write_binding(
 /// the list is on.
 async fn give_list_role(
     state: &AppState,
+    org: &Org,
     conference: &Conference,
     did: &str,
     entry: &index::ListEntry,
@@ -798,8 +822,7 @@ async fn give_list_role(
         Err(_) => writer.to_owned(),
     };
     let acting = admin::Acting::new(state, writer, &handle).await?;
-    acting.put_in(state, conference.space(), index::ROLE, did, value).await?;
-    Ok(())
+    put_role(state, org, conference, &acting, did, value).await
 }
 
 /// Admits someone with a `member` record written as the super admin: for the
@@ -922,7 +945,7 @@ async fn try_email_step(state: &AppState, id_hash: &str, space: &str) -> Result<
     }
     // The role its row gives, before the admission, so they join with it.
     if let Some(entry) = matched.iter().find(|e| e.role.is_some()) {
-        give_list_role(state, conference, &session.did, entry).await?;
+        give_list_role(state, &org, conference, &session.did, entry).await?;
     }
     admit_by_super_admin(state, &org, space, &session.did, "email").await
 }

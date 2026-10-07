@@ -356,15 +356,15 @@ async fn org_admin(state: &AppState, args: &Args, add: bool) -> Result<Done, Str
                     .await?;
             }
             let writer = conference_super_admin(state, &org, conference).await?;
-            writer
-                .put_in(
-                    state,
-                    conference.space(),
-                    index::ROLE,
-                    &subject,
-                    json!({ "subject": subject, "role": role.as_str() }),
-                )
-                .await?;
+            super::put_role(
+                state,
+                &org,
+                conference,
+                &writer,
+                &subject,
+                json!({ "subject": subject, "role": role.as_str() }),
+            )
+            .await?;
         }
         after_change(state, &org).await?;
         return done(
@@ -1271,15 +1271,15 @@ async fn list_import(state: &AppState, args: &Args) -> Result<Done, String> {
             // A role from the list admits its subject only while the list
             // does, and only while the owner who imported it is one.
             let writer = conference_super_admin(state, &org, conference).await?;
-            writer
-                .put_in(
-                    state,
-                    &space.to_string(),
-                    index::ROLE,
-                    did,
-                    json!({ "subject": did, "role": role, "assignedBy": acting.did, "via": "list", "since": index::iso(now_ms() as u64 * 1000) }),
-                )
-                .await?;
+            super::put_role(
+                state,
+                &org,
+                conference,
+                &writer,
+                did,
+                json!({ "subject": did, "role": role, "assignedBy": acting.did, "via": "list", "since": index::iso(now_ms() as u64 * 1000) }),
+            )
+            .await?;
         }
         imported += 1;
     }
@@ -1365,15 +1365,30 @@ async fn decide(state: &AppState, args: &Args, action: &str) -> Result<Done, Str
         }
         _ => return Err(format!("unknown action {action}")),
     };
+    // A removal or ban may take their role away below, which needs the
+    // conference's super admin, and a list row the role holds bound first
+    // (by the organization's): both before anything is written, so a
+    // failure leaves the decision unmade rather than half done.
+    let role_writer =
+        if matches!(action, "remove" | "ban") && conference.roles.contains_key(&subject) {
+            let writer = conference_super_admin(state, &org, conference).await?;
+            super::keep_list_claim(state, &org, conference, &subject).await.map_err(|why| {
+                format!(
+                    "{who}'s list row has to be bound to them by the super admin before their role \
+                 goes, and couldn't be ({why}); nothing was changed"
+                )
+            })?;
+            Some(writer)
+        } else {
+            None
+        };
     acting.create_in(state, &admin_space, collection, None, record).await?;
     let mut after = after_change(state, &org).await?;
     // Another admin's decision doesn't undo the super admin's latest one.
     let mut member = after.conference(&space_uri).is_some_and(|c| c.is_member(&subject));
     // Out of the conference, out of their role: once they're out, so a
     // removal the super admin's decision overrides leaves the role be.
-    if matches!(action, "remove" | "ban") && !member && conference.roles.contains_key(&subject) {
-        super::keep_list_claim(state, &org, conference, &subject).await?;
-        let writer = conference_super_admin(state, &org, conference).await?;
+    if let Some(writer) = role_writer.filter(|_| !member) {
         writer.delete_in(state, &space_uri, index::ROLE, &subject).await?;
         after = after_change(state, &after).await?;
         member = after.conference(&space_uri).is_some_and(|c| c.is_member(&subject));
@@ -1415,22 +1430,23 @@ async fn member_role(state: &AppState, args: &Args) -> Result<Done, String> {
     // admin who decided it, and counts only while they could.
     let writer = conference_super_admin(state, &org, conference).await?;
     // A list row held by this role's claim stays theirs whatever the role
-    // becomes.
-    super::keep_list_claim(state, &org, conference, &subject).await?;
+    // becomes: bound before the role goes (a new role keeps it as it's
+    // written).
     if role == "none" {
         if conference.roles.contains_key(&subject) {
+            super::keep_list_claim(state, &org, conference, &subject).await?;
             writer.delete_in(state, &space.to_string(), index::ROLE, &subject).await?;
         }
     } else {
-        writer
-            .put_in(
-                state,
-                &space.to_string(),
-                index::ROLE,
-                &subject,
-                json!({ "subject": subject, "role": role, "assignedBy": acting.did, "since": index::iso(now_ms() as u64 * 1000) }),
-            )
-            .await?;
+        super::put_role(
+            state,
+            &org,
+            conference,
+            &writer,
+            &subject,
+            json!({ "subject": subject, "role": role, "assignedBy": acting.did, "since": index::iso(now_ms() as u64 * 1000) }),
+        )
+        .await?;
     }
     after_change(state, &org).await?;
     done(format!("{who}'s role: {role}"), json!({ "did": subject, "role": role }))

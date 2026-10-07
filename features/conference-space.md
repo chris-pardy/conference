@@ -1575,6 +1575,32 @@ at the PR alongside rounds 1 to 7:
   forgets the expired, then the tenth soonest to expire (least recently
   remembered, for the last-writer memo), never everyone at once.
 
+**Review round 9 design notes (2026-10-07).** The round-9 fixes, to raise
+at the PR alongside rounds 1 to 8:
+
+- **Every role write goes through one helper, `conference::put_role`.**
+  When the person holds a handle-only list row only by their current
+  role's claim, a new list role (`via: list`, from `list import` or a join)
+  carries the claim on (`listHandle`), and any other role (`member role`,
+  `org admin add`) is written only after the row is bound. A handover
+  copies role records verbatim (claim included), and `conference create`
+  writes roles before the conference has a list. Taking a role away
+  (`member role --role none`, `member remove`/`ban`) still binds first with
+  `keep_list_claim`.
+- **A removal or ban that takes a role checks first.** It resolves the
+  conference super admin's session and binds the claimed row before the
+  decision is written, so a super admin who isn't connected (or whose PDS
+  is down) fails the command with nothing written. If the super admin's
+  own decision then keeps the person in, the binding is harmless: it only
+  makes durable the row they already held.
+- **Reindex reads intake repos capped, like a sync.** A read cut short at
+  the caps deletes only the records up to where it stopped (`rev <=` its
+  last whole commit) and keeps the rest as they were, and sets the repo's
+  `synced_rev` to that point even if a sync had read further, so the next
+  sync reads on from there (re-reading what's already stored changes
+  nothing). This replaces round 8's uncapped reindex read, which an
+  anonymous intake writer could make buffer up to 1000 pages of 4 MB.
+
 **Red-test gate (2026-10-06):** the user approved the red tests and the
 surfaces they pin (see Build notes), with these contract changes:
 
@@ -2532,3 +2558,44 @@ unchanged.
    a pass per insert.** **Fixed:** one helper for all three: the expired,
    then the tenth soonest to expire, go. Rust test
    `a_full_gone_memo_forgets_the_expired_not_everyone` (extended).
+
+### Round 9
+
+Reviewer: a fresh subagent following `adversarial-review`. Verdict: not
+clean (0 blocking, 2 major, 1 minor, 1 nit). After the rework: `pnpm check`
+green (lint, build, Rust 93 + unit 122 + integration 111 + tooling 33 + e2e
+35), and `scripts/check-tests-unchanged.sh` reports the frozen tests
+unchanged.
+
+1. **[major] Two more role writes dropped a list row's claim.** `org admin
+   add` wrote `{subject, role}` in every conference, and a re-import of
+   someone under a new handle wrote their list role without `listHandle`,
+   so the old handle's row reopened to its next holder. **Fixed:** every
+   role write goes through `conference::put_role`, which carries the claim
+   onto a list role and binds the row before any other role; see "Review
+   round 9 design notes". Integration TC-17 (round 9) for `org admin add`
+   and for a re-import, which fail on the old code.
+2. **[major] Reindex read intake repos uncapped**, so any anonymous intake
+   writer could make it buffer up to ~4 GB per repo. **Fixed:** reindex
+   reads them capped like a sync; a read cut short keeps the records past
+   where it stopped and sets `synced_rev` there, so later syncs read on and
+   nothing is lost (round 8's concern). Integration TC-48 (round 9), which
+   fails on the old code (reindex read past the cap), and fails too on a
+   capped read that deletes the rest (the join past the cap is gone).
+3. **[minor] `member remove`/`ban` wrote the decision before binding the
+   row,** so without the organization's super admin the command failed
+   with the person already removed and their role still there. **Fixed:**
+   the conference super admin's session is resolved and the row bound
+   before anything is written; a failure says nothing was changed.
+   (`member role` already bound before writing.) Integration TC-17
+   (round 9), which fails on the old code.
+4. **[nit] Rewriting a version at the same revision counts as a change.**
+   **Declined:** that's what keeps two syncs racing over the same ops
+   correct. With `<` (or `<` plus a CID check), the sync that loses the
+   race to store a record reports no change and returns at once, before
+   the winner has bumped the generation, so its caller (a join waiting for
+   its own write) answers from the old view: the round 7 TC-29 failure.
+   Bumping before `synced_rev` (round 8) doesn't help, since the loser
+   never gets as far as either. The extra bump only happens when ops are
+   read twice (a commit cut short, or overlapping syncs), and costs a
+   re-derive, not correctness.

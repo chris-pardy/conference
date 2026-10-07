@@ -82,15 +82,14 @@ fn version(op: &Value) -> Option<(String, String, Version)> {
 /// A repo's ops in a space after `since` (all of them without it), from its
 /// PDS, and how far they go. No repo in the space yet is no ops.
 ///
-/// With `capped`, a read of an intake repo stops after
-/// [`INTAKE_RECORDS_PER_REPO`] ops or [`INTAKE_READ_CAP`] bytes, so a write
-/// notification costs a bounded read; reindex reads everything.
+/// A read of an intake repo stops after [`INTAKE_RECORDS_PER_REPO`] ops or
+/// [`INTAKE_READ_CAP`] bytes, so a write notification, or a reindex, costs a
+/// bounded read whatever anyone wrote there.
 async fn fetch_ops(
     state: &AppState,
     space: &str,
     repo: &str,
     since: Option<&str>,
-    capped: bool,
 ) -> Result<Read, String> {
     let parsed = SpaceUri::parse(space).ok_or_else(|| format!("{space} isn't a space"))?;
     let pds = state.host.pds_of(state, repo).await?;
@@ -98,7 +97,7 @@ async fn fetch_ops(
     let url = format!("{pds}/xrpc/com.atproto.space.listRepoOps");
     let client = state.http.guarded(&url)?;
     let authorization = format!("Atproto-Space {credential}");
-    let intake = capped && parsed.kind == INTAKE_TYPE;
+    let intake = parsed.kind == INTAKE_TYPE;
     let mut cursor: Option<String> = None;
     let mut all = Vec::new();
     let mut bytes = 0;
@@ -145,17 +144,19 @@ async fn fetch_ops(
     Ok(Read::whole(all))
 }
 
-/// Ops read from a repo, and the revision the next read goes on from.
+/// Ops read from a repo, the revision the next read goes on from, and
+/// whether the read stopped at a cap (so there may be later ops unread).
 struct Read {
     ops: Vec<Value>,
     through: Option<String>,
+    cut: bool,
 }
 
 impl Read {
     /// Everything there was: the next read goes on from the latest.
     fn whole(ops: Vec<Value>) -> Self {
         let through = latest_rev(&ops);
-        Self { ops, through }
+        Self { ops, through, cut: false }
     }
 
     /// A read stopped at a cap, perhaps partway through a commit (every op
@@ -169,7 +170,7 @@ impl Read {
             ops.iter().filter(|op| op.get("rev").and_then(Value::as_str) != last.as_deref()),
         )
         .or(last);
-        Self { ops, through }
+        Self { ops, through, cut: true }
     }
 }
 
@@ -197,7 +198,7 @@ pub async fn sync_repo(state: &AppState, space: &str, repo: &str) -> Result<bool
     .fetch_optional(&state.db)
     .await
     .map_err(|e| e.to_string())?;
-    let Read { ops, through } = fetch_ops(state, space, repo, since.as_deref(), true).await?;
+    let Read { ops, through, .. } = fetch_ops(state, space, repo, since.as_deref()).await?;
     if ops.is_empty() {
         return Ok(false);
     }
@@ -451,12 +452,18 @@ pub async fn reindex(state: &AppState, org: &str) -> Result<Reindexed, String> {
 
     let mut read: BTreeMap<(String, String), Repo> = BTreeMap::new();
     let mut synced: BTreeMap<(String, String), String> = BTreeMap::new();
+    // Intake repos whose read stopped at a cap, and how far it went.
+    let mut cut: BTreeMap<(String, String), Option<String>> = BTreeMap::new();
     let mut unread: BTreeSet<(String, String)> = BTreeSet::new();
     let mut fetch = async |space: &str, repo: &str, read: &mut BTreeMap<_, Repo>| {
-        // Uncapped: what isn't read here is deleted below, and a capped
-        // read's rest would never be read again.
-        let Read { ops, through } = fetch_ops(state, space, repo, None, false).await?;
+        // Capped like a sync's read. A read cut short keeps the records
+        // past where it stopped (below), and the next sync goes on from
+        // there.
+        let Read { ops, through, cut: was_cut } = fetch_ops(state, space, repo, None).await?;
         let key = (space.to_owned(), repo.to_owned());
+        if was_cut {
+            cut.insert(key.clone(), through.clone());
+        }
         if let Some(latest) = through {
             synced.insert(key.clone(), latest);
         }
@@ -523,15 +530,24 @@ pub async fn reindex(state: &AppState, org: &str) -> Result<Reindexed, String> {
     .await
     .map_err(|e| e.to_string())?;
     for (space, repo) in old_repos.iter().filter(|(s, r)| !keeps(s, r)) {
+        // A read cut short at a cap leaves what's past where it stopped as
+        // it was: it wasn't read, and the next sync goes on from there.
+        let past = match cut.get(&(space.clone(), repo.clone())) {
+            None => None,
+            Some(Some(through)) => Some(through.as_str()),
+            Some(None) => continue,
+        };
         sqlx::query(
             "DELETE FROM space_records WHERE space = $1 AND repo = $2 AND NOT EXISTS ( \
              SELECT 1 FROM space_record_seen s WHERE s.space = space_records.space \
              AND s.repo = space_records.repo AND s.collection = space_records.collection \
-             AND s.rkey = space_records.rkey AND s.rev = space_records.rev AND s.seen_at >= $3)",
+             AND s.rkey = space_records.rkey AND s.rev = space_records.rev AND s.seen_at >= $3) \
+             AND ($4 = '' OR space_records.rev <= $4)",
         )
         .bind(space)
         .bind(repo)
         .bind(started)
+        .bind(past.unwrap_or(""))
         .execute(&mut *tx)
         .await
         .map_err(|e| e.to_string())?;
@@ -551,17 +567,24 @@ pub async fn reindex(state: &AppState, org: &str) -> Result<Reindexed, String> {
             apply(&mut tx, space, repo, collection, rkey, version, seen_at, room.as_mut()).await?;
         }
         if let Some(latest) = synced.get(&(space.clone(), repo.clone())) {
-            sqlx::query(
+            // A read cut short is where the next sync goes on from, even if
+            // a sync had read further: what's past it may be missing from
+            // the index, and reading it again changes nothing that's there.
+            let sql = if cut.contains_key(&(space.clone(), repo.clone())) {
+                "INSERT INTO space_repos (space, repo, synced_rev) VALUES ($1, $2, $3) \
+                 ON CONFLICT (space, repo) DO UPDATE SET synced_rev = excluded.synced_rev"
+            } else {
                 "INSERT INTO space_repos (space, repo, synced_rev) VALUES ($1, $2, $3) \
                  ON CONFLICT (space, repo) DO UPDATE SET synced_rev = excluded.synced_rev \
-                 WHERE space_repos.synced_rev < excluded.synced_rev",
-            )
-            .bind(space)
-            .bind(repo)
-            .bind(latest)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| e.to_string())?;
+                 WHERE space_repos.synced_rev < excluded.synced_rev"
+            };
+            sqlx::query(sql)
+                .bind(space)
+                .bind(repo)
+                .bind(latest)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| e.to_string())?;
         }
     }
     tx.commit().await.map_err(|e| format!("couldn't replace the index: {e}"))?;

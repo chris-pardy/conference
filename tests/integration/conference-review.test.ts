@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite'
+import type { VivariumScope } from '@vivarium-dev/client'
 import { afterAll, beforeAll, expect, test, vi } from '@vivarium-dev/client/vitest'
 import {
   bringOnline,
@@ -6,9 +7,11 @@ import {
   eventually,
   type Json,
   ownSpaceRecords,
+  pdsOf,
   publicRecords,
   takeOffline,
   writeSpaceRecord,
+  xrpcOk,
 } from '../support/atproto.ts'
 import {
   ATMOSPHERECONF,
@@ -738,3 +741,144 @@ for (const role of ['staff', 'none'] as const) {
     expect(read.status, 'Zoe is still a member').toBe(200)
   })
 }
+
+// Regressions from adversarial review round 9.
+
+/** A conference whose list row for Zoe's handle is held only by her list role's claim. */
+async function claimedListRow(viv: VivariumScope) {
+  const olga = await viv.createAccount(viv.handle('olga'))
+  const pim = await viv.createAccount(viv.handle('pim'))
+  const org = await createOrg(dep, olga)
+  await addAdmin(dep, org, pim, 'owner')
+  const conference = await createConference(dep, org, { ...ATMOSPHERECONF, superAdmin: pim, methods: ['list'] })
+  const zoeHandle = viv.handle('zoe')
+  await importList(dep, conference, [{ handle: zoeHandle, role: 'speaker' }])
+  const zoeAccount = await viv.createAccount(zoeHandle)
+  const zoe = await Attendee.signIn(dep, zoeAccount)
+  await takeOffline(viv.url, olga)
+  try {
+    expect((await zoe.join({ conference: conference.space })).body.status).toBe('joined')
+  } finally {
+    await bringOnline(viv.url, olga)
+  }
+  // Someone else taking Zoe's old handle isn't let in by her row.
+  const rowStaysWithZoe = async () => {
+    await changeHandle(viv.url, zoeAccount, viv.handle('zoe-new'))
+    const next = await viv.createAccount(zoeHandle)
+    const answer = await (await Attendee.signIn(dep, next)).join({ conference: conference.space })
+    expect(answer.body.status, 'the row stayed with Zoe').not.toBe('joined')
+  }
+  return { olga, pim, org, conference, zoeAccount, zoe, rowStaysWithZoe }
+}
+
+test('TC-17: a list row a role holds stays with its holder when they’re made an admin (review round 9)', async ({
+  viv,
+}) => {
+  const { org, zoeAccount, rowStaysWithZoe } = await claimedListRow(viv)
+  await addAdmin(dep, org, zoeAccount, 'staff')
+  await rowStaysWithZoe()
+})
+
+test('TC-17: a list row a role holds stays with its holder through a re-import under a new handle (review round 9)', async ({
+  viv,
+}) => {
+  const { conference, zoeAccount, rowStaysWithZoe } = await claimedListRow(viv)
+  // The organizers re-import Zoe under the handle she's moving to.
+  const zoeNew = viv.handle('zoe-new')
+  await changeHandle(viv.url, zoeAccount, zoeNew)
+  await importList(dep, conference, [{ handle: zoeNew, role: 'speaker' }])
+  await rowStaysWithZoe()
+})
+
+test('TC-17: a removal that can’t keep a list row with its holder changes nothing (review round 9)', async ({
+  viv,
+}) => {
+  const { olga, pim, conference, zoeAccount, zoe } = await claimedListRow(viv)
+  // Olga, who binds the row before the role goes, is down.
+  await takeOffline(viv.url, olga)
+  try {
+    const removal = await cli(dep, [
+      'member',
+      'remove',
+      zoeAccount.did,
+      '--conference',
+      conference.space,
+      '--as',
+      pim.handle,
+    ])
+    expect(removal.code, 'the removal fails').not.toBe(0)
+  } finally {
+    await bringOnline(viv.url, olga)
+  }
+  const read = await zoe.call('app.eventside.conference.listRecords', {
+    params: { conference: conference.space, collection: NSID.event },
+  })
+  expect(read.status, 'nothing was half done: Zoe is still a member').toBe(200)
+})
+
+test('TC-48: reindex reads an intake repo only up to its cap, and keeps the rest for later syncs (review round 9)', async ({
+  viv,
+}) => {
+  const { org, conference } = await seedConference(dep, accountsIn(viv), { methods: ['code'] })
+  const mallory = await viv.createAccount(viv.handle('mallory'))
+  const pds = await pdsOf(viv.url, mallory.did)
+  const db = new DatabaseSync(dep.databasePath as string)
+  try {
+    const synced = () =>
+      (
+        db
+          .prepare('SELECT synced_rev FROM space_repos WHERE space = ? AND repo = ?')
+          .get(conference.intake, mallory.did) as { synced_rev: string } | undefined
+      )?.synced_rev
+    const join = () =>
+      db
+        .prepare('SELECT rev FROM space_records WHERE space = ? AND repo = ? AND collection = ?')
+        .get(conference.intake, mallory.did, 'app.eventside.intake.join') as { rev: string } | undefined
+
+    // More junk than one read takes (1200 ops), each batch read before the next.
+    for (let batch = 0; batch < 6; batch++) {
+      const before = synced()
+      await xrpcOk(pds, 'com.atproto.space.applyWrites', {
+        token: mallory.accessJwt,
+        body: {
+          space: conference.intake,
+          repo: mallory.did,
+          writes: Array.from({ length: 200 }, (_, n) => ({
+            $type: 'com.atproto.space.applyWrites#create',
+            collection: 'com.example.junk',
+            rkey: `j${batch}x${n}`,
+            value: { $type: 'com.example.junk', n },
+          })),
+        },
+      })
+      await eventually(
+        async () => synced(),
+        (rev) => rev !== undefined && rev !== before,
+        `our host read batch ${batch}`,
+      )
+    }
+    // Then a join, past what one read takes.
+    await writeSpaceRecord(viv.url, mallory, conference.intake, 'app.eventside.intake.join', {})
+    const stored = await eventually(
+      async () => join(),
+      (row) => row !== undefined,
+      'our host stored the join',
+    )
+
+    await cliOk(dep, ['reindex', '--org', org.did])
+
+    expect(join(), 'the join past the cap is kept').toEqual(stored)
+    expect((synced() as string) < (stored as { rev: string }).rev, 'reindex read only up to the cap').toBe(true)
+
+    // The next write's sync goes on from where reindex stopped.
+    await writeSpaceRecord(viv.url, mallory, conference.intake, 'com.example.junk', { n: 'last' })
+    await eventually(
+      async () => synced(),
+      (rev) => rev !== undefined && rev > (stored as { rev: string }).rev,
+      'a later sync read on past the join',
+    )
+    expect(join()).toEqual(stored)
+  } finally {
+    db.close()
+  }
+})
