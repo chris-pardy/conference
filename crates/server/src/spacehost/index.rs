@@ -51,6 +51,10 @@ pub const RULES: &str = "app.eventside.conference.rules";
 /// someone's attendance.
 pub const VIA_ADMIN: &str = "orgAdmin";
 pub const VIA_ADMIN_REMOVED: &str = "orgAdminRemoved";
+/// A `member` record's `via` when the super admin kept someone a departing
+/// admin had let in (`org admin remove --keep-admissions`). Its `since` is
+/// when the membership it keeps began.
+pub const VIA_KEPT: &str = "kept";
 
 /// A record from the index.
 #[derive(Debug, Clone)]
@@ -1129,7 +1133,17 @@ fn derive_conference(
                 } else {
                     By::Admin(rank_of(&rec.repo))
                 };
-                events.entry(subject.to_owned()).or_default().push((rec.us, event, by));
+                // The super admin keeping a departing admin's admission keeps
+                // the period it began: from its `since`, never after the record.
+                let us =
+                    if via == Some(VIA_KEPT) && rec.repo == super_admin && event == Event::Admit {
+                        rec.str("since")
+                            .and_then(parse_iso_us)
+                            .map_or(rec.us, |since| since.min(rec.us))
+                    } else {
+                        rec.us
+                    };
+                events.entry(subject.to_owned()).or_default().push((us, event, by));
                 let at = decided_at.entry(subject.to_owned()).or_default();
                 *at = (*at).max(rec.us);
             }
@@ -1713,6 +1727,24 @@ mod tests {
             join(ana, 15, None, json!({})),
             member(PIM, ana, "m2", 20, false),
         ]));
+    }
+
+    #[test]
+    fn a_kept_admission_keeps_the_period_it_began() {
+        let bram = "did:plc:bramaaaaaaaaaaaaaaaaaaaa";
+        let mut kept = member(OLGA, bram, "m2", 30_000, false);
+        kept.value["via"] = json!(VIA_KEPT);
+        kept.value["since"] = json!(iso(10_000));
+        // Pim, who admitted Bram at 10, isn't an admin any more.
+        let org =
+            org_with(&["code"], false, vec![member(PIM, bram, "m1", 10_000, false), kept.clone()]);
+        let conference = org.conference(&space(CONFERENCE_TYPE)).unwrap();
+        assert!(conference.is_member(bram));
+        assert!(conference.was_member_at(bram, 20_000), "what he wrote before the keep");
+        // A `since` after the record, or from anyone but the super admin, isn't honoured.
+        kept.value["since"] = json!(iso(90_000));
+        let org = org_with(&["code"], false, vec![kept.clone()]);
+        assert!(!org.conference(&space(CONFERENCE_TYPE)).unwrap().was_member_at(bram, 20_000));
     }
 
     #[test]

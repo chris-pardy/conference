@@ -1,3 +1,6 @@
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterAll, beforeAll, expect, test, vi } from '@vivarium-dev/client/vitest'
 import {
@@ -737,3 +740,87 @@ test('TC-52: staff can’t admit someone an owner denied (simplification)', asyn
   expect(added.stderr).toMatch(/by an owner or the super admin stands/)
   expect(await bram.isMember(conference.space)).toBe(false)
 })
+
+// Regressions from adversarial review round 11.
+
+test('TC-52: a decision staff can’t make isn’t left on record to count later (review round 11)', async ({ viv }) => {
+  const { org, conference, admins } = await seedConference(dep, accountsIn(viv), {
+    staff: ['pim'],
+    methods: ['code'],
+  })
+  const kees = await viv.createAccount(viv.handle('kees'))
+  await addAdmin(dep, org, kees, 'owner')
+  const ana = await Attendee.signIn(dep, await viv.createAccount(viv.handle('ana')))
+  await cliOk(dep, ['member', 'add', ana.person.handle, '--conference', conference.space, '--as', kees.handle])
+
+  const removal = await cli(dep, [
+    'member',
+    'remove',
+    ana.person.handle,
+    '--conference',
+    conference.space,
+    '--as',
+    admins.pim.handle,
+  ])
+  expect(removal.code).not.toBe(0)
+  expect(removal.stderr).toMatch(/nothing was changed/)
+  // Promoting Pim doesn't bring his refused removal back to life.
+  await addAdmin(dep, org, admins.pim, 'owner')
+  expect(await ana.isMember(conference.space)).toBe(true)
+})
+
+test('TC-58: what a kept member wrote before the keep is still shown (review round 11)', async ({ viv }) => {
+  const { org, conference, superAdmin, admins } = await seedConference(dep, accountsIn(viv), {
+    staff: ['pim'],
+    methods: ['code'],
+  })
+  const bramAccount = await viv.createAccount(viv.handle('bram'))
+  const bram = await Attendee.signIn(dep, bramAccount)
+  await cliOk(dep, ['member', 'add', bramAccount.handle, '--conference', conference.space, '--as', admins.pim.handle])
+  await writeSpaceRecord(viv.url, bramAccount, conference.space, NSID.event, plan('Bram’s canal walk'))
+  const asOlga = await Attendee.signIn(dep, superAdmin)
+  const bramsPlans = async () => {
+    const answer = await asOlga.listRecords(conference.space, NSID.event)
+    expect(answer.status).toBe(200)
+    return (answer.body.records as Json[]).filter((r) => r.author === bramAccount.did)
+  }
+  await eventually(bramsPlans, (records) => records.length === 1, 'Bram’s plan is listed')
+
+  await cliOk(dep, ['org', 'admin', 'remove', admins.pim.handle, '--org', org.did, '--keep-admissions'])
+  expect(await bram.isMember(conference.space)).toBe(true)
+  expect(await bramsPlans(), 'his plan from before the keep').toHaveLength(1)
+})
+
+test('TC-16: a bad role on an unresolved row refuses the import, and re-importing adds nothing twice (review round 11)', async ({
+  viv,
+}) => {
+  const { conference, superAdmin, org } = await seedConference(dep, accountsIn(viv), { methods: ['list'] })
+  const ana = await viv.createAccount(viv.handle('ana'))
+  const bad = await cli(dep, [
+    'list',
+    'import',
+    listFile([`${viv.handle('nobody-yet')},,organiser`, `${ana.handle},,speaker`]),
+    '--conference',
+    conference.space,
+  ])
+  expect(bad.code, 'a bad role refuses the import').not.toBe(0)
+
+  const file = listFile([`${ana.handle},,speaker`])
+  await cliOk(dep, ['list', 'import', file, '--conference', conference.space])
+  await cliOk(dep, ['list', 'import', file, '--conference', conference.space])
+  const entries = await ownSpaceRecords(viv.url, superAdmin, org.adminSpace, 'app.eventside.admin.listEntry')
+  expect(
+    entries.filter((r) => r.value.did === ana.did),
+    'one row for Ana',
+  ).toHaveLength(1)
+  const answer = await (await Attendee.signIn(dep, ana)).join({ conference: conference.space })
+  expect(answer.body.status).toBe('joined')
+  expect(answer.body.role).toBe('speaker')
+})
+
+/** An attendee list file with the given `handle,email,role` rows. */
+function listFile(rows: string[]): string {
+  const file = join(mkdtempSync(join(tmpdir(), 'eventside-list-')), 'attendees.csv')
+  writeFileSync(file, `${['handle,email,role', ...rows].join('\n')}\n`)
+  return file
+}

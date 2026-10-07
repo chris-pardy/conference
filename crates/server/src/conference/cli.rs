@@ -434,20 +434,23 @@ async fn org_admin(state: &AppState, args: &Args, add: bool) -> Result<Done, Str
         for conference in org.conferences.values() {
             let space = conference.space();
             let stays = without.conference(space);
-            for did in conference.current_members() {
+            for (did, periods) in &conference.members {
+                // The membership kept: their open period, from its start, so
+                // what they wrote in it still counts.
+                let Some(open) = periods.iter().find(|p| p.until.is_none()) else { continue };
                 if *did != subject && !stays.is_some_and(|c| c.is_member(did)) {
-                    kept.push((space.to_owned(), did.clone()));
+                    kept.push((space.to_owned(), did.clone(), open.since));
                 }
             }
         }
-        for (space, did) in &kept {
+        for (space, did, since) in &kept {
             acting
                 .create_in(
                     state,
                     &admin_space,
                     index::MEMBER,
                     None,
-                    json!({ "space": space, "subject": did, "via": "kept", "keptFrom": subject, "since": now }),
+                    json!({ "space": space, "subject": did, "via": index::VIA_KEPT, "keptFrom": subject, "since": index::iso(*since) }),
                 )
                 .await?;
         }
@@ -474,16 +477,22 @@ async fn org_admin(state: &AppState, args: &Args, add: bool) -> Result<Done, Str
     after_change(state, &org).await?;
     let mut text = format!("{who} is no longer an admin of {}.", org.did);
     if !kept.is_empty() {
-        let names: Vec<&str> = kept.iter().map(|(_, did)| did.as_str()).collect();
+        let people: BTreeSet<&String> = kept.iter().map(|(_, did, _)| did).collect();
         text.push_str(&format!(
-            "\nKept {} people they let in, now on {}'s decision: {}",
-            kept.len(),
-            acting.handle,
-            names.join(", ")
+            "\nKept {} people they let in, now on {}'s decision:",
+            people.len(),
+            acting.handle
         ));
+        let mut by_space: BTreeMap<&str, Vec<String>> = BTreeMap::new();
+        for (space, did, _) in &kept {
+            by_space.entry(space).or_default().push(handle_of(state, did).await);
+        }
+        for (space, names) in by_space {
+            text.push_str(&format!("\n  {space}: {}", names.join(", ")));
+        }
     }
     let kept: Vec<Value> =
-        kept.iter().map(|(space, did)| json!({ "space": space, "did": did })).collect();
+        kept.iter().map(|(space, did, _)| json!({ "space": space, "did": did })).collect();
     done(text, json!({ "did": subject, "kept": kept }))
 }
 
@@ -1270,49 +1279,82 @@ async fn list_import(state: &AppState, args: &Args) -> Result<Done, String> {
     }
     let conference = org.conference(&space.to_string()).ok_or("no such conference")?;
     let admin_space = SpaceUri::admin(&org.did).to_string();
-    // Every row is read, and every handle resolved, before anything is
+    // Every row is checked, and every handle resolved, before anything is
     // written. A handle is bound to the DID it names now, so one that changes
     // hands later doesn't take the place with it; one that doesn't resolve
-    // is reported and skipped, with nothing stored about its row.
+    // is reported and skipped, with nothing stored about its row. A resolver
+    // that can't answer right now refuses the import, rather than passing
+    // the handle off as one that doesn't resolve.
     let mut rows = Vec::new();
     let mut unresolved = Vec::new();
+    let mut seen = BTreeSet::new();
+    let mut already = 0;
     for cells in lines {
         let cell = |col: Option<usize>| {
             col.and_then(|i| cells.get(i)).map(|c| c.trim()).filter(|c| !c.is_empty())
         };
-        let mut entry = json!({ "space": space.to_string() });
-        let mut did = None;
-        if let Some(handle) = cell(handle_col) {
-            let handle = crate::identity::normalize_handle(handle)
-                .ok_or_else(|| format!("{handle} isn't a handle; nothing was imported"))?;
-            match state.resolver.resolve_handle(&handle).await {
-                Ok(resolved) => {
-                    entry["did"] = json!(resolved);
-                    entry["handle"] = json!(handle);
-                    did = Some(resolved);
-                }
-                Err(_) => {
-                    unresolved.push(handle);
+        let role = cell(role_col);
+        if let Some(role) = role
+            && !ROLES.contains(&role)
+        {
+            return Err(format!(
+                "{role} isn't a role: use owner, staff or speaker; nothing was imported"
+            ));
+        }
+        let handle = match cell(handle_col) {
+            Some(handle) => Some(
+                crate::identity::normalize_handle(handle)
+                    .ok_or_else(|| format!("{handle} isn't a handle; nothing was imported"))?,
+            ),
+            None => None,
+        };
+        let email_hmac = cell(email_col).map(|email| state.secrets.email_hmac(email));
+        let did = match &handle {
+            Some(handle) => match state.resolver.resolve_handle(handle).await {
+                Ok(resolved) => Some(resolved),
+                Err(crate::identity::IdentityError::HandleNotFound) => {
+                    unresolved.push(handle.clone());
                     continue;
                 }
-            }
-        }
-        if let Some(email) = cell(email_col) {
-            entry["emailHmac"] = json!(state.secrets.email_hmac(email));
-        }
-        let role = cell(role_col);
-        if let Some(role) = role {
-            if !ROLES.contains(&role) {
-                return Err(format!(
-                    "{role} isn't a role: use owner, staff or speaker; nothing was imported"
-                ));
-            }
-            entry["role"] = json!(role);
-        }
-        if did.is_none() && entry.get("emailHmac").is_none() {
+                Err(crate::identity::IdentityError::Unresolvable(why)) => {
+                    return Err(format!(
+                        "couldn't check {handle} right now ({why}); nothing was imported, so \
+                         run the import again"
+                    ));
+                }
+            },
+            None => None,
+        };
+        if did.is_none() && email_hmac.is_none() {
             continue;
         }
-        rows.push((entry, did, role.map(str::to_owned)));
+        // A row this owner already imported (or one repeated in the file) isn't
+        // written again, so importing the list again adds only what's new. Its
+        // role is still given below if it hasn't been.
+        let same = |e: &index::ListEntry| {
+            e.by == acting.did
+                && e.did == did
+                && e.email_hmac == email_hmac
+                && e.role.as_deref() == role
+        };
+        let key = (did.clone(), email_hmac.clone(), role.map(str::to_owned));
+        if conference.list.iter().any(same) || !seen.insert(key) {
+            already += 1;
+            rows.push((None, did, role.map(str::to_owned)));
+            continue;
+        }
+        let mut entry = json!({ "space": space.to_string() });
+        if let (Some(did), Some(handle)) = (&did, &handle) {
+            entry["did"] = json!(did);
+            entry["handle"] = json!(handle);
+        }
+        if let Some(hmac) = &email_hmac {
+            entry["emailHmac"] = json!(hmac);
+        }
+        if let Some(role) = role {
+            entry["role"] = json!(role);
+        }
+        rows.push((Some(entry), did, role.map(str::to_owned)));
     }
     // The conference's super admin writes the list's roles, if there are any.
     let writer = if rows.iter().any(|(_, did, role)| did.is_some() && role.is_some()) {
@@ -1323,8 +1365,10 @@ async fn list_import(state: &AppState, args: &Args) -> Result<Done, String> {
     let mut imported = 0;
     let mut kept = Vec::new();
     for (entry, did, role) in rows {
-        acting.create_in(state, &admin_space, index::LIST_ENTRY, None, entry).await?;
-        imported += 1;
+        if let Some(entry) = entry {
+            acting.create_in(state, &admin_space, index::LIST_ENTRY, None, entry).await?;
+            imported += 1;
+        }
         // A role from the list admits its subject only while the list does,
         // and only while the owner who imported it is one. A role an admin
         // gave (or an admin's own) isn't the list's to replace: it could push
@@ -1334,6 +1378,10 @@ async fn list_import(state: &AppState, args: &Args) -> Result<Done, String> {
             || (conference.roles.contains_key(&did) && !conference.has_list_role(&did))
         {
             kept.push(did);
+            continue;
+        }
+        // The same list role again keeps the time it took effect.
+        if conference.has_list_role(&did) && conference.roles.get(&did) == Some(&role) {
             continue;
         }
         writer
@@ -1348,6 +1396,9 @@ async fn list_import(state: &AppState, args: &Args) -> Result<Done, String> {
     }
     after_change(state, &org).await?;
     let mut text = format!("Imported {imported} attendees.");
+    if already > 0 {
+        text.push_str(&format!(" {already} were already on the list."));
+    }
     if !kept.is_empty() {
         text.push_str(&format!(
             "\nKept the role they already had, not the list's: {}",
@@ -1361,7 +1412,10 @@ async fn list_import(state: &AppState, args: &Args) -> Result<Done, String> {
             unresolved.join(", ")
         ));
     }
-    done(text, json!({ "imported": imported, "keptRoles": kept, "unresolved": unresolved }))
+    done(
+        text,
+        json!({ "imported": imported, "already": already, "keptRoles": kept, "unresolved": unresolved }),
+    )
 }
 
 async fn requests_list(state: &AppState, args: &Args) -> Result<Done, String> {
@@ -1451,6 +1505,9 @@ async fn decide(state: &AppState, args: &Args, action: &str) -> Result<Done, Str
         } else {
             None
         };
+    if matches!(action, "approve" | "add") && conference.banned.contains(&subject) {
+        return Err(format!("{who} is banned from this conference; nothing was changed"));
+    }
     let rkey = acting.create_in(state, &admin_space, collection, None, record).await?;
     let mut after = after_change(state, &org).await?;
     // A decision doesn't undo a higher-ranking admin's: staff can't override
@@ -1481,19 +1538,35 @@ async fn decide(state: &AppState, args: &Args, action: &str) -> Result<Done, Str
         member = after.conference(&space_uri).is_some_and(|c| c.is_member(&subject));
     }
     let now_in = after.conference(&space_uri);
-    if matches!(action, "approve" | "add") && now_in.is_some_and(|c| c.banned.contains(&subject)) {
-        return Err(format!("{who} is banned from this conference"));
-    }
+    let banned = now_in.is_some_and(|c| c.banned.contains(&subject));
     if (matches!(action, "approve" | "add") && !member) || (action == "remove" && member) {
-        let above = if role == Some(Role::Owner) {
-            "the super admin"
+        // An overridden decision isn't left on record: decisions rank by
+        // their authors' roles now, so it would take effect, unannounced, if
+        // its author were promoted or the overriding admin demoted.
+        let undone = acting.delete_in(state, &admin_space, collection, &rkey).await;
+        after_change(state, &after).await?;
+        let why = if banned {
+            format!("{who} is banned from this conference")
         } else {
-            "an owner or the super admin"
+            let above = if role == Some(Role::Owner) {
+                "the super admin"
+            } else {
+                "an owner or the super admin"
+            };
+            format!(
+                "{who}: a decision about them by {above} stands, and {} can't override it",
+                acting.handle
+            )
         };
-        return Err(format!(
-            "{who}: a decision about them by {above} stands, and {} can't override it",
-            acting.handle
-        ));
+        return Err(match undone {
+            Ok(()) => format!("{why}; nothing was changed"),
+            Err(also) => format!(
+                "{why}, and the {action} couldn't be deleted again ({also}): delete the record \
+                 {collection}/{rkey} from {}'s repo in {admin_space} once their PDS is back, or \
+                 it counts if their rank changes",
+                acting.handle
+            ),
+        });
     }
     done(message, json!({ "did": subject, "action": action }))
 }

@@ -1636,6 +1636,31 @@ then review again (rounds 11 to 15). What changed:
   members by the super admin's decision, which only she can override. The
   roles the departing admin assigned still go, as before.
 
+**Review round 11 design notes (2026-10-07).** The round-11 fixes, to
+raise at the PR alongside the simplification:
+
+- **An overridden decision isn't left on record.** Decisions rank by their
+  authors' roles now, so a refused one would take effect, unannounced, if
+  its author were promoted or the overriding admin demoted. `member
+  add|remove` and `requests approve` delete their own record again when a
+  higher rank's decision (or a ban) overrides it, and fail saying nothing
+  was changed. Adding or approving someone already banned is refused
+  before anything is written.
+- **A kept admission keeps the period it began.** `--keep-admissions`
+  writes each kept `member` record (`via: "kept"`) with `since` the start
+  of the membership it keeps, and the index dates the super admin's kept
+  admission from that `since` (never after the record), so what the person
+  wrote before the keep still counts.
+- **`list import` checks every row before writing anything, and adds
+  only what's new.** A bad role refuses the import even on a row whose
+  handle doesn't resolve. A resolver that can't answer right now (not "no
+  such handle") refuses the import with nothing written, rather than
+  skipping the row as unresolved. A row the same owner already imported
+  (same DID, email and role), or one repeated in the file, isn't written
+  again, and the same list role isn't rewritten (it keeps its `since`).
+  So importing the list again, as the command suggests for skipped rows,
+  adds only what's new.
+
 **Red-test gate (2026-10-06):** the user approved the red tests and the
 surfaces they pin (see Build notes), with these contract changes:
 
@@ -2764,3 +2789,37 @@ TC-58 is a new test, shown red before it's implemented. TC-53 is unchanged.
 `member` records for everyone admitted only on the departing admin's say-so,
 then removes them. The build then resumes with the simplification above and
 review rounds 11 to 15.
+
+### Round 11
+
+Reviewer: a fresh subagent following `adversarial-review`, the first to see
+the simplification. Verdict: not clean (0 blocking, 2 major, 2 minor, 1
+nit). It confirmed the TC-52 change matches its approved wording and is the
+only changed frozen file. After the rework: `pnpm check` green (lint, build,
+Rust 94 + unit 122 + integration 108 + tooling 33 + e2e 35), and
+`check:frozen` warns only about `tests/integration/conference-admins.test.ts`
+(the approved TC-52 change).
+
+1. **[major] A decision reported as overridden stayed on record,** and
+   counted later if its author was promoted or the overriding owner
+   demoted (ranks use authors' current roles). **Fixed:** `decide` deletes
+   its record again and fails with "nothing was changed"; a banned person
+   is refused before anything is written. Integration TC-52 (review round
+   11), which fails on the old code.
+2. **[major] `--keep-admissions` restarted the kept membership at the
+   keep,** so what the person wrote before it stopped being shown.
+   **Fixed:** the kept record's `since` is the start of the kept period, and
+   the index honours it for the super admin's `via: "kept"` records. Rust
+   test `a_kept_admission_keeps_the_period_it_began`; integration TC-58
+   (review round 11), which fails on the old code.
+3. **[minor] An unresolved row skipped the role check,** so a bad role
+   didn't refuse the import. **Fixed:** every cell is checked before the
+   handle is resolved. Integration TC-16 (review round 11).
+4. **[minor] Re-importing duplicated every row and reset list roles'
+   `since`, and a resolver hiccup read as "doesn't resolve".** **Fixed:**
+   rows the same owner already imported aren't written again (their role
+   is still given if it's missing), the same list role isn't rewritten,
+   and a resolver error other than "no such handle" refuses the import.
+   Integration TC-16 (review round 11).
+5. **[nit] The keep summary counted (conference, person) pairs and showed
+   DIDs.** **Fixed:** it counts people, and shows handles by conference.
