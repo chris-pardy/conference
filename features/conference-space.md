@@ -1705,6 +1705,25 @@ one question for the PR:
   as admin-given roles are. The first row for a person in a file decides
   their role.
 
+**Review round 14 design notes (2026-10-07).**
+
+- **Every change to an admin's role is checked for who it takes out or lets
+  in,** not only removals and demotions: promoting staff to owner re-ranks
+  their past decisions (a decision weighs by its author's role now), and
+  re-adding a removed admin makes their old decisions, codes, list rows
+  and bans count again. `org admin add` works out both before writing
+  anything, keeps the people it would take out with `--keep-admissions`,
+  and names them otherwise, along with anyone it lets back in. Ranking a
+  decision by its author's role when it was made would avoid the re-ranking,
+  but needs role history the `admin` record doesn't keep; worth raising
+  with the PR's question about bans.
+- **The let-back-in report says which kind:** members again at once, or
+  only able to join again.
+- **Removing an owner hands their list roles on.** A list role the owner
+  gave that another current owner's list also gives (the same person and
+  role) is rewritten as that owner's, keeping its time, instead of being
+  deleted.
+
 **Red-test gate (2026-10-06):** the user approved the red tests and the
 surfaces they pin (see Build notes), with these contract changes:
 
@@ -2930,3 +2949,36 @@ only about `tests/integration/conference-admins.test.ts`.
    isn't connected.
 4. **[nit] With two rows for one person in a file, which role won depended
    on what was stored.** **Fixed:** the first row decides.
+
+### Round 14
+
+Reviewer: a fresh subagent following `adversarial-review`. Verdict: not
+clean (0 blocking, 2 major, 2 minor, 1 nit). It confirmed the TC-52 change
+is still the only changed frozen file. After the rework: `pnpm check`
+green (lint, build, Rust 94 + unit 122 + integration 116 + tooling 33 + e2e
+35), and `check:frozen` warns only about
+`tests/integration/conference-admins.test.ts`.
+
+1. **[major] Promoting staff to owner silently re-ranked their decisions,**
+   which could take someone out or let them in. **Fixed:** every `org admin
+   add` works out who it takes out (kept with `--keep-admissions`, named
+   otherwise) and who it lets in (named). Integration TC-52 (review round
+   14).
+2. **[major] Re-adding a removed owner silently revived their bans,
+   removals, codes and list rows.** **Fixed the same way:** the re-add
+   names everyone it takes out. Counting only decisions made while their
+   author was an admin was considered; it would also need the role at the
+   time, which isn't recorded, so it's raised for the PR with round 13's
+   question. Integration TC-28 (review round 14).
+3. **[minor] Removing the owner whose import last took over a list role
+   deleted it,** though another owner's list still gave it. **Fixed:** such
+   a role is handed to that owner, keeping its time. Integration TC-32
+   (review round 14).
+4. **[minor] attendee-sign-in's frozen e2e TC-1 can flake under load,**
+   checking the avatar's `naturalWidth` straight after it's visible.
+   **Declined here:** it's another feature's frozen test, unchanged by this
+   branch, and passed in every run of this build's `pnpm check`. Noted for
+   the PR as a known flake to fix on `main` through attendee-sign-in.
+5. **[nit] The let-back-in report didn't say who was a member again at
+   once.** **Fixed:** it reports members again and those only able to join
+   again separately (`member` in the JSON).

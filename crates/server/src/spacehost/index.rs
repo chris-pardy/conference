@@ -788,8 +788,24 @@ pub async fn with_admin_as(
     match role {
         None => recs.retain(|r| !theirs(r)),
         Some(role) => {
+            let mut found = false;
             for rec in recs.iter_mut().filter(|r| theirs(r)) {
                 rec.value["role"] = json!(role.as_str());
+                found = true;
+            }
+            // Not an admin now: as if the super admin's record were written now.
+            if !found {
+                let us = crate::db::now_ms() as u64 * 1000;
+                recs.push(Rec {
+                    space: admin_space.clone(),
+                    repo: org.super_admin.clone(),
+                    collection: ADMIN.to_owned(),
+                    rkey: admin.to_owned(),
+                    rev: String::new(),
+                    us,
+                    seen_us: Some(us),
+                    value: json!({ "subject": admin, "role": role.as_str() }),
+                });
             }
         }
     }
@@ -803,11 +819,11 @@ pub async fn with_admin_as(
     ))
 }
 
-/// Who'd be let back in by `changed`: (conference, person) for everyone who
-/// isn't a member of one of `org`'s conferences now but would be, or is
-/// banned now and wouldn't be, as when the admin whose ban or removal kept
-/// them out stops counting.
-pub fn would_let_in(org: &Org, changed: &Org, except: &str) -> Vec<(String, String)> {
+/// Who'd be let back in by `changed`: (conference, person, whether they'd be
+/// a member again at once) for everyone who isn't a member of one of `org`'s
+/// conferences now but would be, or is banned now and wouldn't be, as when
+/// the admin whose ban or removal kept them out stops counting.
+pub fn would_let_in(org: &Org, changed: &Org, except: &str) -> Vec<(String, String, bool)> {
     let mut back = Vec::new();
     for conference in org.conferences.values() {
         let space = conference.space();
@@ -817,7 +833,7 @@ pub fn would_let_in(org: &Org, changed: &Org, except: &str) -> Vec<(String, Stri
         let people: BTreeSet<&String> = members.chain(unbanned).collect();
         for did in people {
             if did != except {
-                back.push((space.to_owned(), did.clone()));
+                back.push((space.to_owned(), did.clone(), then.is_member(did)));
             }
         }
     }
