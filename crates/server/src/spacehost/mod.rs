@@ -310,6 +310,23 @@ pub fn invalid(error: &str, message: &str) -> Response {
     refuse(StatusCode::BAD_REQUEST, error, message)
 }
 
+/// A page size from a query's `limit`: `default` without one, clamped to
+/// `1..=max`, or `None` if it isn't a number. Taken as a string, so a
+/// non-number is answered by [`bad_limit`] rather than the query
+/// extractor's plain-text refusal.
+pub fn page_limit(raw: Option<&str>, default: i64, max: i64) -> Option<usize> {
+    let limit = match raw {
+        None => default,
+        Some(raw) => raw.trim().parse::<i64>().ok()?,
+    };
+    Some(limit.clamp(1, max) as usize)
+}
+
+/// The XRPC refusal of a `limit` that isn't a number.
+pub fn bad_limit() -> Response {
+    invalid("InvalidRequest", "limit must be an integer")
+}
+
 pub fn internal(why: impl std::fmt::Display) -> Response {
     eprintln!("space host: {why}");
     refuse(StatusCode::INTERNAL_SERVER_ERROR, "InternalServerError", "something went wrong")

@@ -321,6 +321,10 @@ pub struct Conference {
     /// Roles assigned by an attendee list import, which admit their subject
     /// only while the list does.
     list_roles: BTreeSet<String>,
+    /// The handle-only list rows a list role was given for, by handle: the
+    /// row is the role's holder's, bound or not, so it can't match anyone
+    /// else (the handle's next holder, say).
+    list_claims: BTreeMap<String, String>,
     /// Who assigned each role, when another admin did.
     pub role_deciders: BTreeMap<String, String>,
     /// When each role took effect: its record's `since`, else when its
@@ -373,21 +377,30 @@ impl Conference {
         self.list.iter().any(|e| e.email_hmac.is_some())
     }
 
+    /// Whether someone is on the list: a row bound to their DID, or a
+    /// handle-only row whose list role they were given.
     pub fn on_list(&self, did: &str) -> bool {
-        self.list.iter().any(|e| e.did.as_deref() == Some(did))
+        self.list.iter().any(|e| {
+            e.did.as_deref() == Some(did)
+                || (e.did.is_none()
+                    && e.handle.as_deref().is_some_and(|h| {
+                        self.list_claims.get(h).is_some_and(|holder| holder == did)
+                    }))
+        })
     }
 
     /// List entries with only a handle that didn't resolve when imported,
     /// and hasn't been bound to a DID since (no entry with a DID has the
-    /// same handle).
+    /// same handle, and no one was given its role).
     pub fn unbound_handles(&self) -> impl Iterator<Item = &ListEntry> {
         self.list.iter().filter(|e| {
             e.did.is_none()
                 && e.handle.as_deref().is_some_and(|handle| {
-                    !self
-                        .list
-                        .iter()
-                        .any(|b| b.did.is_some() && b.handle.as_deref() == Some(handle))
+                    !self.list_claims.contains_key(handle)
+                        && !self
+                            .list
+                            .iter()
+                            .any(|b| b.did.is_some() && b.handle.as_deref() == Some(handle))
                 })
         })
     }
@@ -939,6 +952,7 @@ fn derive_conference(
     };
     let mut roles = BTreeMap::new();
     let mut list_roles = BTreeSet::new();
+    let mut list_claims = BTreeMap::new();
     let mut role_deciders = BTreeMap::new();
     let mut role_since = BTreeMap::new();
     let mut rules = None;
@@ -964,6 +978,9 @@ fn derive_conference(
                     }
                     if rec.str("via") == Some("list") {
                         list_roles.insert(subject.to_owned());
+                        if let Some(handle) = rec.str("listHandle") {
+                            list_claims.insert(handle.to_owned(), subject.to_owned());
+                        }
                     }
                 }
             }
@@ -981,6 +998,7 @@ fn derive_conference(
         super_admin_did: conference_super.clone(),
         roles,
         list_roles,
+        list_claims,
         role_deciders,
         role_since,
         admin_periods: BTreeMap::new(),
@@ -1015,12 +1033,25 @@ fn derive_conference(
         .filter_map(|r| Some((r.str("subject")?, r.us)))
         .collect();
     // Admins can't be banned: they're members because they're admins, and
-    // the super admin's say always stands.
+    // the super admin's say always stands. A ban of someone her admin marks
+    // cover still counts outside their admin periods (the timeline suspends
+    // it within them), so it's skipped only for admins with no marks: her,
+    // and admins made before marks were written.
     let is_admin = |did: &str| did == super_admin || admins.contains_key(did);
+    let marked: BTreeSet<&str> = decisions
+        .iter()
+        .filter(about)
+        .filter(|r| {
+            r.repo == super_admin
+                && r.collection == MEMBER
+                && matches!(r.str("via"), Some(VIA_ADMIN | VIA_ADMIN_REMOVED))
+        })
+        .filter_map(|r| r.str("subject"))
+        .collect();
     for rec in decisions.iter().filter(about) {
         let Some(subject) = rec.str("subject") else { continue };
         match rec.collection.as_str() {
-            BAN if is_admin(subject) => {}
+            BAN if is_admin(subject) && !marked.contains(subject) => {}
             BAN => {
                 let lifted = super_admits
                     .iter()
@@ -1213,7 +1244,9 @@ fn derive_conference(
         if let Some(start) = since {
             periods.push(Period { since: start, until: None });
         }
-        if bans > 0 {
+        // A current admin isn't banned, though a ban may hold again once
+        // they're not.
+        if bans > 0 && !is_admin(&subject) {
             conference.banned.insert(subject.clone());
         }
         if !periods.is_empty() {
@@ -1571,6 +1604,31 @@ mod tests {
     }
 
     #[test]
+    fn a_handle_rows_list_role_claims_the_row_for_its_holder() {
+        let kees = "did:plc:keesaaaaaaaaaaaaaaaaaaaa";
+        let zoe = "did:plc:zoeaaaaaaaaaaaaaaaaaaaaa";
+        let imported = rec(
+            &SpaceUri::admin(ORG).to_string(),
+            kees,
+            LIST_ENTRY,
+            "l1",
+            5,
+            json!({ "space": space(CONFERENCE_TYPE), "handle": "zoe.test", "role": "speaker" }),
+        );
+        // Zoe was given the row's role, but its binding was never written.
+        let given = role(
+            zoe,
+            "speaker",
+            json!({ "assignedBy": kees, "via": "list", "listHandle": "zoe.test" }),
+        );
+        let org = org_with(&["list"], true, vec![admin_rec(kees, "owner", 1), imported, given]);
+        let conference = org.conference(&space(CONFERENCE_TYPE)).unwrap();
+        assert_eq!(conference.unbound_handles().count(), 0, "the row is Zoe's");
+        assert!(conference.on_list(zoe));
+        assert!(!conference.on_list("did:plc:nextholderaaaaaaaaaaaaaa"));
+    }
+
+    #[test]
     fn a_conference_record_cant_be_dated_long_before_it_was_seen() {
         assert_eq!(conference_us(5_000_000, None), 5_000_000);
         // A notification's ordinary delay: dated by its commit.
@@ -1789,6 +1847,56 @@ mod tests {
             assert!(!conference.is_member(bram), "the ban holds again (ban at {banned_at})");
             assert!(conference.banned.contains(bram));
         }
+    }
+
+    #[test]
+    fn a_ban_holds_outside_an_admin_period_whether_or_not_they_are_still_an_admin() {
+        let bram = "did:plc:bramaaaaaaaaaaaaaaaaaaaa";
+        let kees = "did:plc:keesaaaaaaaaaaaaaaaaaaaa";
+        let ban = rec(
+            &SpaceUri::admin(ORG).to_string(),
+            kees,
+            BAN,
+            "b",
+            20,
+            json!({ "space": space(CONFERENCE_TYPE), "subject": bram }),
+        );
+        let marked = |rkey: &str, via: &str, us: u64| {
+            let mut value = json!({ "space": space(CONFERENCE_TYPE), "subject": bram, "via": via });
+            if via == VIA_ADMIN_REMOVED {
+                value["until"] = json!(iso(us));
+            }
+            rec(&SpaceUri::admin(ORG).to_string(), OLGA, MEMBER, rkey, us, value)
+        };
+        let mut joined = join(bram, 10, None, json!({}));
+        joined.rkey = "j10".into();
+        let mut during_ban = join(bram, 25, None, json!({}));
+        during_ban.rkey = "j25".into();
+        let base =
+            vec![admin_rec(kees, "owner", 1), joined, ban, during_ban, marked("m1", VIA_ADMIN, 30)];
+
+        // Still an admin: a member again from the mark, but not while banned
+        // before it, and the join written during the ban isn't honoured.
+        let mut still = base.clone();
+        still.push(admin_rec(bram, "staff", 30));
+        let org = org_with(&["open"], true, still);
+        let conference = org.conference(&space(CONFERENCE_TYPE)).unwrap();
+        assert!(conference.was_member_at(bram, 15));
+        assert!(!conference.was_member_at(bram, 25), "banned from 20, while still an admin");
+        assert!(conference.was_member_at(bram, 35));
+        assert!(conference.is_member(bram));
+        assert!(!conference.banned.contains(bram), "a current admin isn't banned");
+
+        // Removed at 40: the same history, and banned again after.
+        let mut removed = base;
+        removed.push(marked("m2", VIA_ADMIN_REMOVED, 40));
+        let org = org_with(&["open"], true, removed);
+        let conference = org.conference(&space(CONFERENCE_TYPE)).unwrap();
+        assert!(conference.was_member_at(bram, 15));
+        assert!(!conference.was_member_at(bram, 25), "banned from 20, once removed");
+        assert!(conference.was_member_at(bram, 35));
+        assert!(!conference.was_member_at(bram, 45));
+        assert!(conference.banned.contains(bram));
     }
 
     #[test]

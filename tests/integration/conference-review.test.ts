@@ -576,3 +576,92 @@ test('TC-31: a list role that couldn’t be given is given on a later join (revi
   expect(again.body.status).toBe('joined')
   expect(again.body.role, 'the row’s role, once Pim is back').toBe('speaker')
 })
+
+// Regressions from adversarial review round 7.
+
+test('TC-31: a list role given without its binding still lets the person in, and only them (review round 7)', async ({
+  viv,
+}) => {
+  const olga = await viv.createAccount(viv.handle('olga'))
+  const pim = await viv.createAccount(viv.handle('pim'))
+  const org = await createOrg(dep, olga)
+  await addAdmin(dep, org, pim, 'owner')
+  const conference = await createConference(dep, org, { ...ATMOSPHERECONF, superAdmin: pim, methods: ['list'] })
+  const zoeHandle = viv.handle('zoe')
+  await importList(dep, conference, [{ handle: zoeHandle, role: 'speaker' }])
+  const zoeAccount = await viv.createAccount(zoeHandle)
+  const zoe = await Attendee.signIn(dep, zoeAccount)
+
+  // Pim gives the row's role, but Olga, who writes the binding, is down.
+  await takeOffline(viv.url, olga)
+  try {
+    const answer = await zoe.join({ conference: conference.space })
+    expect(answer.status).toBe(200)
+    expect(answer.body.status, 'the role lets her in').toBe('joined')
+    expect(answer.body.role).toBe('speaker')
+  } finally {
+    await bringOnline(viv.url, olga)
+  }
+
+  // The row is Zoe's: the handle's next holder isn't let in by it.
+  await changeHandle(viv.url, zoeAccount, viv.handle('zoe-new'))
+  const next = await viv.createAccount(zoeHandle)
+  const answer = await (await Attendee.signIn(dep, next)).join({ conference: conference.space })
+  expect(answer.body.status, 'the row stayed with Zoe').not.toBe('joined')
+})
+
+test('TC-7: a bad cursor or limit doesn’t reveal an invite-only conference (review round 7)', async ({ viv }) => {
+  const sanne = await viv.createAccount(viv.handle('sanne'))
+  const bruiloft = await createOrg(dep, sanne)
+  const wedding = await createConference(dep, bruiloft, { ...WEDDING, methods: ['code', 'request'] })
+  const mallory = await Attendee.signIn(dep, await viv.createAccount(viv.handle('mallory')))
+  const list = (who: Attendee, params: Record<string, string>) =>
+    who.call('app.eventside.conference.listRecords', {
+      params: { conference: wedding.space, collection: NSID.event, ...params },
+    })
+
+  expect((await list(mallory, { cursor: 'not a cursor' })).status).toBe(404)
+  expect((await list(mallory, { limit: 'ten' })).status).toBe(404)
+
+  // A member is told what's wrong, in the XRPC shape.
+  const asSanne = await Attendee.signIn(dep, sanne)
+  const badCursor = await list(asSanne, { cursor: 'not a cursor' })
+  expect(badCursor.status).toBe(400)
+  expect(badCursor.body.error).toBe('InvalidRequest')
+  const badLimit = await list(asSanne, { limit: 'ten' })
+  expect(badLimit.status).toBe(400)
+  expect(badLimit.body.error).toBe('InvalidRequest')
+})
+
+test('TC-48: junk written to an intake space doesn’t change the index (review round 7)', async ({ viv }) => {
+  const { org, conference } = await seedConference(dep, accountsIn(viv), { methods: ['code'] })
+  const mallory = await viv.createAccount(viv.handle('mallory'))
+  const db = new DatabaseSync(dep.databasePath as string)
+  try {
+    const generation = () =>
+      (db.prepare('SELECT generation FROM index_generations WHERE org = ?').get(org.did) as { generation: number })
+        .generation
+    const read = () =>
+      db.prepare('SELECT synced_rev FROM space_repos WHERE space = ? AND repo = ?').get(conference.intake, mallory.did)
+    const before = generation()
+
+    for (const n of [1, 2, 3]) {
+      await writeSpaceRecord(viv.url, mallory, conference.intake, 'com.example.junk', { n, pad: 'x'.repeat(1000) })
+    }
+    await eventually(
+      async () => read(),
+      (row) => row !== undefined,
+      'our host read Mallory’s repo in the intake space',
+    )
+    await new Promise((done) => setTimeout(done, 1_500))
+
+    expect(generation(), 'nothing was stored, so nothing is re-derived').toBe(before)
+    expect(
+      db
+        .prepare('SELECT COUNT(*) AS n FROM space_records WHERE space = ? AND repo = ?')
+        .get(conference.intake, mallory.did),
+    ).toEqual({ n: 0 })
+  } finally {
+    db.close()
+  }
+})

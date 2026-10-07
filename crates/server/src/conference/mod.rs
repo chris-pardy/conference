@@ -264,7 +264,7 @@ pub async fn list_my_conferences(State(state): State<AppState>, user: CurrentUse
 pub struct RecordsParams {
     conference: String,
     collection: String,
-    limit: Option<i64>,
+    limit: Option<String>,
     cursor: Option<String>,
 }
 
@@ -326,12 +326,6 @@ pub async fn list_records(
         Ok(None) => return not_found(),
         Err(why) => return failed(why),
     };
-    let after = match params.cursor.as_deref().map(parse_place) {
-        Some(None) => return xrpc_error(StatusCode::BAD_REQUEST, "InvalidRequest", "Bad cursor."),
-        Some(Some(place)) => Some(place),
-        None => None,
-    };
-    let limit = params.limit.unwrap_or(RECORDS_PAGE).clamp(1, RECORDS_PAGE_MAX) as usize;
     let conference = org.conference(&row.space).expect("loaded with its conference");
     if !conference.is_member(&user.did) {
         // An invite-only conference doesn't exist for anyone outside it.
@@ -344,6 +338,18 @@ pub async fn list_records(
             "Only members can see inside this conference.",
         );
     }
+    // The paging is checked only for members, so a bad cursor or limit says
+    // nothing about a conference that's hidden from the asker.
+    let after = match params.cursor.as_deref().map(parse_place) {
+        Some(None) => return xrpc_error(StatusCode::BAD_REQUEST, "InvalidRequest", "Bad cursor."),
+        Some(Some(place)) => Some(place),
+        None => None,
+    };
+    let Some(limit) =
+        crate::spacehost::page_limit(params.limit.as_deref(), RECORDS_PAGE, RECORDS_PAGE_MAX)
+    else {
+        return crate::spacehost::bad_limit();
+    };
     let rows = sqlx::query_as::<_, (String, String, String, Option<String>, String, Option<i64>)>(
         "SELECT r.repo, r.rkey, r.rev, r.cid, r.value, s.seen_at FROM space_records r \
          LEFT JOIN space_record_seen s ON s.space = r.space AND s.repo = r.repo \
@@ -456,7 +462,7 @@ pub async fn join(
         Ok(None) => return not_found(),
         Err(why) => return failed(why),
     };
-    let org = match load(&state, &row).await {
+    let mut org = match load(&state, &row).await {
         Ok(Some(org)) => org,
         Ok(None) => return not_found(),
         Err(why) => return failed(why),
@@ -499,6 +505,14 @@ pub async fn join(
                 return reload_answer(&state, &row, did).await;
             }
             Err(why) => {
+                // The row's role may have been given though its binding
+                // wasn't: judged by the index as it is now.
+                org = match load(&state, &row).await {
+                    Ok(Some(org)) => org,
+                    Ok(None) => return not_found(),
+                    Err(err) => return failed(err),
+                };
+                let conference = org.conference(&row.space).expect("loaded with its conference");
                 let otherwise = conference.is_member(did)
                     || conference.would_admit(did, code_hash.as_deref(), now).is_some();
                 if !otherwise {
@@ -506,11 +520,13 @@ pub async fn join(
                 }
                 eprintln!(
                     "conference: {did}'s list handle isn't bound yet (tried again on a later \
-                     join): {why}"
+                     join unless its role was given): {why}"
                 );
             }
         }
     }
+    let conference = org.conference(&row.space).expect("loaded with its conference");
+    let settings = &conference.settings;
     if conference.is_member(did) {
         return joined(&org, conference);
     }
@@ -740,22 +756,22 @@ async fn give_list_role(
     if conference.roles.contains_key(did) {
         return Ok(());
     }
+    let mut value = json!({ "subject": did, "role": role, "assignedBy": entry.by, "via": "list",
+                            "since": index::iso(now_ms() as u64 * 1000) });
+    // A handle-only row's role names the row, so it's this person's from
+    // now on even if its binding isn't written.
+    if entry.did.is_none()
+        && let Some(handle) = &entry.handle
+    {
+        value["listHandle"] = json!(handle);
+    }
     let writer = conference.super_admin();
     let handle = match state.resolver.resolve_did(writer).await {
         Ok(identity) => identity.handle,
         Err(_) => writer.to_owned(),
     };
     let acting = admin::Acting::new(state, writer, &handle).await?;
-    acting
-        .put_in(
-            state,
-            conference.space(),
-            index::ROLE,
-            did,
-            json!({ "subject": did, "role": role, "assignedBy": entry.by, "via": "list",
-                    "since": index::iso(now_ms() as u64 * 1000) }),
-        )
-        .await?;
+    acting.put_in(state, conference.space(), index::ROLE, did, value).await?;
     Ok(())
 }
 

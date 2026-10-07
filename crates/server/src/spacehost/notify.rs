@@ -87,11 +87,19 @@ pub async fn notify_write(
         tokio::spawn(async move {
             // A write from any app (an admin's ban, a member's leave) can take
             // someone's access away: whoever lost it is revoked.
+            // Only a read that changed the index (or failed partway) can
+            // have taken anyone's access away: junk in an intake space,
+            // which isn't stored, costs no re-derive or comparison.
             let before = index::load(&background, &space.authority).await.ok().flatten();
-            if let Err(why) = sync::sync_repo(&background, &space_uri, &repo).await {
-                eprintln!("notifyWrite: could not read {repo} in {space_uri}: {why}");
-            }
-            if let Some(before) = before
+            let changed = match sync::sync_repo(&background, &space_uri, &repo).await {
+                Ok(changed) => changed,
+                Err(why) => {
+                    eprintln!("notifyWrite: could not read {repo} in {space_uri}: {why}");
+                    true
+                }
+            };
+            if changed
+                && let Some(before) = before
                 && let Ok(Some(after)) = index::load(&background, &space.authority).await
             {
                 let before = crate::conference::access(&before);
@@ -519,8 +527,13 @@ async fn deliver(state: &AppState, space: &str, jtis: &[String]) -> Result<(), S
 const WRITERS_PER_PDS: usize = 10;
 /// How long a PDS that doesn't take revocations is left alone.
 const REST_MS: i64 = 10 * 60 * 1000;
-/// How long a writer a PDS refused as gone is skipped there.
-const GONE_MS: i64 = 60 * 60 * 1000;
+/// How long a writer a PDS refused as gone is skipped there: well within a
+/// credential's life, so a writer who was only briefly away (deactivated,
+/// say) is tried again before the credentials being revoked expire.
+const GONE_MS: i64 = credential::CREDENTIAL_SECS * 1000 / 2;
+const _: () = assert!(GONE_MS <= credential::CREDENTIAL_SECS * 1000);
+/// The most writers remembered as gone at once.
+const GONE_CAP: usize = 10_000;
 
 type Memo<T> = std::sync::Mutex<std::collections::HashMap<String, T>>;
 
@@ -547,16 +560,29 @@ fn gone() -> &'static Memo<i64> {
 fn mark_gone(pds: &str, space: &str, writer: &str) {
     {
         let mut memo = gone().lock().expect("the gone memo isn't poisoned");
-        if memo.len() >= 10_000 {
-            memo.clear();
-        }
-        memo.insert(format!("{pds} {writer}"), now_ms() + GONE_MS);
+        remember_gone(&mut memo, format!("{pds} {writer}"), now_ms());
     }
     let mut last = last_writers().lock().expect("the writer memo isn't poisoned");
     let key = pds_in(pds, space);
     if last.get(&key).is_some_and(|w| w == writer) {
         last.remove(&key);
     }
+}
+
+/// Notes a writer as gone until [`GONE_MS`] from `now`. A full memo first
+/// forgets those whose time is up, then (if it's still full) whoever's
+/// time is up soonest, rather than everyone at once.
+fn remember_gone(memo: &mut std::collections::HashMap<String, i64>, key: String, now: i64) {
+    if memo.len() >= GONE_CAP && !memo.contains_key(&key) {
+        memo.retain(|_, until| *until > now);
+        if memo.len() >= GONE_CAP
+            && let Some(soonest) =
+                memo.iter().min_by_key(|(_, until)| **until).map(|(k, _)| k.clone())
+        {
+            memo.remove(&soonest);
+        }
+    }
+    memo.insert(key, now + GONE_MS);
 }
 
 fn is_gone(pds: &str, writer: &str) -> bool {
@@ -757,6 +783,28 @@ mod tests {
         // Another space's writer list on the same PDS isn't affected.
         let other = "at://did:plc:a/space/app.eventside.conference/2";
         assert_eq!(writers_to_try(pds, other, writers)[0], "did:plc:w0");
+    }
+
+    #[test]
+    fn a_full_gone_memo_forgets_the_expired_not_everyone() {
+        let mut memo = std::collections::HashMap::new();
+        // Half remembered long ago (their time is up), half just now.
+        for i in 0..GONE_CAP {
+            let at = if i % 2 == 0 { 0 } else { 10 * GONE_MS };
+            remember_gone(&mut memo, format!("old{i}"), at);
+        }
+        let now = 10 * GONE_MS + 1;
+        remember_gone(&mut memo, "new".into(), now);
+        assert_eq!(memo.len(), GONE_CAP / 2 + 1, "only the expired were forgotten");
+        assert!(memo.contains_key("old1") && !memo.contains_key("old0"));
+        // Full of the unexpired: only the soonest to expire makes room.
+        let mut memo = std::collections::HashMap::new();
+        for i in 0..GONE_CAP {
+            remember_gone(&mut memo, format!("w{i}"), i as i64);
+        }
+        remember_gone(&mut memo, "late".into(), 0);
+        assert_eq!(memo.len(), GONE_CAP);
+        assert!(!memo.contains_key("w0") && memo.contains_key("w1") && memo.contains_key("late"));
     }
 
     #[test]

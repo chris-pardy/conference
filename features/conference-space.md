@@ -1509,6 +1509,40 @@ at the PR alongside rounds 1 to 5:
   database made by an earlier build of this branch fails the migration
   checksum and has to be deleted (the worktree's git-ignored `data/` was).
 
+**Review round 7 design notes (2026-10-07).** The round-7 fixes, to raise
+at the PR alongside rounds 1 to 6:
+
+- **A read that stores nothing changes nothing.** `sync_repo` says whether
+  it changed the index; only then is the organization's generation bumped
+  (so its view re-derived), and only then does a write notification compare
+  access before and after for revocations (a read that failed partway still
+  does). Writing a record's same revision again still counts as a change:
+  a sync racing another (the CLI's and a write notification's) may have
+  stored it before bumping, and the caller must not read a stale view.
+- **Intake reads are bounded.** A read of one repo in an intake space stops
+  after 1,000 ops or 4 MiB, and the next read goes on from there (ops come
+  oldest first, and how far it read is kept). The per-repo record limit is
+  checked against the repo's records read once per sync, not a count per
+  op.
+- **A ban of a marked admin is part of their history.** Bans are skipped
+  only for admins the super admin's `orgAdmin` marks don't cover (her, and
+  admins made before marks); for everyone else the timeline suspends a ban
+  during an admin period and holds it outside one, whether or not they're
+  still an admin. A current admin is never in `banned`.
+- **A handle row's list role claims the row.** The role a handle-only list
+  row gives is written with `listHandle`, the row's handle. The holder of
+  such a role is on the list by that row, and the row no longer matches
+  anyone else, so if the binding after the role fails, the person is let in
+  by the role (the join re-judges against the reloaded index rather than
+  answering failed) and the handle's next holder isn't.
+- **Paging is checked after membership.** `listRecords` parses its cursor
+  and limit only for members, so an invite-only conference stays a 404 to
+  others. `limit` on `listRecords` and `listMembers` is parsed by us, so a
+  non-number is an XRPC `InvalidRequest`.
+- **Gone writers are skipped for half a credential's life** (5 minutes, not
+  an hour), and a full memo of them forgets the expired (then the soonest to
+  expire) rather than everyone.
+
 **Red-test gate (2026-10-06):** the user approved the red tests and the
 surfaces they pin (see Build notes), with these contract changes:
 
@@ -2380,3 +2414,48 @@ unchanged.
 7. **[nit] Migrations 0003 to 0005 amended 0002 in the same PR, and 0005
    had no backfill.** **Fixed:** folded into 0002 (see "Review round 6
    design notes"); the worktree's local databases were deleted.
+
+### Round 7
+
+Reviewer: a fresh subagent following `adversarial-review`. Verdict: not
+clean (0 blocking, 2 major, 2 minor, 2 nit). After the rework: `pnpm check`
+green (lint, build, Rust 90 + unit 122 + integration 104 + tooling 33 + e2e
+35), and `scripts/check-tests-unchanged.sh` reports the frozen tests
+unchanged.
+
+1. **[major] Junk in an intake space still cost a full re-derive.** It was
+   no longer stored, but was still read unbounded, bumped the
+   organization's generation and ran the revocation comparison, and the
+   record limit was a `COUNT(*)` per op. **Fixed:** a sync that stores
+   nothing doesn't bump or compare, intake reads stop after 1,000 ops or
+   4 MiB (the next read goes on from there), and the limit is read once
+   per sync. See "Review round 7 design notes". Rust test
+   `only_a_write_that_changes_the_index_counts_as_a_change`; integration
+   TC-48 (round 7).
+2. **[major] A ban of a current admin vanished from their history.**
+   Someone banned and later made an admin counted as a member during the
+   ban, and a join written during it was honoured. **Fixed:** bans are
+   skipped only for admins with no `orgAdmin` marks; a current admin just
+   isn't listed as banned. Rust test
+   `a_ban_holds_outside_an_admin_period_whether_or_not_they_are_still_an_admin`
+   (fails on the old code).
+3. **[minor] `listRecords` checked its cursor before membership,** so a bad
+   cursor told a non-member an invite-only conference exists. **Fixed:**
+   the cursor and limit are checked after. Integration TC-7 (round 7).
+4. **[minor] A list role given without its binding left the row open.**
+   The join answered failed though the role let the person in, and the
+   unbound row could then admit the handle's next holder too. **Fixed:**
+   the role names the row (`listHandle`), which makes its holder on the
+   list and the row no one else's, and a failed binding is judged against
+   the reloaded index. Rust test
+   `a_handle_rows_list_role_claims_the_row_for_its_holder`; integration
+   TC-31 (round 7).
+5. **[nit] Gone writers were skipped for an hour, and a full memo was
+   cleared wholesale.** **Fixed:** 5 minutes (half a credential's life),
+   and the expired are evicted first. Rust test
+   `a_full_gone_memo_forgets_the_expired_not_everyone`.
+6. **[nit] A non-numeric `limit` got axum's plain-text 400.** **Fixed:**
+   `limit` is parsed by us into an XRPC `InvalidRequest`, on `listRecords`
+   and `listMembers`. Rust test
+   `a_limit_that_isnt_a_number_is_an_xrpc_invalid_request`; integration
+   TC-7 (round 7).

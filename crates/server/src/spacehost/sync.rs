@@ -25,10 +25,17 @@ const INTAKE_RECORD_CAP: usize = 4 * 1024;
 /// The most records one repo may have in an intake space. Anyone can write
 /// there, so this bounds what one writer can make us keep and re-derive.
 const INTAKE_RECORDS_PER_REPO: i64 = 1000;
+/// The most bytes of ops read from one repo in an intake space at once.
+/// A read stops at this (or at [`INTAKE_RECORDS_PER_REPO`] ops) and the next
+/// goes on from there, so a writer filling one with junk costs a bounded
+/// read per notification.
+const INTAKE_READ_CAP: usize = 4 * 1024 * 1024;
 
 /// Whether a record version in a space goes into the index. Intake spaces
 /// take writes from anyone: only joins and leaves of a sensible size are
-/// kept there, so nothing else a writer puts in one costs us anything.
+/// kept there. Anything else is still read (up to the intake read caps),
+/// but isn't stored, and a read with nothing stored doesn't change the
+/// organization's index.
 fn indexed(space: &str, collection: &str, version: &Version) -> bool {
     if SpaceUri::parse(space).is_none_or(|s| s.kind != INTAKE_TYPE) {
         return true;
@@ -86,8 +93,10 @@ async fn fetch_ops(
     let url = format!("{pds}/xrpc/com.atproto.space.listRepoOps");
     let client = state.http.guarded(&url)?;
     let authorization = format!("Atproto-Space {credential}");
+    let intake = parsed.kind == INTAKE_TYPE;
     let mut cursor: Option<String> = None;
     let mut all = Vec::new();
+    let mut bytes = 0;
     for _ in 0..1000 {
         let mut query = vec![
             ("space", space.to_owned()),
@@ -106,7 +115,8 @@ async fn fetch_ops(
         }
         let res = req.send().await.map_err(|e| format!("{url}: {e}"))?;
         let status = res.status();
-        let body = read(res).await?;
+        let (body, size) = read(res).await?;
+        bytes += size;
         if !status.is_success() {
             // No repo in the space yet: nothing to read.
             if body.get("error").and_then(Value::as_str) == Some("RepoNotFound") {
@@ -121,6 +131,11 @@ async fn fetch_ops(
         if cursor.is_none() || empty {
             break;
         }
+        // The rest of an intake repo is read next time, from where this
+        // stopped (ops come oldest first).
+        if intake && (all.len() as i64 >= INTAKE_RECORDS_PER_REPO || bytes >= INTAKE_READ_CAP) {
+            break;
+        }
     }
     Ok(all)
 }
@@ -131,8 +146,10 @@ fn latest_rev<'a>(ops: impl IntoIterator<Item = &'a Value>) -> Option<String> {
 }
 
 /// Reads a repo's new ops in a space into the index. Safe to run twice at
-/// once: a record only ever moves to a later revision.
-pub async fn sync_repo(state: &AppState, space: &str, repo: &str) -> Result<(), String> {
+/// once: a record only ever moves to a later revision. Says whether the
+/// index changed: when nothing read was stored, the organization's view
+/// isn't re-derived.
+pub async fn sync_repo(state: &AppState, space: &str, repo: &str) -> Result<bool, String> {
     let parsed = SpaceUri::parse(space).ok_or_else(|| format!("{space} isn't a space"))?;
     let since = sqlx::query_scalar::<_, String>(
         "SELECT synced_rev FROM space_repos WHERE space = $1 AND repo = $2",
@@ -144,19 +161,34 @@ pub async fn sync_repo(state: &AppState, space: &str, repo: &str) -> Result<(), 
     .map_err(|e| e.to_string())?;
     let ops = fetch_ops(state, space, repo, since.as_deref()).await?;
     if ops.is_empty() {
-        return Ok(());
+        return Ok(false);
     }
     let seen_at = now_ms();
     let mut db = state.db.acquire().await.map_err(|e| e.to_string())?;
+    let mut room = Room::of(&mut db, space, repo).await?;
+    let mut changed = false;
+    // Whatever was written before a failure is still bumped for, so it's
+    // never stored without the view being re-derived.
+    let mut outcome = Ok(());
     for op in &ops {
         if let Some((collection, rkey, version)) = version(op)
             && indexed(space, &collection, &version)
         {
-            apply(&mut db, space, repo, &collection, &rkey, &version, seen_at).await?;
+            match apply(&mut db, space, repo, &collection, &rkey, &version, seen_at, room.as_mut())
+                .await
+            {
+                Ok(wrote) => changed |= wrote,
+                Err(why) => {
+                    outcome = Err(why);
+                    break;
+                }
+            }
         }
     }
-    if let Some(latest) = latest_rev(&ops) {
-        sqlx::query(
+    if outcome.is_ok()
+        && let Some(latest) = latest_rev(&ops)
+    {
+        outcome = sqlx::query(
             "INSERT INTO space_repos (space, repo, synced_rev) VALUES ($1, $2, $3) \
              ON CONFLICT (space, repo) DO UPDATE SET synced_rev = excluded.synced_rev \
              WHERE space_repos.synced_rev < excluded.synced_rev",
@@ -166,10 +198,47 @@ pub async fn sync_repo(state: &AppState, space: &str, repo: &str) -> Result<(), 
         .bind(&latest)
         .execute(&mut *db)
         .await
-        .map_err(|e| e.to_string())?;
+        .map(drop)
+        .map_err(|e| e.to_string());
     }
     drop(db);
-    index::bump(state, &parsed.authority).await
+    if changed {
+        index::bump(state, &parsed.authority).await?;
+    }
+    outcome.map(|()| changed)
+}
+
+/// The records a repo already has in an intake space, read once per sync
+/// (not once per op) to hold it to [`INTAKE_RECORDS_PER_REPO`]. Other
+/// spaces have no limit.
+struct Room(BTreeSet<(String, String)>);
+
+impl Room {
+    async fn of(
+        db: &mut sqlx::AnyConnection,
+        space: &str,
+        repo: &str,
+    ) -> Result<Option<Room>, String> {
+        if SpaceUri::parse(space).is_none_or(|s| s.kind != INTAKE_TYPE) {
+            return Ok(None);
+        }
+        let keys = sqlx::query_as::<_, (String, String)>(
+            "SELECT collection, rkey FROM space_records WHERE space = $1 AND repo = $2",
+        )
+        .bind(space)
+        .bind(repo)
+        .fetch_all(&mut *db)
+        .await
+        .map_err(|e| e.to_string())?;
+        Ok(Some(Room(keys.into_iter().collect())))
+    }
+
+    /// Whether a record may be written: one the repo has, or a new one
+    /// while there's room.
+    fn admits(&self, collection: &str, rkey: &str) -> bool {
+        (self.0.len() as i64) < INTAKE_RECORDS_PER_REPO
+            || self.0.contains(&(collection.to_owned(), rkey.to_owned()))
+    }
 }
 
 /// A code record's HMAC, for finding a code's conference without deriving
@@ -185,7 +254,9 @@ fn code_hmac_of(space: &str, collection: &str, value: Option<&str>) -> Option<St
 
 /// Writes a record's version into the index, unless it has a later one, and
 /// notes when this version was first seen. A repo already at its limit of
-/// records in an intake space gets no new ones.
+/// records in an intake space (its `room`) gets no new ones. Says whether
+/// the index changed.
+#[allow(clippy::too_many_arguments)]
 async fn apply(
     db: &mut sqlx::AnyConnection,
     space: &str,
@@ -194,25 +265,13 @@ async fn apply(
     rkey: &str,
     version: &Version,
     seen_at: i64,
-) -> Result<(), String> {
-    if SpaceUri::parse(space).is_some_and(|s| s.kind == INTAKE_TYPE) {
-        let (count, exists) = sqlx::query_as::<_, (i64, i64)>(
-            "SELECT COUNT(*), COALESCE(SUM(CASE WHEN collection = $3 AND rkey = $4 THEN 1 ELSE 0 END), 0) \
-             FROM space_records WHERE space = $1 AND repo = $2",
-        )
-        .bind(space)
-        .bind(repo)
-        .bind(collection)
-        .bind(rkey)
-        .fetch_one(&mut *db)
-        .await
-        .map_err(|e| e.to_string())?;
-        if exists == 0 && count >= INTAKE_RECORDS_PER_REPO {
-            return Ok(());
-        }
+    room: Option<&mut Room>,
+) -> Result<bool, String> {
+    if room.as_ref().is_some_and(|room| !room.admits(collection, rkey)) {
+        return Ok(false);
     }
     let code_hmac = code_hmac_of(space, collection, version.value.as_deref());
-    sqlx::query(
+    let written = sqlx::query(
         "INSERT INTO space_records (space, repo, collection, rkey, rev, cid, value, code_hmac) \
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
          ON CONFLICT (space, repo, collection, rkey) DO UPDATE SET rev = excluded.rev, cid = excluded.cid, \
@@ -228,7 +287,15 @@ async fn apply(
     .bind(code_hmac)
     .execute(&mut *db)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| e.to_string())?
+    .rows_affected()
+        > 0;
+    if !written {
+        return Ok(false);
+    }
+    if let Some(room) = room {
+        room.0.insert((collection.to_owned(), rkey.to_owned()));
+    }
     sqlx::query(
         "INSERT INTO space_record_seen (space, repo, collection, rkey, rev, seen_at) VALUES ($1, $2, $3, $4, $5, $6) \
          ON CONFLICT (space, repo, collection, rkey, rev) DO NOTHING",
@@ -242,10 +309,11 @@ async fn apply(
     .execute(&mut *db)
     .await
     .map_err(|e| e.to_string())?;
-    Ok(())
+    Ok(true)
 }
 
-async fn read(mut res: reqwest::Response) -> Result<Value, String> {
+/// A response's JSON body, and how many bytes it was.
+async fn read(mut res: reqwest::Response) -> Result<(Value, usize), String> {
     let url = res.url().to_string();
     let mut body = Vec::new();
     while let Some(chunk) = res.chunk().await.map_err(|e| format!("{url}: {e}"))? {
@@ -254,7 +322,7 @@ async fn read(mut res: reqwest::Response) -> Result<Value, String> {
         }
         body.extend_from_slice(&chunk);
     }
-    Ok(serde_json::from_slice(&body).unwrap_or(Value::Null))
+    Ok((serde_json::from_slice(&body).unwrap_or(Value::Null), body.len()))
 }
 
 /// One repo in one space, as reindex read it: each record's latest version.
@@ -443,8 +511,9 @@ pub async fn reindex(state: &AppState, org: &str) -> Result<Reindexed, String> {
     }
     let seen_at = now_ms();
     for ((space, repo), records) in &read {
+        let mut room = Room::of(&mut tx, space, repo).await?;
         for ((collection, rkey), version) in records {
-            apply(&mut tx, space, repo, collection, rkey, version, seen_at).await?;
+            apply(&mut tx, space, repo, collection, rkey, version, seen_at, room.as_mut()).await?;
         }
         if let Some(latest) = synced.get(&(space.clone(), repo.clone())) {
             sqlx::query(
@@ -550,6 +619,55 @@ mod tests {
         );
         read.insert((space.clone(), "did:plc:writer".to_owned()), junk);
         assert!(recs_of("did:plc:atmosphereorgaaaaaaaaaaa", &read).is_empty());
+    }
+
+    #[tokio::test]
+    async fn only_a_write_that_changes_the_index_counts_as_a_change() {
+        let dir =
+            std::env::temp_dir().join(format!("eventside-sync-{}", crate::keys::random_token(8)));
+        let url = format!("sqlite://{}/eventside.db?mode=rwc", dir.display());
+        let db = crate::db::connect(&url).await.unwrap();
+        let mut conn = db.acquire().await.unwrap();
+        let space = intake_space();
+        let w = "did:plc:writer";
+        let v = |rev: &str| Version {
+            rev: rev.into(),
+            cid: Some("c".into()),
+            value: Some("{}".into()),
+        };
+
+        let mut room = Room::of(&mut conn, &space, w).await.unwrap();
+        assert!(room.is_some(), "an intake space has a limit");
+        let mut apply_join = async |rkey: &str, rev: &str, room: Option<&mut Room>| {
+            apply(&mut conn, &space, w, index::JOIN, rkey, &v(rev), 1, room).await.unwrap()
+        };
+        assert!(apply_join("1", "3aab", room.as_mut()).await);
+        // An older version: nothing changed, so nothing is re-derived.
+        assert!(!apply_join("1", "3aaa", room.as_mut()).await);
+        // The same version again (a sync racing another, which may not
+        // have bumped yet) counts, so the caller never reads a stale view.
+        assert!(apply_join("1", "3aab", room.as_mut()).await);
+        assert!(apply_join("1", "3aac", room.as_mut()).await);
+
+        // A full repo gets no new records, but its own still update.
+        let mut full = Room(
+            (1..INTAKE_RECORDS_PER_REPO)
+                .map(|i| (index::JOIN.to_owned(), format!("x{i}")))
+                .chain([(index::JOIN.to_owned(), "1".to_owned())])
+                .collect(),
+        );
+        assert!(!apply_join("2", "3aad", Some(&mut full)).await);
+        assert!(apply_join("1", "3aae", Some(&mut full)).await);
+
+        // What's there is read once, for the whole sync.
+        let room = Room::of(&mut conn, &space, w).await.unwrap().unwrap();
+        assert_eq!(room.0.len(), 1);
+        let conference =
+            SpaceUri::new("did:plc:atmosphereorgaaaaaaaaaaa", CONFERENCE_TYPE, "3conf");
+        assert!(Room::of(&mut conn, &conference.to_string(), w).await.unwrap().is_none());
+        drop(conn);
+        db.close().await;
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

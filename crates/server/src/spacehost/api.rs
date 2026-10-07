@@ -64,7 +64,7 @@ pub async fn get_space(
 #[derive(serde::Deserialize)]
 pub struct MembersParams {
     space: String,
-    limit: Option<i64>,
+    limit: Option<String>,
     cursor: Option<String>,
 }
 
@@ -109,7 +109,10 @@ pub async fn list_members(
             "periods": periods.iter().map(Period::to_json).collect::<Vec<_>>(),
         })
     };
-    let limit = params.limit.unwrap_or(MEMBERS_PAGE).clamp(1, MEMBERS_PAGE_MAX) as usize;
+    let Some(limit) = super::page_limit(params.limit.as_deref(), MEMBERS_PAGE, MEMBERS_PAGE_MAX)
+    else {
+        return super::bad_limit();
+    };
     let after = params.cursor.as_deref();
     let (members, cursor): (Vec<Value>, _) = if space.kind == CONFERENCE_TYPE {
         let Some(conference) = org.conference(&space.to_string()) else {
@@ -145,6 +148,21 @@ pub async fn list_members(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_limit_that_isnt_a_number_is_an_xrpc_invalid_request() {
+        let uri: axum::http::Uri =
+            "/xrpc/app.eventside.space.listMembers?space=at://x&limit=ten".parse().unwrap();
+        let Query(params) =
+            Query::<MembersParams>::try_from_uri(&uri).expect("the query is taken as it is");
+        assert_eq!(super::super::page_limit(params.limit.as_deref(), 100, 500), None);
+        let refused = super::super::bad_limit();
+        assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(refused.headers()["content-type"], "application/json");
+        assert_eq!(super::super::page_limit(None, 100, 500), Some(100));
+        assert_eq!(super::super::page_limit(Some("9999"), 100, 500), Some(500));
+        assert_eq!(super::super::page_limit(Some("0"), 100, 500), Some(1));
+    }
 
     #[test]
     fn members_are_paged_by_did() {
