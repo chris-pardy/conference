@@ -316,8 +316,23 @@ async fn org_admin(state: &AppState, args: &Args, add: bool) -> Result<Done, Str
                 json!({ "subject": subject, "role": role.as_str() }),
             )
             .await?;
-        // Admins are members of every conference, with their role.
+        // Admins are members of every conference, with their role. Their
+        // membership is a decision of the super admin's, like anyone's, so
+        // it keeps its start through a change of role, and its end once
+        // they're removed.
+        let now = index::iso(now_ms() as u64 * 1000);
         for conference in org.conferences.values() {
+            if !conference.is_member(&subject) {
+                acting
+                    .create_in(
+                        state,
+                        &admin_space,
+                        index::MEMBER,
+                        None,
+                        json!({ "space": conference.space(), "subject": subject, "via": "admin", "since": now }),
+                    )
+                    .await?;
+            }
             let writer = conference_super_admin(state, &org, conference).await?;
             writer
                 .put_in(
@@ -342,6 +357,28 @@ async fn org_admin(state: &AppState, args: &Args, add: bool) -> Result<Done, Str
     }
     if !org.admins.contains_key(&subject) {
         return Err(format!("{who} isn't an admin of {}", org.did));
+    }
+    // A conference's super admin writes its roles and rules, which count
+    // only while they're an admin.
+    if let Some(conference) = org.conferences.values().find(|c| c.super_admin() == subject) {
+        return Err(format!(
+            "{who} is the super admin of the conference {}: give it another super admin first",
+            conference.space()
+        ));
+    }
+    // Their membership of each conference ends now; what they wrote while
+    // they were a member stays theirs.
+    let now = index::iso(now_ms() as u64 * 1000);
+    for conference in org.conferences.values().filter(|c| c.is_member(&subject)) {
+        acting
+            .create_in(
+                state,
+                &admin_space,
+                index::MEMBER,
+                None,
+                json!({ "space": conference.space(), "subject": subject, "via": "removed", "until": now }),
+            )
+            .await?;
     }
     acting.delete_in(state, &admin_space, index::ADMIN, &subject).await?;
     // Their own role in each conference goes, and so do the roles they
@@ -659,13 +696,39 @@ impl NewConference<'_> {
         if invite_only {
             let rkey = self.skey.clone();
             let event_uri = format!("{space}/{}/{EVENT}/{rkey}", super_admin.did);
+            let in_space = |collection: &'static str, rkey: &str| Written::InSpace {
+                settings: false,
+                space: space.clone(),
+                collection,
+                rkey: rkey.to_owned(),
+            };
             super_admin.put_in(state, &space, EVENT, &rkey, self.event_value.clone()).await?;
+            undo.push(in_space(EVENT, &rkey));
             sidecar["event"] = json!(event_uri);
             super_admin.put_in(state, &space, SIDECAR, "self", sidecar).await?;
+            undo.push(in_space(SIDECAR, "self"));
         }
 
-        // Roles for the organization's admins, and the rules.
+        // The organization's admins: members (by the super admin's decision,
+        // which a later removal ends) with their roles. Then the rules.
+        let now = index::iso(now_ms() as u64 * 1000);
         for (did, admin) in &org.admins {
+            let rkey = self
+                .org_admin
+                .create_in(
+                    state,
+                    &admin_space,
+                    index::MEMBER,
+                    None,
+                    json!({ "space": space, "subject": did, "via": "admin", "since": now }),
+                )
+                .await?;
+            undo.push(Written::InSpace {
+                settings: true,
+                space: admin_space.clone(),
+                collection: index::MEMBER,
+                rkey,
+            });
             super_admin
                 .put_in(
                     state,
@@ -675,12 +738,24 @@ impl NewConference<'_> {
                     json!({ "subject": did, "role": admin.role.as_str() }),
                 )
                 .await?;
+            undo.push(Written::InSpace {
+                settings: false,
+                space: space.clone(),
+                collection: index::ROLE,
+                rkey: did.clone(),
+            });
         }
         let rules: Vec<Value> = index::default_rules()
             .into_iter()
             .map(|(collection, writers)| json!({ "collection": collection, "writers": writers }))
             .collect();
         super_admin.put_in(state, &space, index::RULES, "self", json!({ "rules": rules })).await?;
+        undo.push(Written::InSpace {
+            settings: false,
+            space: space.clone(),
+            collection: index::RULES,
+            rkey: "self".to_owned(),
+        });
 
         super::save(
             state,
@@ -977,6 +1052,24 @@ async fn decide(state: &AppState, args: &Args, action: &str) -> Result<Done, Str
             json!({ "space": space_uri, "subject": subject, "via": "admin", "since": now }),
             format!("{who} is in."),
         ),
+        "remove" | "ban" if org.is_admin(&subject) => {
+            return Err(format!(
+                "{who} is an admin of {}: remove them as an admin with `org admin remove` instead",
+                org.did
+            ));
+        }
+        "remove"
+            if role != Some(Role::Owner)
+                && conference
+                    .roles
+                    .get(&subject)
+                    .is_some_and(|r| matches!(r.as_str(), "owner" | "staff")) =>
+        {
+            return Err(format!(
+                "only owners can remove someone with the owner or staff role; {} is staff",
+                acting.handle
+            ));
+        }
         "remove" => (
             index::MEMBER,
             json!({ "space": space_uri, "subject": subject, "via": "removed", "until": now }),

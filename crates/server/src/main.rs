@@ -34,6 +34,7 @@ async fn main() -> ExitCode {
         }
     };
     auth::renew::spawn(state.clone());
+    conference_server::spacehost::notify::spawn_resender(state.clone());
 
     // Tests and tooling wait for this exact line to learn the port.
     let mut stdout = std::io::stdout();

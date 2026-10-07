@@ -297,8 +297,11 @@ pub async fn list_records(
             "Only members can see inside this conference.",
         );
     }
-    let rows = sqlx::query_as::<_, (String, String, String, Option<String>, String)>(
-        "SELECT repo, rkey, rev, cid, value FROM space_records WHERE space = $1 AND collection = $2 AND value IS NOT NULL",
+    let rows = sqlx::query_as::<_, (String, String, String, Option<String>, String, Option<i64>)>(
+        "SELECT r.repo, r.rkey, r.rev, r.cid, r.value, s.seen_at FROM space_records r \
+         LEFT JOIN space_record_seen s ON s.space = r.space AND s.repo = r.repo \
+         AND s.collection = r.collection AND s.rkey = r.rkey AND s.rev = r.rev \
+         WHERE r.space = $1 AND r.collection = $2 AND r.value IS NOT NULL",
     )
     .bind(&row.space)
     .bind(&params.collection)
@@ -312,12 +315,16 @@ pub async fn list_records(
     let admins_only = conference.writers_of(&params.collection) == "admins";
     let mut records: Vec<(String, Value)> = rows
         .into_iter()
-        .filter_map(|(repo, rkey, rev, cid, value)| {
-            let us = tid_micros(&rev)?;
+        .filter_map(|(repo, rkey, rev, cid, value, seen_at)| {
+            // Dated by its commit, but not long before we first saw it.
+            let seen_us = seen_at.map(|ms| ms.max(0) as u64 * 1000);
+            let us = index::conference_us(tid_micros(&rev)?, seen_us);
             if !conference.was_member_at(&repo, us) {
                 return None;
             }
-            if only_super && repo != conference.super_admin() {
+            // Role and rules records count only from the conference's super
+            // admin, and only while they're an admin, as the index has it.
+            if only_super && (repo != conference.super_admin() || !org.is_admin(&repo)) {
                 return None;
             }
             if admins_only && !may_post_as_admin(&org, conference, &repo) {
@@ -445,11 +452,21 @@ pub async fn join(
         None => {
             // A handle on the list that didn't resolve when it was imported,
             // which names this person now.
-            if settings.has("list") && unresolved_listed(&state, conference, did).await {
-                return match admit_by_super_admin(&state, &org, &row.space, did, "list").await {
-                    Ok(()) => reload_answer(&state, &row, did).await,
-                    Err(why) => failed(why),
-                };
+            let unbound = if settings.has("list") {
+                unbound_listed(&state, conference, did).await
+            } else {
+                None
+            };
+            if let Some(entry) = unbound {
+                // Bound to this person from now on, and then a join like any
+                // other on the list.
+                if let Err(why) = bind_list_entry(&state, &org, &row.space, did, entry).await {
+                    return failed(why);
+                }
+                if let Err(res) = write_intake(&state, &user, &row.intake, JOIN, json!({})).await {
+                    return res;
+                }
+                return reload_answer(&state, &row, did).await;
             }
             if hidden {
                 return not_found();
@@ -564,17 +581,52 @@ async fn by_code(state: &AppState, code_hash: &str) -> Result<Option<Row>, Strin
     Ok(None)
 }
 
-/// Whether a list entry with only a handle (it didn't resolve on import)
-/// resolves to this person now.
-async fn unresolved_listed(state: &AppState, conference: &Conference, did: &str) -> bool {
-    for handle in
-        conference.list.iter().filter(|e| e.did.is_none()).filter_map(|e| e.handle.as_deref())
-    {
-        if state.resolver.resolve_handle(handle).await.is_ok_and(|resolved| resolved == did) {
-            return true;
-        }
+/// The list entry with only a handle (it didn't resolve on import, and
+/// hasn't been bound since) that names this person now: their own handle,
+/// resolved both ways. Two lookups, however long the list.
+async fn unbound_listed<'a>(
+    state: &AppState,
+    conference: &'a Conference,
+    did: &str,
+) -> Option<&'a index::ListEntry> {
+    let mut unbound = conference.unbound_handles().peekable();
+    unbound.peek()?;
+    let handle = state.resolver.resolve_did(did).await.ok()?.handle;
+    let handle = crate::identity::normalize_handle(&handle)?;
+    let entry = unbound.find(|e| e.handle.as_deref() == Some(handle.as_str()))?;
+    let resolved = state.resolver.resolve_handle(&handle).await.ok()?;
+    (resolved == did).then_some(entry)
+}
+
+/// Binds a list entry that had only a handle to the DID it first resolved
+/// to: an entry with both, written as the super admin on behalf of the owner
+/// who imported the handle, so it counts only while they're an owner, and a
+/// handle that later changes hands doesn't take the place with it.
+async fn bind_list_entry(
+    state: &AppState,
+    org: &Org,
+    space: &str,
+    did: &str,
+    entry: &index::ListEntry,
+) -> Result<(), String> {
+    let handle = match state.resolver.resolve_did(&org.super_admin).await {
+        Ok(identity) => identity.handle,
+        Err(_) => org.super_admin.clone(),
+    };
+    let acting = admin::Acting::new(state, &org.super_admin, &handle).await?;
+    let mut bound = json!({
+        "space": space,
+        "did": did,
+        "handle": entry.handle,
+        "onBehalfOf": entry.by,
+    });
+    if let Some(role) = &entry.role {
+        bound["role"] = json!(role);
     }
-    false
+    acting
+        .create_in(state, &SpaceUri::admin(&org.did).to_string(), index::LIST_ENTRY, None, bound)
+        .await?;
+    Ok(())
 }
 
 /// Admits someone with a `member` record written as the super admin: for the

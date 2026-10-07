@@ -71,6 +71,18 @@ impl Rec {
     }
 }
 
+/// How far before our host first saw a record in a conference space its
+/// commit may be dated: enough for a write notification's ordinary delay.
+pub const BACKDATE_SLACK_US: u64 = 60_000_000;
+
+/// When a record in a conference space counts from: its commit, but never
+/// more than [`BACKDATE_SLACK_US`] before our host first saw it. A writer's
+/// PDS chooses its own revisions, so without this someone removed could date
+/// a record back into a period when they were a member.
+pub fn conference_us(us: u64, seen_us: Option<u64>) -> u64 {
+    seen_us.map_or(us, |seen| us.max(seen.saturating_sub(BACKDATE_SLACK_US)))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Role {
     Owner,
@@ -268,6 +280,9 @@ struct CodeUse {
 
 #[derive(Debug, Clone)]
 pub struct ListEntry {
+    /// The owner who imported it (or, for one bound when its handle first
+    /// resolved, the owner who imported the handle).
+    pub by: String,
     pub did: Option<String>,
     pub handle: Option<String>,
     pub email_hmac: Option<String>,
@@ -347,6 +362,21 @@ impl Conference {
 
     pub fn on_list(&self, did: &str) -> bool {
         self.list.iter().any(|e| e.did.as_deref() == Some(did))
+    }
+
+    /// List entries with only a handle that didn't resolve when imported,
+    /// and hasn't been bound to a DID since (no entry with a DID has the
+    /// same handle).
+    pub fn unbound_handles(&self) -> impl Iterator<Item = &ListEntry> {
+        self.list.iter().filter(|e| {
+            e.did.is_none()
+                && e.handle.as_deref().is_some_and(|handle| {
+                    !self
+                        .list
+                        .iter()
+                        .any(|b| b.did.is_some() && b.handle.as_deref() == Some(handle))
+                })
+        })
     }
 
     /// Whether a code (by its HMAC) is one of this conference's.
@@ -719,11 +749,14 @@ pub fn derive(
     let decisions: Vec<&Rec> = recs
         .iter()
         .filter(in_admin)
-        .filter(|r| {
-            matches!(
-                (r.collection.as_str(), role_of(&r.repo)),
-                (MEMBER | DENY, Some(_)) | (BAN | CODE | LIST_ENTRY, Some(Role::Owner))
-            )
+        .filter(|r| match (r.collection.as_str(), role_of(&r.repo)) {
+            (MEMBER | DENY, Some(_)) | (BAN | CODE, Some(Role::Owner)) => true,
+            // A list entry bound for an owner who imported its handle counts
+            // only while they're still one.
+            (LIST_ENTRY, Some(Role::Owner)) => {
+                r.str("onBehalfOf").is_none_or(|owner| role_of(owner) == Some(Role::Owner))
+            }
+            _ => false,
         })
         .collect();
 
@@ -801,6 +834,7 @@ fn derive_conference(
                 }
             }
             LIST_ENTRY => list.push(ListEntry {
+                by: rec.str("onBehalfOf").unwrap_or(&rec.repo).to_owned(),
                 did: rec.str("did").map(str::to_owned),
                 handle: rec.str("handle").map(str::to_owned),
                 email_hmac: rec.str("emailHmac").map(str::to_owned),
@@ -810,12 +844,14 @@ fn derive_conference(
         }
     }
 
-    // Roles and rules: only from the conference's super admin, in its space.
-    // A role written for another admin (`assignedBy`) counts only while that
-    // admin may assign it: owner and staff roles by owners, others by any
-    // admin. That's what lets a role admit the person it names.
+    // Roles and rules: only from the conference's super admin, in its space,
+    // and only while they're an admin. A role written for another admin
+    // (`assignedBy`) counts only while that admin may assign it: owner and
+    // staff roles by owners, others by any admin. That's what lets a role
+    // admit the person it names.
+    let super_counts = conference_super == super_admin || admins.contains_key(&conference_super);
     let may_assign = |decider: &str, role: &str| {
-        if decider == super_admin || decider == conference_super {
+        if decider == super_admin || (super_counts && decider == conference_super) {
             return true;
         }
         match admins.get(decider).map(|a| a.role) {
@@ -828,7 +864,9 @@ fn derive_conference(
     let mut list_roles = BTreeSet::new();
     let mut role_deciders = BTreeMap::new();
     let mut rules = None;
-    for rec in recs.iter().filter(|r| r.space == space && r.repo == conference_super) {
+    for rec in
+        recs.iter().filter(|r| super_counts && r.space == space && r.repo == conference_super)
+    {
         match rec.collection.as_str() {
             ROLE => {
                 if let (Some(subject), Some(role)) = (rec.str("subject"), rec.str("role"))
@@ -879,9 +917,13 @@ fn derive_conference(
         })
         .filter_map(|r| Some((r.str("subject")?, r.us)))
         .collect();
+    // Admins can't be banned: they're members because they're admins, and
+    // the super admin's say always stands.
+    let is_admin = |did: &str| did == super_admin || admins.contains_key(did);
     for rec in decisions.iter().filter(about) {
         let Some(subject) = rec.str("subject") else { continue };
         match rec.collection.as_str() {
+            BAN if is_admin(subject) => {}
             BAN => {
                 let overridden = rec.repo != super_admin
                     && super_admits.iter().any(|(s, us)| *s == subject && *us > rec.us);
@@ -1179,6 +1221,130 @@ mod tests {
         assert!(joined(None), "committed before the code expired");
         assert!(joined(Some(3_000_000)), "and seen before it did");
         assert!(!joined(Some(6_000_000)), "seen only after it expired: a backdated join");
+    }
+
+    fn admin_rec(subject: &str, role: &str, us: u64) -> Rec {
+        rec(
+            &SpaceUri::admin(ORG).to_string(),
+            OLGA,
+            ADMIN,
+            subject,
+            us,
+            json!({ "subject": subject, "role": role }),
+        )
+    }
+
+    fn member(by: &str, subject: &str, rkey: &str, us: u64, removed: bool) -> Rec {
+        let mut value = json!({ "space": space(CONFERENCE_TYPE), "subject": subject });
+        if removed {
+            value["until"] = json!(iso(us));
+        }
+        rec(&SpaceUri::admin(ORG).to_string(), by, MEMBER, rkey, us, value)
+    }
+
+    #[test]
+    fn an_admins_membership_keeps_its_start_and_its_end() {
+        let admitted = member(OLGA, PIM, "m1", 10, false);
+        // Promoted to owner later: the admin record is rewritten, but the
+        // membership still starts when Pim became an admin.
+        let org = org_with(&["code"], false, vec![admin_rec(PIM, "owner", 50), admitted.clone()]);
+        let conference = org.conference(&space(CONFERENCE_TYPE)).unwrap();
+        assert!(conference.was_member_at(PIM, 20));
+        // Removed as an admin: what Pim wrote as a member still counts.
+        let org = org_with(&["code"], false, vec![admitted, member(OLGA, PIM, "m2", 80, true)]);
+        let conference = org.conference(&space(CONFERENCE_TYPE)).unwrap();
+        assert!(!conference.is_member(PIM));
+        assert!(conference.was_member_at(PIM, 20));
+        assert!(!conference.was_member_at(PIM, 90));
+    }
+
+    #[test]
+    fn a_conference_super_admin_counts_only_while_an_admin() {
+        let mallory = "did:plc:malloryaaaaaaaaaaaaaaaaa";
+        let conference_space = space(CONFERENCE_TYPE);
+        let settings = rec(
+            &SpaceUri::admin(ORG).to_string(),
+            OLGA,
+            SPACE,
+            "s2",
+            3,
+            json!({ "space": conference_space, "intake": space(INTAKE_TYPE),
+                    "superAdmin": PIM, "join": { "methods": ["code"] } }),
+        );
+        let made_owner = rec(
+            &conference_space,
+            PIM,
+            ROLE,
+            mallory,
+            4,
+            json!({ "subject": mallory, "role": "owner", "assignedBy": PIM }),
+        );
+        let org = org_with(&["code"], true, vec![settings.clone(), made_owner.clone()]);
+        let conference = org.conference(&conference_space).unwrap();
+        assert_eq!(conference.roles.get(mallory).map(String::as_str), Some("owner"));
+        let org = org_with(&["code"], false, vec![settings, made_owner]);
+        let conference = org.conference(&conference_space).unwrap();
+        assert!(conference.roles.is_empty(), "Pim isn't an admin any more");
+    }
+
+    #[test]
+    fn admins_cant_be_banned() {
+        let kees = "did:plc:keesaaaaaaaaaaaaaaaaaaaa";
+        let ban = |subject: &str| {
+            rec(
+                &SpaceUri::admin(ORG).to_string(),
+                kees,
+                BAN,
+                subject,
+                5,
+                json!({ "space": space(CONFERENCE_TYPE), "subject": subject }),
+            )
+        };
+        let org = org_with(&["code"], true, vec![admin_rec(kees, "owner", 1), ban(OLGA), ban(PIM)]);
+        let conference = org.conference(&space(CONFERENCE_TYPE)).unwrap();
+        assert!(conference.banned.is_empty());
+        assert!(conference.is_member(OLGA) && conference.is_member(PIM));
+    }
+
+    #[test]
+    fn a_handle_on_the_list_is_bound_once_and_only_for_its_importer() {
+        let kees = "did:plc:keesaaaaaaaaaaaaaaaaaaaa";
+        let ana = "did:plc:anaaaaaaaaaaaaaaaaaaaaaa";
+        let entry = |by: &str, rkey: &str, value: Value| {
+            let mut value = value;
+            value["space"] = json!(space(CONFERENCE_TYPE));
+            rec(&SpaceUri::admin(ORG).to_string(), by, LIST_ENTRY, rkey, 5, value)
+        };
+        let imported = entry(kees, "l1", json!({ "handle": "ana.test" }));
+        let bound =
+            entry(OLGA, "l2", json!({ "handle": "ana.test", "did": ana, "onBehalfOf": kees }));
+        let org = org_with(&["list"], true, vec![admin_rec(kees, "owner", 1), imported.clone()]);
+        let conference = org.conference(&space(CONFERENCE_TYPE)).unwrap();
+        assert_eq!(conference.unbound_handles().count(), 1);
+        assert_eq!(conference.unbound_handles().next().unwrap().by, kees);
+
+        let org = org_with(
+            &["list"],
+            true,
+            vec![admin_rec(kees, "owner", 1), imported.clone(), bound.clone()],
+        );
+        let conference = org.conference(&space(CONFERENCE_TYPE)).unwrap();
+        assert_eq!(conference.unbound_handles().count(), 0, "bound to Ana for good");
+        assert!(conference.on_list(ana));
+
+        // Once Kees isn't an owner, the entry bound for Kees stops counting.
+        let org = org_with(&["list"], true, vec![imported, bound]);
+        assert!(!org.conference(&space(CONFERENCE_TYPE)).unwrap().on_list(ana));
+    }
+
+    #[test]
+    fn a_conference_record_cant_be_dated_long_before_it_was_seen() {
+        assert_eq!(conference_us(5_000_000, None), 5_000_000);
+        // A notification's ordinary delay: dated by its commit.
+        assert_eq!(conference_us(5_000_000, Some(30_000_000)), 5_000_000);
+        // Backdated by more than that: dated by when it was seen.
+        let seen = 500_000_000;
+        assert_eq!(conference_us(5_000_000, Some(seen)), seen - BACKDATE_SLACK_US);
     }
 
     #[test]

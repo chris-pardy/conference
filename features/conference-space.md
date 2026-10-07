@@ -1311,6 +1311,41 @@ little past the approved design in these places, to raise at the PR:
   `notifyWrite` (an admin's ban from another app, a leave) revokes the
   credentials of whoever it took access from, like a CLI change.
 
+**Review round 2 design notes (2026-10-06).** The round-2 fixes, to raise
+at the PR alongside round 1's:
+
+- **Admins' memberships are member decisions too.** `org admin add` writes a
+  `member` record (by the super admin, `via: "admin"`) for each conference
+  the new admin isn't already in, `conference create` writes one for each
+  admin, and `org admin remove` ends each with a removal record. So an
+  admin's period starts when they became an admin, keeps that start through
+  a change of role, and ends (rather than vanishing) when they're removed:
+  what they wrote while an admin stays listed. Removing an admin who was
+  also an attendee ends that membership too; they can join again.
+- **A conference's super admin must stay an admin.** `org admin remove`
+  refuses the super admin of any conference, and their role and rules
+  records count only while they're an admin.
+- **Admins can't be banned or removed from a conference.** The index ignores
+  bans whose subject is an admin or the super admin, and `member ban` and
+  `member remove` refuse admins. `member remove` of someone with the owner
+  or staff role needs an owner, as `member role` does.
+- **Conference-space records can't be backdated far.** A record counts from
+  its commit, but never more than 60 seconds before our host first saw it
+  (an intake record, as before, never before). The slack keeps an ordinary
+  write notification's delay from moving a record into a later period.
+- **List handles are bound when they first resolve.** A list entry with only
+  a handle that names someone joining (their own handle, checked both ways)
+  gets a bound entry with their DID, written by the super admin with
+  `onBehalfOf` the owner who imported it, which counts only while that
+  owner is one. The join is then an ordinary list join, and the handle
+  can't later admit whoever holds it next.
+- **Revocations are retried.** A revocation not yet delivered to every
+  writer's PDS stays in an outbox (`space_credentials.revocation_sent_at`,
+  migration 0004) that the server sends again every 30 seconds until it's
+  delivered or the credential expires.
+- **Reindex keeps what syncs alongside it wrote,** and never moves a repo's
+  read position backwards.
+
 **Red-test gate (2026-10-06):** the user approved the red tests and the
 surfaces they pin (see Build notes), with these contract changes:
 
@@ -1902,3 +1937,74 @@ and `scripts/check-tests-unchanged.sh` reports the frozen tests unchanged.
     **Fixed:** `Conference::super_admin()` is the one answer (its settings'
     super admin, else the organization's), used by the index, `listRecords`,
     reindex and the CLI.
+
+### Round 2
+
+Reviewer: a fresh subagent following `adversarial-review`. Verdict: not
+clean (0 blocking, 5 major, 5 minor, 1 nit). After the rework: `pnpm check`
+green (lint, build, Rust 62 + unit 122 + integration 85 + tooling 33 + e2e 35),
+and `scripts/check-tests-unchanged.sh` reports the frozen tests unchanged.
+
+1. **[major] Admin membership periods came from the current `admin` record
+   alone.** Promoting Pim moved his start forward; removing him erased his
+   period, so his past records vanished and `listMembers` dropped him.
+   **Fixed:** admins' memberships are `member` decisions by the super admin,
+   written when they're added (and for each admin when a conference is
+   created) and ended by a removal record when they're removed. Rust test
+   `an_admins_membership_keeps_its_start_and_its_end`, and
+   `conference-review.test.ts` (TC-29, round 2). See "Review round 2 design
+   notes".
+2. **[major] A conference's super admin could be removed as an admin and
+   still assign roles.**
+   **Fixed:** `org admin remove` refuses a conference's super admin (give it
+   another first), and the index and `listRecords` count their role and
+   rules records only while they're an admin. Rust test
+   `a_conference_super_admin_counts_only_while_an_admin`, integration TC-4
+   (round 2).
+3. **[major] Conference-space records were dated by the writer's PDS alone.**
+   **Fixed:** `listRecords` dates a record by its commit, but never more than
+   60 seconds before our host first saw it (`index::conference_us`), so a
+   removed self-hosted member can't date a record back into their earlier
+   period. Not the full clamp intake records get: there an ordinary
+   notification delay could put a record written as a member after a quick
+   removal (TC-29 writes, removes and re-admits within a second). Rust test
+   `a_conference_record_cant_be_dated_long_before_it_was_seen`.
+4. **[major] Reindex overwrote syncs that landed while it read, and reset
+   `synced_rev`.**
+   **Fixed:** the replacing transaction deletes only records first seen
+   before reindex started (a concurrent sync's are newer, and kept, and
+   `apply` never replaces a newer revision), and `synced_rev` only moves
+   forward. The reindex command already revokes against the rebuilt index.
+5. **[major] List handles unresolved at import weren't bound, cost a lookup
+   each per join, and were admitted by the super admin's authority.**
+   **Fixed:** a joiner's own handle is resolved (and checked back to their
+   DID), two lookups whatever the list's length; a matching handle-only
+   entry is bound with an entry carrying their DID, written as the super
+   admin `onBehalfOf` the importing owner, which counts only while that
+   owner is one. Bound handles are skipped from then on, and the join is an
+   ordinary list join. Rust test
+   `a_handle_on_the_list_is_bound_once_and_only_for_its_importer`.
+6. **[minor] An undelivered revocation was never retried.**
+   **Fixed:** revoked credentials carry `revocation_sent_at`, set once every
+   writer's PDS has them; a background loop resends the rest every 30
+   seconds until delivered or expired.
+7. **[minor] Any owner could ban the super admin or another admin.**
+   **Fixed:** the index ignores bans of admins and the super admin, and
+   `member ban` refuses an admin. Rust test `admins_cant_be_banned`,
+   integration TC-51 (round 2).
+8. **[minor] `member remove` deleted roles without a role check.**
+   **Fixed:** removing someone with the owner or staff role needs an owner,
+   and admins can't be removed from a conference (remove them as admins).
+   Integration TC-51 (round 2).
+9. **[minor] The rate-limit map wasn't bounded, and IPv6 was keyed per
+   address.**
+   **Fixed:** at the cap, a new key evicts the one used longest ago, so the
+   map never grows past it; per-IP limits count IPv6 by its /64. Rust test
+   `rate_limits_stay_bounded_and_count_ipv6_by_its_64`.
+10. **[minor] Removal could race credential issuance.**
+    **Fixed:** after recording a credential, the host re-checks the user's
+    and app's access against a fresh index, and revokes and refuses it if
+    either was lost; any revocation after the row exists finds it.
+11. **[nit] `conference create` didn't undo its later writes.**
+    **Fixed:** the in-space event and sidecar, the admins' member and role
+    records, and the rules are all pushed onto `undo`.

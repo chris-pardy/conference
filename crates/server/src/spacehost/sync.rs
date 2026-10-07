@@ -274,6 +274,9 @@ pub async fn reindex(state: &AppState, org: &str) -> Result<Reindexed, String> {
     let authority = super::authority::get(&state.db, org)
         .await?
         .ok_or_else(|| format!("no organization {org}"))?;
+    // Anything first seen from now on came from a sync running alongside,
+    // and is newer than what this reads: it's kept.
+    let started = now_ms();
     let admin_space = SpaceUri::admin(org).to_string();
     let pattern = format!("at://{org}/space/%");
     // The repos read before, as well as the writer sets, say where to look.
@@ -345,7 +348,8 @@ pub async fn reindex(state: &AppState, org: &str) -> Result<Reindexed, String> {
     }
 
     // Replace the organization's index at once, keeping what the repos that
-    // couldn't be read had.
+    // couldn't be read had, and whatever a sync running alongside wrote:
+    // records first seen since this started, and how far it read.
     let mut tx = state.db.begin().await.map_err(|e| e.to_string())?;
     let keeps = |space: &str, repo: &str| unread.contains(&(space.to_owned(), repo.to_owned()));
     let old_repos = sqlx::query_as::<_, (String, String)>(
@@ -356,11 +360,20 @@ pub async fn reindex(state: &AppState, org: &str) -> Result<Reindexed, String> {
     .await
     .map_err(|e| e.to_string())?;
     for (space, repo) in old_repos.iter().filter(|(s, r)| !keeps(s, r)) {
-        for sql in [
-            "DELETE FROM space_records WHERE space = $1 AND repo = $2",
-            "DELETE FROM space_repos WHERE space = $1 AND repo = $2",
-        ] {
-            sqlx::query(sql)
+        sqlx::query(
+            "DELETE FROM space_records WHERE space = $1 AND repo = $2 AND NOT EXISTS ( \
+             SELECT 1 FROM space_record_seen s WHERE s.space = space_records.space \
+             AND s.repo = space_records.repo AND s.collection = space_records.collection \
+             AND s.rkey = space_records.rkey AND s.rev = space_records.rev AND s.seen_at >= $3)",
+        )
+        .bind(space)
+        .bind(repo)
+        .bind(started)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
+        if !read.contains_key(&(space.clone(), repo.clone())) {
+            sqlx::query("DELETE FROM space_repos WHERE space = $1 AND repo = $2")
                 .bind(space)
                 .bind(repo)
                 .execute(&mut *tx)
@@ -376,7 +389,8 @@ pub async fn reindex(state: &AppState, org: &str) -> Result<Reindexed, String> {
         if let Some(latest) = synced.get(&(space.clone(), repo.clone())) {
             sqlx::query(
                 "INSERT INTO space_repos (space, repo, synced_rev) VALUES ($1, $2, $3) \
-                 ON CONFLICT (space, repo) DO UPDATE SET synced_rev = excluded.synced_rev",
+                 ON CONFLICT (space, repo) DO UPDATE SET synced_rev = excluded.synced_rev \
+                 WHERE space_repos.synced_rev < excluded.synced_rev",
             )
             .bind(space)
             .bind(repo)

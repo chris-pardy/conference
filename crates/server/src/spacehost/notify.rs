@@ -398,12 +398,67 @@ pub async fn revoke_apps(
     send(state, space, &jtis).await
 }
 
+/// How often undelivered revocations are sent again.
+const RESEND_EVERY: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Sends again, in the background, every revocation that hasn't reached
+/// every writer's PDS yet (a PDS was down, or the admin CLI that revoked it
+/// gave up), until it has or the credential expires.
+pub fn spawn_resender(state: AppState) {
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(RESEND_EVERY);
+        loop {
+            tick.tick().await;
+            if let Err(why) = resend(&state).await {
+                eprintln!("revocation: {why}");
+            }
+        }
+    });
+}
+
+/// One pass over the undelivered revocations, by space.
+pub async fn resend(state: &AppState) -> Result<(), String> {
+    let pending = sqlx::query_as::<_, (String, String)>(
+        "SELECT space, jti FROM space_credentials WHERE revoked_at IS NOT NULL \
+         AND revocation_sent_at IS NULL AND expires_at > $1 ORDER BY space",
+    )
+    .bind(now_ms())
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| e.to_string())?;
+    let mut by_space: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (space, jti) in pending {
+        by_space.entry(space).or_default().push(jti);
+    }
+    for (space, jtis) in by_space {
+        if let Err(why) = send(state, &space, &jtis).await {
+            eprintln!("revocation: will try again: {why}");
+        }
+    }
+    Ok(())
+}
+
 /// Sends revocations to every writer's PDS: once per PDS, addressed to one
-/// of its writers, at most 100 at a time.
+/// of its writers, at most 100 at a time. Once every PDS has them, they're
+/// marked sent; until then the background loop sends them again.
 async fn send(state: &AppState, space: &str, jtis: &[String]) -> Result<(), String> {
     if jtis.is_empty() {
         return Ok(());
     }
+    deliver(state, space, jtis).await?;
+    let now = now_ms();
+    for jti in jtis {
+        sqlx::query("UPDATE space_credentials SET revocation_sent_at = $1 WHERE jti = $2")
+            .bind(now)
+            .bind(jti)
+            .execute(&state.db)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+async fn deliver(state: &AppState, space: &str, jtis: &[String]) -> Result<(), String> {
     let mut by_pds: BTreeMap<String, String> = BTreeMap::new();
     for writer in sync::writers(state, space).await? {
         match state.host.pds_of(state, &writer).await {

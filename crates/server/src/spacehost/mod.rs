@@ -237,7 +237,7 @@ impl Host {
     /// `TRUSTED_PROXIES` so each client is counted by its own address.
     pub fn allow_ip(&self, state: &AppState, what: &str, ip: IpAddr, max: usize) -> bool {
         (ip.is_loopback() && !state.secure_cookies())
-            || self.allow(&format!("{what}:ip:{ip}"), max, 60_000)
+            || self.allow(&format!("{what}:ip:{}", ip_key(ip)), max, 60_000)
     }
 
     /// Counts an attempt against a limit of `max` per `window_ms`; false once
@@ -245,8 +245,18 @@ impl Host {
     pub fn allow(&self, key: &str, max: usize, window_ms: i64) -> bool {
         let now = now_ms();
         let mut limits = self.limits.lock().expect("the rate limits aren't poisoned");
-        if limits.len() >= CACHE_MAX {
+        if limits.len() >= CACHE_MAX && !limits.contains_key(key) {
             limits.retain(|_, hits| hits.last().is_some_and(|t| now - t < window_ms));
+            // Still full: the key used longest ago makes room, so the map
+            // never grows past its cap.
+            if limits.len() >= CACHE_MAX
+                && let Some(oldest) = limits
+                    .iter()
+                    .min_by_key(|(_, hits)| hits.last().copied().unwrap_or(i64::MIN))
+                    .map(|(k, _)| k.clone())
+            {
+                limits.remove(&oldest);
+            }
         }
         let hits = limits.entry(key.to_owned()).or_default();
         hits.retain(|t| now - t < window_ms);
@@ -255,6 +265,21 @@ impl Host {
         }
         hits.push(now);
         true
+    }
+}
+
+/// What a per-IP limit counts by: the address, or for IPv6 its /64, which
+/// is what one client is usually given.
+pub fn ip_key(ip: IpAddr) -> String {
+    match ip {
+        IpAddr::V4(v4) => v4.to_string(),
+        IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
+            Some(v4) => v4.to_string(),
+            None => {
+                let s = v6.segments();
+                format!("{:x}:{:x}:{:x}:{:x}::/64", s[0], s[1], s[2], s[3])
+            }
+        },
     }
 }
 
@@ -312,6 +337,21 @@ mod tests {
         assert_eq!(client_ip(proxy, &headers, &[]), proxy);
         // Through a proxy that names no client: the proxy.
         assert_eq!(client_ip(proxy, &axum::http::HeaderMap::new(), &[proxy]), proxy);
+    }
+
+    #[test]
+    fn rate_limits_stay_bounded_and_count_ipv6_by_its_64() {
+        let host = Host::default();
+        for i in 0..CACHE_MAX + 50 {
+            assert!(host.allow(&format!("k{i}"), 1, 60_000));
+        }
+        assert!(host.limits.lock().unwrap().len() <= CACHE_MAX);
+        let a: IpAddr = "2001:db8:1:2:aaaa::1".parse().unwrap();
+        let b: IpAddr = "2001:db8:1:2:bbbb::9".parse().unwrap();
+        let other: IpAddr = "2001:db8:1:3::1".parse().unwrap();
+        assert_eq!(ip_key(a), ip_key(b));
+        assert_ne!(ip_key(a), ip_key(other));
+        assert_eq!(ip_key("203.0.113.7".parse().unwrap()), "203.0.113.7");
     }
 
     #[test]

@@ -285,6 +285,27 @@ pub async fn get_space_credential(
     if let Err(err) = recorded {
         return internal(format!("could not record a credential: {err}"));
     }
+    // Access may have been taken away while this was being issued, by a
+    // change whose revocation ran before the credential was recorded. Now
+    // that it is, any later revocation finds it; this catches an earlier one.
+    let still = match index::load_for_space(&state, &space).await {
+        Ok(org) => org.is_some_and(|org| {
+            org.can_read(&space, &user)
+                && org.app_access(&space).allows(client_id.as_deref(), &state.oauth.public_url)
+        }),
+        Err(why) => return internal(why),
+    };
+    if !still {
+        let revoked = sqlx::query("UPDATE space_credentials SET revoked_at = $1 WHERE jti = $2")
+            .bind(now_ms())
+            .bind(&jti)
+            .execute(&state.db)
+            .await;
+        if let Err(err) = revoked {
+            return internal(err);
+        }
+        return invalid("UserNotAuthorized", "User not authorized for this space");
+    }
     Json(json!({ "credential": credential })).into_response()
 }
 

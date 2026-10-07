@@ -2,8 +2,10 @@ import { DatabaseSync } from 'node:sqlite'
 import { afterAll, beforeAll, expect, test, vi } from '@vivarium-dev/client/vitest'
 import { eventually, type Json, writeSpaceRecord } from '../support/atproto.ts'
 import {
+  ATMOSPHERECONF,
   Attendee,
   accountsIn,
+  addAdmin,
   allowApp,
   cli,
   cliOk,
@@ -180,4 +182,65 @@ test('TC-26: an admin can’t leave (review round 1)', async ({ viv }) => {
   expect(left.status).toBe(400)
   expect(left.body.error).toBe('AdminCannotLeave')
   expect(await pim.isMember(conference.space)).toBe(true)
+})
+
+// Regressions from adversarial review round 2.
+
+test('TC-29: an admin’s records outlive a change of role and their removal (review round 2)', async ({ viv }) => {
+  const { org, conference, superAdmin, admins } = await seedConference(dep, accountsIn(viv), {
+    staff: ['pim'],
+    methods: ['code'],
+  })
+  await allowApp(dep, conference, app.clientId)
+  await writeSpaceRecord(viv.url, admins.pim, conference.space, NSID.event, plan('Pim’s walking tour'))
+  const asOlga = await Attendee.signIn(dep, superAdmin)
+  const pimsPlans = async () => {
+    const answer = await asOlga.listRecords(conference.space, NSID.event)
+    expect(answer.status).toBe(200)
+    return (answer.body.records as Json[]).filter((r) => r.author === admins.pim.did)
+  }
+  await eventually(pimsPlans, (records) => records.length === 1, 'Pim’s plan is listed')
+
+  await cliOk(dep, ['org', 'admin', 'add', admins.pim.handle, '--org', org.did, '--role', 'owner'])
+  expect(await pimsPlans(), 'still listed once Pim is an owner').toHaveLength(1)
+  await cliOk(dep, ['org', 'admin', 'remove', admins.pim.handle, '--org', org.did])
+  expect(await pimsPlans(), 'still listed once Pim isn’t an admin').toHaveLength(1)
+
+  const access = await (await app.signIn(superAdmin)).open(conference.space)
+  const pim = (await access.members()).find((m: Json) => m.did === admins.pim.did)
+  expect(pim?.periods).toHaveLength(1)
+  expect(pim?.periods[0].until, 'a past member, not forgotten').toBeDefined()
+})
+
+test('TC-51: admins can’t be removed or banned from a conference (review round 2)', async ({ viv }) => {
+  const { conference, superAdmin, admins } = await seedConference(dep, accountsIn(viv), {
+    owners: ['kees'],
+    staff: ['pim'],
+    methods: ['code'],
+  })
+  const ban = await cli(dep, [
+    'member',
+    'ban',
+    superAdmin.handle,
+    '--conference',
+    conference.space,
+    '--as',
+    admins.kees.handle,
+  ])
+  expect(ban.code).not.toBe(0)
+  expect(ban.stderr).toMatch(/is an admin/)
+  const remove = await cli(dep, ['member', 'remove', admins.kees.handle, '--conference', conference.space])
+  expect(remove.code).not.toBe(0)
+  expect(await (await Attendee.signIn(dep, superAdmin)).isMember(conference.space)).toBe(true)
+})
+
+test('TC-4: a conference’s super admin can’t stop being an admin (review round 2)', async ({ viv }) => {
+  const olga = await viv.createAccount(viv.handle('olga'))
+  const pim = await viv.createAccount(viv.handle('pim'))
+  const org = await createOrg(dep, olga)
+  await addAdmin(dep, org, pim, 'owner')
+  await createConference(dep, org, { ...ATMOSPHERECONF, superAdmin: pim })
+  const refused = await cli(dep, ['org', 'admin', 'remove', pim.handle, '--org', org.did])
+  expect(refused.code).not.toBe(0)
+  expect(refused.stderr).toMatch(/super admin of the conference/)
 })
