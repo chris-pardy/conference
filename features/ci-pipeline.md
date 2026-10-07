@@ -652,12 +652,14 @@ the agent's own behavior, and are verified on the PR.
 - **When** the frozen-tests check runs
 - **Then** it passes
 
-#### TC-21: A changed frozen test fails the check
+#### TC-21: A changed frozen test is a warning, not a failure
 
 - **Given** a feature branch with a recorded `tests-commit`
 - **When** a file from that commit has been changed, either committed or
   only in the working tree
-- **Then** the check fails and names the changed file
+- **Then** the check passes with a warning that names the changed file
+
+(Amended after completion, 2026-10-07; see the end of this file.)
 
 #### TC-22: Erasing the freeze fails the check
 
@@ -965,3 +967,13 @@ scripts, then `.npmrc`, pre/post scripts, `node_modules/.bin`, and
 directly in a clean environment, and round 5 found no bypass. Everything
 round 5 found is fixed. **The user chose to ship** rather than run a
 sixth round.
+
+## After completion: frozen-test changes warn (2026-10-07)
+
+The user decided that a changed frozen test should be a warning in the
+`frozen-tests` check, not a failure, so a test change they approve can land
+on a feature branch (conference-space's TC-52 was the first). TC-21 now
+expects a passing check with a warning that names the file, and TC-25's test
+was updated to match. Erasing, re-pointing or rebasing the freeze
+(TC-22..TC-24) still fails. The approval itself is recorded in the feature
+file, and the adversarial review treats an unrecorded change as blocking.

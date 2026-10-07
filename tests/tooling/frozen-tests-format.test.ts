@@ -62,7 +62,7 @@ test('a tests-commit with a trailing comment, as the README shows, is read as th
 
   write('tests/demo.test.ts', 'weakened\n')
   const changed = await check()
-  expect(changed.code).not.toBe(0)
+  expect(changed.output).toMatch(/warning/i)
   expect(changed.output).toContain('tests/demo.test.ts')
 })
 
@@ -101,7 +101,7 @@ test('a test file renamed in the frozen commit stays frozen', async () => {
   await commit('record')
   write('tests/renamed.test.ts', 'weakened\n')
   const result = await check()
-  expect(result.code).not.toBe(0)
+  expect(result.output).toMatch(/warning/i)
   expect(result.output).toContain('tests/renamed.test.ts')
 })
 
@@ -113,7 +113,7 @@ test('a frozen test file with a space in its path stays frozen', async () => {
   write('tests/a b.test.ts', 'weakened\n')
   await commit('loosen the test')
   const result = await check()
-  expect(result.code).not.toBe(0)
+  expect(result.output).toMatch(/warning/i)
   expect(result.output).toContain('tests/a b.test.ts')
 })
 
