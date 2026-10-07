@@ -317,6 +317,17 @@ async fn org_admin(state: &AppState, args: &Args, add: bool) -> Result<Done, Str
                 org.did
             ));
         }
+        // A conference's super admin writes its roles and rules: an owner.
+        if role != Role::Owner
+            && let Some(conference) = org.conferences.values().find(|c| c.super_admin() == subject)
+        {
+            return Err(format!(
+                "{who} is the super admin of the conference {}, which takes an owner: give it \
+                 another first, with `conference super-admin <handle> --conference {}`",
+                conference.space(),
+                conference.space()
+            ));
+        }
         acting
             .put_in(
                 state,
@@ -361,9 +372,15 @@ async fn org_admin(state: &AppState, args: &Args, add: bool) -> Result<Done, Str
             json!({ "did": subject, "role": role.as_str() }),
         );
     }
-    let owners: Vec<&String> =
-        org.admins.iter().filter(|(_, a)| a.role == Role::Owner).map(|(d, _)| d).collect();
-    if owners.len() == 1 && owners[0] == &subject {
+    // The super admin is always an owner, with or without an `admin` record.
+    let owners: BTreeSet<&String> = org
+        .admins
+        .iter()
+        .filter(|(_, a)| a.role == Role::Owner)
+        .map(|(d, _)| d)
+        .chain(std::iter::once(&org.super_admin))
+        .collect();
+    if owners.len() == 1 && owners.contains(&subject) {
         return Err(format!("{who} is the last owner of {}: add another owner first", org.did));
     }
     if !org.admins.contains_key(&subject) {
@@ -537,13 +554,9 @@ async fn conference_create(state: &AppState, args: &Args) -> Result<Done, String
         Some(handle) => {
             let did = did_of(state, handle).await?;
             // They write the conference's records into its space, so they
-            // must be someone whose writes it takes: an admin.
-            if !org.is_admin(&did) {
-                return Err(format!(
-                    "{handle} isn't an admin of {}: add them with `org admin add` first",
-                    org.did
-                ));
-            }
+            // must be someone whose writes it takes: an admin, and an owner,
+            // since the roles and rules are theirs to write.
+            only_owner_super_admin(&org, &did, handle)?;
             Acting::new(state, &did, handle).await?
         }
         None => Acting::new(state, &org.super_admin, &org_admin.handle).await?,
@@ -615,13 +628,16 @@ async fn conference_create(state: &AppState, args: &Args) -> Result<Done, String
     }
 }
 
-/// Gives a conference another super admin (an admin of the organization):
+/// Gives a conference another super admin (an owner of the organization):
 /// they re-issue its role and rules records (and an invite-only one's event
 /// and sidecar) in their own repo, a new settings snapshot names them, and
 /// a public conference's sidecar is pointed at them. From the snapshot on,
 /// only the new super admin's role and rules records count; the old ones
-/// are then deleted. A public conference's event stays where it was
-/// published, in the old super admin's repo.
+/// are then deleted. A public conference's event and sidecar stay where
+/// they were published, in the first super admin's repo.
+///
+/// Everything is read before anything is written, and run again it
+/// finishes a handover that was cut short.
 async fn conference_handover(state: &AppState, args: &Args) -> Result<Done, String> {
     let who = args.word(2, "the new super admin's handle")?;
     let subject = did_of(state, who).await?;
@@ -629,96 +645,173 @@ async fn conference_handover(state: &AppState, args: &Args) -> Result<Done, Stri
     let space = space.to_string();
     let (acting, _) = acting(state, args, &org).await?;
     only_super_admin(&org, &acting, "change a conference's super admin")?;
-    if !org.is_admin(&subject) {
-        return Err(format!(
-            "{who} isn't an admin of {}: add them with `org admin add` first",
-            org.did
-        ));
-    }
+    only_owner_super_admin(&org, &subject, who)?;
     let conference = org.conference(&space).ok_or("no such conference")?;
-    let old_did = conference.super_admin().to_owned();
-    if old_did == subject {
-        return done(
-            format!("{who} is already its super admin."),
-            json!({ "superAdmin": subject }),
-        );
-    }
-    let old = Acting::new(state, &old_did, &handle_of(state, &old_did).await).await?;
+    let current = conference.super_admin().to_owned();
+    let sidecar = public_sidecar(state, conference).await?;
     let new = Acting::new(state, &subject, who).await?;
+    let mut changed = false;
 
-    // What the old super admin wrote into the space, re-issued by the new.
-    let rows = sqlx::query_as::<_, (String, String, String, String, Option<i64>)>(
-        "SELECT r.collection, r.rkey, r.rev, r.value, s.seen_at FROM space_records r \
-         LEFT JOIN space_record_seen s ON s.space = r.space AND s.repo = r.repo \
-         AND s.collection = r.collection AND s.rkey = r.rkey AND s.rev = r.rev \
-         WHERE r.space = $1 AND r.repo = $2 AND r.collection IN ($3, $4, $5, $6) \
-         AND r.value IS NOT NULL",
-    )
-    .bind(&space)
-    .bind(&old_did)
-    .bind(index::ROLE)
-    .bind(index::RULES)
-    .bind(EVENT)
-    .bind(SIDECAR)
-    .fetch_all(&state.db)
-    .await
-    .map_err(|e| e.to_string())?;
-    let mut copied = Vec::new();
-    for (collection, rkey, rev, value, seen_at) in rows {
-        let Ok(mut value) = serde_json::from_str::<Value>(&value) else { continue };
-        let collection: &'static str = match collection.as_str() {
-            index::ROLE => {
-                // A role keeps the time it took effect.
-                if value.get("since").is_none()
-                    && let Some(us) = crate::crypto::tid_micros(&rev)
-                {
-                    let seen_us = seen_at.map(|ms| ms.max(0) as u64 * 1000);
-                    value["since"] = json!(index::iso(index::conference_us(us, seen_us)));
+    if current != subject {
+        // What the current super admin wrote into the space, re-issued by the new.
+        let rows = sqlx::query_as::<_, (String, String, String, String, Option<i64>)>(
+            "SELECT r.collection, r.rkey, r.rev, r.value, s.seen_at FROM space_records r \
+             LEFT JOIN space_record_seen s ON s.space = r.space AND s.repo = r.repo \
+             AND s.collection = r.collection AND s.rkey = r.rkey AND s.rev = r.rev \
+             WHERE r.space = $1 AND r.repo = $2 AND r.collection IN ($3, $4, $5, $6) \
+             AND r.value IS NOT NULL",
+        )
+        .bind(&space)
+        .bind(&current)
+        .bind(index::ROLE)
+        .bind(index::RULES)
+        .bind(EVENT)
+        .bind(SIDECAR)
+        .fetch_all(&state.db)
+        .await
+        .map_err(|e| e.to_string())?;
+        let mut copies = Vec::new();
+        for (collection, rkey, rev, value, seen_at) in rows {
+            let Ok(mut value) = serde_json::from_str::<Value>(&value) else { continue };
+            let collection: &'static str = match collection.as_str() {
+                index::ROLE => {
+                    // A role keeps the time it took effect.
+                    if value.get("since").is_none()
+                        && let Some(us) = crate::crypto::tid_micros(&rev)
+                    {
+                        let seen_us = seen_at.map(|ms| ms.max(0) as u64 * 1000);
+                        value["since"] = json!(index::iso(index::conference_us(us, seen_us)));
+                    }
+                    index::ROLE
                 }
-                index::ROLE
-            }
-            index::RULES => index::RULES,
-            EVENT => EVENT,
-            _ => {
-                value["superAdmin"] = json!(subject);
-                if let Some(event) = value.get("event").and_then(Value::as_str) {
-                    value["event"] =
-                        json!(event.replace(
-                            &format!("{space}/{old_did}/"),
+                index::RULES => index::RULES,
+                EVENT => EVENT,
+                _ => {
+                    value["superAdmin"] = json!(subject);
+                    if let Some(event) = value.get("event").and_then(Value::as_str) {
+                        value["event"] = json!(event.replace(
+                            &format!("{space}/{current}/"),
                             &format!("{space}/{subject}/")
                         ));
+                    }
+                    SIDECAR
                 }
-                SIDECAR
-            }
-        };
-        new.put_in(state, &space, collection, &rkey, value).await?;
-        copied.push((collection, rkey));
+            };
+            copies.push((collection, rkey, value));
+        }
+        for (collection, rkey, value) in copies {
+            new.put_in(state, &space, collection, &rkey, value).await?;
+        }
+        // From this snapshot on, the new super admin's records are the ones.
+        settings_snapshot(state, &acting, &org, &space, |v| v["superAdmin"] = json!(subject))
+            .await?;
+        changed = true;
     }
 
-    // From this snapshot on, the new super admin's records are the ones.
-    settings_snapshot(state, &acting, &org, &space, |v| v["superAdmin"] = json!(subject)).await?;
-    if let Some(event) = &conference.settings.event
-        && let Some(rkey) = event.rsplit('/').next()
+    // The rest finishes the handover, this one or one cut short before.
+    if let Some((writer, rkey, mut value)) = sidecar
+        && value.get("superAdmin").and_then(Value::as_str) != Some(subject.as_str())
     {
-        let uri = format!("at://{old_did}/{SIDECAR}/{rkey}");
-        let mut sidecar = super::public_record(state, &uri).await?;
-        sidecar["superAdmin"] = json!(subject);
-        old.put_public(state, SIDECAR, rkey, sidecar).await?;
+        value["superAdmin"] = json!(subject);
+        writer.put_public(state, SIDECAR, &rkey, value).await?;
+        changed = true;
     }
     let mut row = super::row(state, &space).await?.ok_or("no such conference")?;
-    row.super_admin = subject.clone();
-    super::save(state, &row).await?;
-    // The old records count no more; they're tidied away.
-    for (collection, rkey) in copied {
-        if let Err(why) = old.delete_in(state, &space, collection, &rkey).await {
-            eprintln!("note: couldn't delete the old {collection} record {rkey}: {why}");
+    if row.super_admin != subject {
+        row.super_admin = subject.clone();
+        super::save(state, &row).await?;
+        changed = true;
+    }
+    // Earlier super admins' records count no more; they're tidied away.
+    let mut earlier = conference.past_super_admins(&org.super_admin);
+    earlier.insert(current);
+    earlier.remove(&subject);
+    for repo in earlier {
+        let left = sqlx::query_as::<_, (String, String)>(
+            "SELECT collection, rkey FROM space_records WHERE space = $1 AND repo = $2 \
+             AND collection IN ($3, $4, $5, $6) AND value IS NOT NULL",
+        )
+        .bind(&space)
+        .bind(&repo)
+        .bind(index::ROLE)
+        .bind(index::RULES)
+        .bind(EVENT)
+        .bind(SIDECAR)
+        .fetch_all(&state.db)
+        .await
+        .map_err(|e| e.to_string())?;
+        if left.is_empty() {
+            continue;
         }
+        let old = match Acting::new(state, &repo, &handle_of(state, &repo).await).await {
+            Ok(old) => old,
+            Err(why) => {
+                eprintln!("note: couldn't delete {repo}'s old records: {why}");
+                continue;
+            }
+        };
+        for (collection, rkey) in left {
+            match old.delete_in(state, &space, &collection, &rkey).await {
+                Ok(()) => changed = true,
+                Err(why) => {
+                    eprintln!("note: couldn't delete the old {collection} record {rkey}: {why}")
+                }
+            }
+        }
+    }
+    if !changed {
+        return done(
+            format!("{who} is already its super admin."),
+            json!({ "space": space, "superAdmin": subject }),
+        );
     }
     after_change(state, &org).await?;
     done(
         format!("{who} is now the super admin of {space}."),
         json!({ "space": space, "superAdmin": subject }),
     )
+}
+
+/// A conference's super admin writes its roles and rules, which are an
+/// owner's to decide: they must be an owner.
+fn only_owner_super_admin(org: &Org, did: &str, who: &str) -> Result<(), String> {
+    if !org.is_admin(did) {
+        return Err(format!(
+            "{who} isn't an admin of {}: add them with `org admin add` first",
+            org.did
+        ));
+    }
+    if org.admin_role(did) != Some(Role::Owner) {
+        return Err(format!(
+            "{who} is staff of {}: a conference's super admin must be an owner",
+            org.did
+        ));
+    }
+    Ok(())
+}
+
+/// A public conference's sidecar, beside its event in the repo that
+/// published it, with that account's session to update it. None for an
+/// invite-only conference, or (with a note) when the account that published
+/// it isn't connected.
+async fn public_sidecar(
+    state: &AppState,
+    conference: &Conference,
+) -> Result<Option<(Acting, String, Value)>, String> {
+    let Some(event) = &conference.settings.event else { return Ok(None) };
+    let parts: Vec<&str> = event.strip_prefix("at://").unwrap_or_default().split('/').collect();
+    let [repo, _, rkey] = parts.as_slice() else {
+        return Err(format!("the conference's event {event} isn't a record's AT-URI"));
+    };
+    let value = super::public_record(state, &format!("at://{repo}/{SIDECAR}/{rkey}")).await?;
+    let handle = handle_of(state, repo).await;
+    match Acting::new(state, repo, &handle).await {
+        Ok(writer) => Ok(Some((writer, (*rkey).to_owned(), value))),
+        Err(why) => {
+            eprintln!("note: the public sidecar at://{repo}/{SIDECAR}/{rkey} isn't updated: {why}");
+            Ok(None)
+        }
+    }
 }
 
 /// A record `conference create` wrote, to delete if a later step fails.
@@ -1216,15 +1309,18 @@ async fn decide(state: &AppState, args: &Args, action: &str) -> Result<Done, Str
         _ => return Err(format!("unknown action {action}")),
     };
     acting.create_in(state, &admin_space, collection, None, record).await?;
-    // Out of the conference, out of their role.
-    if matches!(action, "remove" | "ban") && conference.roles.contains_key(&subject) {
+    let mut after = after_change(state, &org).await?;
+    // Another admin's decision doesn't undo the super admin's latest one.
+    let mut member = after.conference(&space_uri).is_some_and(|c| c.is_member(&subject));
+    // Out of the conference, out of their role: once they're out, so a
+    // removal the super admin's decision overrides leaves the role be.
+    if matches!(action, "remove" | "ban") && !member && conference.roles.contains_key(&subject) {
         let writer = conference_super_admin(state, &org, conference).await?;
         writer.delete_in(state, &space_uri, index::ROLE, &subject).await?;
+        after = after_change(state, &after).await?;
+        member = after.conference(&space_uri).is_some_and(|c| c.is_member(&subject));
     }
-    let after = after_change(state, &org).await?;
-    // Another admin's decision doesn't undo the super admin's latest one.
     let now_in = after.conference(&space_uri);
-    let member = now_in.is_some_and(|c| c.is_member(&subject));
     if matches!(action, "approve" | "add") && now_in.is_some_and(|c| c.banned.contains(&subject)) {
         return Err(format!("{who} is banned from this conference"));
     }

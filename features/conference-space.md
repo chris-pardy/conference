@@ -1396,6 +1396,44 @@ at the PR alongside rounds 1 and 2:
 - **Per-IP rate limits have their own map,** so a flood of addresses can't
   evict a person's own limit.
 
+**Review round 4 design notes (2026-10-06).** The round-4 fixes, to raise
+at the PR alongside rounds 1 to 3:
+
+- **Only the super admin's records are neutral.** A `member` record with
+  `via: "email"`, `"orgAdmin"` or `"orgAdminRemoved"` ends the super
+  admin's say (round 3) only when it's hers; another admin's is their own
+  decision, judged like any other.
+- **An overridden ban still ended the membership then.** A ban the super
+  admin overrides by admitting the person later now lasts from the ban
+  until her admission: the period before it ends at the ban, joins and
+  other admins' admissions in between don't count, and her admission
+  starts a new period.
+- **A conference's super admin must be an owner.** `conference create
+  --super-admin` and `conference super-admin` refuse staff, and `org admin
+  add --role staff` refuses to demote a conference's super admin. The
+  index caps them too: role records count only as far as their role
+  allows (no owner or staff roles from staff), and a staff one's rules
+  don't count (the default rules apply).
+- **Handing a public conference over again.** Its event and sidecar stay
+  in the repo that first published them (named by the settings' `event`),
+  and the sidecar is updated with that account's session (skipped with a
+  note if it isn't connected). Everything is read before anything is
+  written, and running `conference super-admin` again finishes a handover
+  cut short: it updates the sidecar and the conference row if they're
+  stale, and deletes every earlier super admin's leftover role, rules,
+  event and sidecar records.
+- **`member remove` and `ban` take a role away only once the person is
+  out**, so a removal the super admin's decision overrides leaves it be.
+- **A late-resolving list handle is bound however the person gets in**:
+  whenever the list is on and they aren't already in by their role or the
+  list, their own handle is checked against the unbound rows, also when a
+  code or an open conference admits them or they're already a member.
+- **Revocation delivery per PDS** moves to another writer only when the
+  refusal is about the writer (`RepoNotFound`, `AccountDeactivated` and
+  the like, or a 403 "not hosted here"), tries at most 3 writers, starts
+  with the one the PDS last took, and leaves a PDS that doesn't take
+  revocations (404, 501, `MethodNotImplemented`) alone for 10 minutes.
+
 **Red-test gate (2026-10-06):** the user approved the red tests and the
 surfaces they pin (see Build notes), with these contract changes:
 
@@ -2123,3 +2161,58 @@ and `scripts/check-tests-unchanged.sh` reports the frozen tests unchanged.
 9. **[nit] Wrong refusal name, and `listRecords` sorted by claimed rev.**
    **Fixed:** the post-insert re-check answers `AppNotAuthorized` when only
    the app lost access; `listRecords` sorts by each record's dated time.
+
+### Round 4
+
+Reviewer: a fresh subagent following `adversarial-review`. Verdict: not
+clean (0 blocking, 4 major, 3 minor, 1 nit). After the rework: `pnpm check`
+green (lint, build, Rust 77 + unit 122 + integration 95 + tooling 33 + e2e 35),
+and `scripts/check-tests-unchanged.sh` reports the frozen tests unchanged.
+
+1. **[major] Staff could pass a decision off as neutral.** A staff `member`
+   record with `via: "email"` or `"orgAdmin"` readmitted someone the super
+   admin removed, and `"orgAdminRemoved"` removed someone she admitted.
+   **Fixed:** those vias are neutral only in the super admin's records;
+   anyone else's are their own decisions. Rust test
+   `only_the_super_admins_admin_and_email_records_are_neutral`.
+2. **[major] `member remove` stripped the role of someone it didn't
+   remove.** The role was deleted before the reload found the super
+   admin's decision overriding the removal. **Fixed:** the role is deleted
+   only once the reloaded index shows the person out (also for `ban`).
+   Integration TC-51 (round 4).
+3. **[major] A second handover of a public conference failed midway.** It
+   looked for the sidecar in the current super admin's repo rather than
+   the publisher's, after writing the copies and a snapshot, and a retry
+   said "already its super admin". **Fixed:** the sidecar is read and
+   written in the repo the settings' `event` names, with that account's
+   session (skipped with a note if not connected), before anything is
+   written; a rerun finishes a cut-short handover (sidecar, conference row,
+   earlier super admins' leftover records). Integration TC-4 (round 4)
+   hands a public conference over twice and reruns it.
+4. **[major] A list row's role was lost when a code let the person in
+   first.** **Fixed:** with the list on, a joiner not already in by role or
+   list has their own handle checked against unbound rows and bound (with
+   the role) whatever else admits them, members included. Integration
+   TC-31 (round 4).
+5. **[minor] An overridden ban was dropped from history.** **Fixed:** it
+   ends the membership at the ban and lasts until the super admin's
+   admission, which starts a new period. Rust test
+   `a_ban_the_super_admin_overrode_still_ended_the_membership_then`.
+6. **[minor] A staff conference super admin had owner powers over roles
+   and rules.** **Fixed:** a conference's super admin must be an owner
+   (`conference create --super-admin`, `conference super-admin`, and no
+   demotion to staff while one), and the index caps a staff one to staff
+   roles and ignores their rules. Rust test
+   `a_staff_conference_super_admin_has_only_staff_powers`, integration
+   TC-4 (round 4).
+7. **[minor] Revocation fallback hammered a PDS that rejects everything.**
+   **Fixed:** only writer-specific refusals move on to another writer, at
+   most 3 per PDS, the last accepted writer first, and a PDS answering
+   404/501/`MethodNotImplemented` rests for 10 minutes. Writers' DID
+   documents were already cached (`did_document`, with a TTL), so resolving
+   them each pass costs no lookups. Rust tests
+   `only_a_refusal_of_the_writer_moves_on_to_another`,
+   `a_pds_hears_from_a_few_writers_the_one_it_last_took_first`.
+8. **[nit] The last-owner check ignored the super admin without an admin
+   record.** **Fixed:** she counts among the owners. Integration TC-8
+   (round 4).

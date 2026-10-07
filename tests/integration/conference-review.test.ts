@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite'
 import { afterAll, beforeAll, expect, test, vi } from '@vivarium-dev/client/vitest'
-import { eventually, type Json, writeSpaceRecord } from '../support/atproto.ts'
+import { eventually, type Json, publicRecords, writeSpaceRecord } from '../support/atproto.ts'
 import {
   ATMOSPHERECONF,
   Attendee,
@@ -335,4 +335,90 @@ test('TC-31: a role on the list comes with a handle that resolves only later (re
   const answer = await (await Attendee.signIn(dep, zoe)).join({ conference: conference.space })
   expect(answer.body.status).toBe('joined')
   expect(answer.body.role).toBe('speaker')
+})
+
+// Regressions from adversarial review round 4.
+
+test('TC-51: staff can’t strip a role by a removal the super admin’s decision overrides (review round 4)', async ({
+  viv,
+}) => {
+  const { conference, admins } = await seedConference(dep, accountsIn(viv), { staff: ['pim'], methods: ['code'] })
+  const code = await sharedCode(dep, conference, uniqueCode('atmosphere27'))
+  const bram = await Attendee.signIn(dep, await viv.createAccount(viv.handle('bram')))
+  expect((await bram.join({ conference: conference.space, code })).body.status).toBe('joined')
+  await cliOk(dep, ['member', 'add', bram.person.handle, '--conference', conference.space])
+  await setRole(dep, conference, bram.person, 'speaker')
+
+  const refused = await cli(dep, [
+    'member',
+    'remove',
+    bram.person.handle,
+    '--conference',
+    conference.space,
+    '--as',
+    admins.pim.handle,
+  ])
+  expect(refused.code).not.toBe(0)
+  expect(refused.stderr).toMatch(/super admin.s latest decision/)
+  const page = await bram.getConference(conference.space)
+  expect(page.body.viewer, 'Bram keeps his role').toEqual(expect.objectContaining({ member: true, role: 'speaker' }))
+})
+
+test('TC-4: a public conference can be handed over twice (review round 4)', async ({ viv }) => {
+  const olga = await viv.createAccount(viv.handle('olga'))
+  const pim = await viv.createAccount(viv.handle('pim'))
+  const kees = await viv.createAccount(viv.handle('kees'))
+  const org = await createOrg(dep, olga)
+  await addAdmin(dep, org, pim, 'owner')
+  await addAdmin(dep, org, kees, 'owner')
+  const conference = await createConference(dep, org, { ...ATMOSPHERECONF, superAdmin: pim, methods: ['code'] })
+
+  await cliOk(dep, ['conference', 'super-admin', kees.handle, '--conference', conference.space])
+  const handed = await cliOkJson(dep, ['conference', 'super-admin', olga.handle, '--conference', conference.space])
+  expect(handed.superAdmin).toBe(olga.did)
+  const again = await cliOkJson(dep, ['conference', 'super-admin', olga.handle, '--conference', conference.space])
+  expect(again.superAdmin).toBe(olga.did)
+
+  const sidecars = await publicRecords(viv.url, pim.did, 'app.eventside.conference')
+  expect(sidecars.map((r) => r.value.superAdmin)).toEqual([olga.did])
+  expect((await publicConference(dep, conference.event as string)).status).toBe(200)
+})
+
+test('TC-31: a role on the list comes with a handle bound after a code let them in (review round 4)', async ({
+  viv,
+}) => {
+  const { conference } = await seedConference(dep, accountsIn(viv), { methods: ['list', 'code'] })
+  const code = await sharedCode(dep, conference, uniqueCode('atmosphere27'))
+  const zoeHandle = viv.handle('zoe')
+  await importList(dep, conference, [{ handle: zoeHandle, role: 'speaker' }])
+  const zoe = await viv.createAccount(zoeHandle)
+
+  const answer = await (await Attendee.signIn(dep, zoe)).join({ conference: conference.space, code })
+  expect(answer.body.status).toBe('joined')
+  expect(answer.body.role).toBe('speaker')
+})
+
+test('TC-4: a conference’s super admin must be an owner (review round 4)', async ({ viv }) => {
+  const olga = await viv.createAccount(viv.handle('olga'))
+  const pim = await viv.createAccount(viv.handle('pim'))
+  const kees = await viv.createAccount(viv.handle('kees'))
+  const org = await createOrg(dep, olga)
+  await addAdmin(dep, org, pim, 'staff')
+  await addAdmin(dep, org, kees, 'owner')
+  const conference = await createConference(dep, org, { ...ATMOSPHERECONF, superAdmin: kees })
+
+  const handover = await cli(dep, ['conference', 'super-admin', pim.handle, '--conference', conference.space])
+  expect(handover.code).not.toBe(0)
+  expect(handover.stderr).toMatch(/must be an owner/)
+  const demoted = await cli(dep, ['org', 'admin', 'add', kees.handle, '--org', org.did, '--role', 'staff'])
+  expect(demoted.code).not.toBe(0)
+  expect(demoted.stderr).toMatch(/super admin of the conference/)
+})
+
+test('TC-8: the super admin counts as an owner without an admin record (review round 4)', async ({ viv }) => {
+  const { org, superAdmin, admins } = await seedConference(dep, accountsIn(viv), { owners: ['kees'] })
+  await cliOk(dep, ['org', 'admin', 'remove', superAdmin.handle, '--org', org.did])
+  await cliOk(dep, ['org', 'admin', 'remove', admins.kees.handle, '--org', org.did])
+  const shown = await cliOkJson(dep, ['org', 'show', '--org', org.did])
+  expect(shown.admins).not.toContainEqual(expect.objectContaining({ did: admins.kees.did }))
 })

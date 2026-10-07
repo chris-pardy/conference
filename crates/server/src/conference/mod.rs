@@ -416,11 +416,30 @@ pub async fn join(
     if conference.banned.contains(did) {
         return Json(answer("refused")).into_response();
     }
+    let now = tid_micros(&tid_now()).unwrap_or_default();
+    let settings = &conference.settings;
+    // A handle on the list that didn't resolve when it was imported, which
+    // names this person now: bound to them from now on, with its role,
+    // however else they were or would be let in. Then a join like any
+    // other on the list.
+    let listed = matches!(conference.would_admit(did, None, now), Some(Via::Role | Via::List));
+    if settings.has("list")
+        && !listed
+        && let Some(entry) = unbound_listed(&state, conference, did).await
+    {
+        if let Err(why) = bind_list_entry(&state, &org, conference, did, entry).await {
+            return failed(why);
+        }
+        if !conference.is_member(did)
+            && let Err(res) = write_intake(&state, &user, &row.intake, JOIN, json!({})).await
+        {
+            return res;
+        }
+        return reload_answer(&state, &row, did).await;
+    }
     if conference.is_member(did) {
         return joined(&org, conference);
     }
-    let now = tid_micros(&tid_now()).unwrap_or_default();
-    let settings = &conference.settings;
     // Named by its address, an invite-only conference that wouldn't let this
     // person in answers as if it didn't exist, as its page does.
     let hidden = row.invite_only != 0 && input.conference.is_some();
@@ -438,24 +457,6 @@ pub async fn join(
     let write = match admission {
         Some(_) => true,
         None => {
-            // A handle on the list that didn't resolve when it was imported,
-            // which names this person now.
-            let unbound = if settings.has("list") {
-                unbound_listed(&state, conference, did).await
-            } else {
-                None
-            };
-            if let Some(entry) = unbound {
-                // Bound to this person from now on, and then a join like any
-                // other on the list.
-                if let Err(why) = bind_list_entry(&state, &org, conference, did, entry).await {
-                    return failed(why);
-                }
-                if let Err(res) = write_intake(&state, &user, &row.intake, JOIN, json!({})).await {
-                    return res;
-                }
-                return reload_answer(&state, &row, did).await;
-            }
             if hidden {
                 return not_found();
             }

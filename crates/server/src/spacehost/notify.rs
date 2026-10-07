@@ -460,8 +460,10 @@ async fn send(state: &AppState, space: &str, jtis: &[String]) -> Result<(), Stri
 
 /// Sends revocations to each writer's PDS, addressed to one of its writers.
 /// If a PDS refuses that one (its account was deleted or moved, say), the
-/// next writer on it is tried, so one gone account can't keep a PDS from
-/// ever hearing of revocations.
+/// next writer on it is tried, up to [`WRITERS_PER_PDS`], so one gone
+/// account can't keep a PDS from ever hearing of revocations. Any other
+/// refusal would be the same for every writer, so it isn't sent again; a
+/// PDS that doesn't take revocations at all is left alone for a while.
 async fn deliver(state: &AppState, space: &str, jtis: &[String]) -> Result<(), String> {
     let mut by_pds: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for writer in sync::writers(state, space).await? {
@@ -472,15 +474,29 @@ async fn deliver(state: &AppState, space: &str, jtis: &[String]) -> Result<(), S
     }
     let mut failures = Vec::new();
     for (pds, writers) in by_pds {
+        if let Some(until) = resting_until(&pds) {
+            failures.push(format!("{pds} doesn't take revocations; trying again after {until}"));
+            continue;
+        }
         let mut tried = Vec::new();
         let mut delivered = false;
-        for writer in writers {
+        for writer in writers_to_try(&pds, writers) {
             match send_revocations(state, space, &pds, &writer, jtis).await {
                 Ok(()) => {
+                    remember_writer(&pds, &writer);
                     delivered = true;
                     break;
                 }
-                Err(why) => tried.push(why),
+                Err(failure) => {
+                    let kind = failure.kind;
+                    tried.push(failure.why);
+                    match kind {
+                        Refusal::Writer => continue,
+                        Refusal::Unsupported => rest(&pds),
+                        Refusal::Other => {}
+                    }
+                    break;
+                }
             }
         }
         if !delivered {
@@ -490,6 +506,98 @@ async fn deliver(state: &AppState, space: &str, jtis: &[String]) -> Result<(), S
     if failures.is_empty() { Ok(()) } else { Err(failures.join("; ")) }
 }
 
+/// At most this many writers are tried on one PDS per pass.
+const WRITERS_PER_PDS: usize = 3;
+/// How long a PDS that doesn't take revocations is left alone.
+const REST_MS: i64 = 10 * 60 * 1000;
+
+type Memo<T> = std::sync::Mutex<std::collections::HashMap<String, T>>;
+
+/// The writer each PDS last took revocations for.
+fn last_writers() -> &'static Memo<String> {
+    static MEMO: std::sync::OnceLock<Memo<String>> = std::sync::OnceLock::new();
+    MEMO.get_or_init(Default::default)
+}
+
+/// When each PDS that doesn't take revocations is tried again.
+fn resting() -> &'static Memo<i64> {
+    static MEMO: std::sync::OnceLock<Memo<i64>> = std::sync::OnceLock::new();
+    MEMO.get_or_init(Default::default)
+}
+
+fn remember_writer(pds: &str, writer: &str) {
+    let mut memo = last_writers().lock().expect("the writer memo isn't poisoned");
+    if memo.len() >= 10_000 {
+        memo.clear();
+    }
+    memo.insert(pds.to_owned(), writer.to_owned());
+}
+
+fn rest(pds: &str) {
+    let mut memo = resting().lock().expect("the rest memo isn't poisoned");
+    if memo.len() >= 10_000 {
+        memo.clear();
+    }
+    memo.insert(pds.to_owned(), now_ms() + REST_MS);
+}
+
+/// When a resting PDS is tried again, if it's resting.
+fn resting_until(pds: &str) -> Option<String> {
+    let until = *resting().lock().expect("the rest memo isn't poisoned").get(pds)?;
+    (until > now_ms()).then(|| crate::spacehost::index::iso(until as u64 * 1000))
+}
+
+/// The writers to address a PDS's revocations to, the one it last took
+/// first, at most [`WRITERS_PER_PDS`].
+fn writers_to_try(pds: &str, mut writers: Vec<String>) -> Vec<String> {
+    let last = last_writers().lock().expect("the writer memo isn't poisoned").get(pds).cloned();
+    if let Some(at) = last.and_then(|last| writers.iter().position(|w| *w == last)) {
+        let last = writers.remove(at);
+        writers.insert(0, last);
+    }
+    writers.truncate(WRITERS_PER_PDS);
+    writers
+}
+
+/// Why a PDS didn't take revocations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Refusal {
+    /// Not for this writer (gone, moved or deactivated): another may do.
+    Writer,
+    /// It doesn't take revocations at all.
+    Unsupported,
+    /// Anything else, which would be the same for any writer.
+    Other,
+}
+
+struct Failure {
+    why: String,
+    kind: Refusal,
+}
+
+/// What a PDS's refusal says, from its status and its XRPC error body.
+fn refusal(status: StatusCode, body: &str) -> Refusal {
+    let parsed: Value = serde_json::from_str(body).unwrap_or(Value::Null);
+    let error = parsed.get("error").and_then(Value::as_str).unwrap_or_default();
+    let message = parsed.get("message").and_then(Value::as_str).unwrap_or_default();
+    if status == StatusCode::NOT_FOUND
+        || status == StatusCode::NOT_IMPLEMENTED
+        || error == "MethodNotImplemented"
+    {
+        return Refusal::Unsupported;
+    }
+    let writer_gone = matches!(
+        error,
+        "RepoNotFound"
+            | "AccountNotFound"
+            | "AccountDeactivated"
+            | "AccountTakedown"
+            | "RepoDeactivated"
+            | "RepoTakendown"
+    ) || (status == StatusCode::FORBIDDEN && message.contains("hosted here"));
+    if writer_gone { Refusal::Writer } else { Refusal::Other }
+}
+
 /// Sends revocations to one PDS, retrying a few times.
 async fn send_revocations(
     state: &AppState,
@@ -497,13 +605,14 @@ async fn send_revocations(
     pds: &str,
     writer: &str,
     jtis: &[String],
-) -> Result<(), String> {
-    let parsed = SpaceUri::parse(space).ok_or("not a space")?;
-    let key = authority::space_key(state, &parsed.authority).await?;
+) -> Result<(), Failure> {
+    let other = |why: String| Failure { why, kind: Refusal::Other };
+    let parsed = SpaceUri::parse(space).ok_or_else(|| other("not a space".into()))?;
+    let key = authority::space_key(state, &parsed.authority).await.map_err(other)?;
     let url = format!("{pds}/xrpc/{REVOKED}");
-    let client = state.http.guarded(&url)?;
+    let client = state.http.guarded(&url).map_err(other)?;
     for chunk in jtis.chunks(100) {
-        let mut last = String::new();
+        let mut last = other(String::new());
         let mut delivered = false;
         for attempt in 0..3 {
             if attempt > 0 {
@@ -523,17 +632,17 @@ async fn send_revocations(
                 }
                 Ok(res) => {
                     let status = res.status();
-                    last = format!(
-                        "{url} answered {status} for {writer}: {}",
-                        res.text().await.unwrap_or_default()
-                    );
-                    // A refusal won't change on a retry; the caller tries
-                    // another writer on this PDS instead.
+                    let body = res.text().await.unwrap_or_default();
+                    last = Failure {
+                        why: format!("{url} answered {status} for {writer}: {body}"),
+                        kind: refusal(status, &body),
+                    };
+                    // A refusal won't change on a retry.
                     if status.is_client_error() && status != StatusCode::TOO_MANY_REQUESTS {
                         break;
                     }
                 }
-                Err(err) => last = format!("{url}: {err}"),
+                Err(err) => last = other(format!("{url}: {err}")),
             }
         }
         if !delivered {
@@ -559,7 +668,36 @@ async fn send_recent_revocations(state: &AppState, space: &str, writer: &str) {
         return;
     }
     let Ok(pds) = state.host.pds_of(state, writer).await else { return };
-    if let Err(why) = send_revocations(state, space, &pds, writer, &jtis).await {
-        eprintln!("revocation: {why}");
+    if let Err(failure) = send_revocations(state, space, &pds, writer, &jtis).await {
+        eprintln!("revocation: {}", failure.why);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_a_refusal_of_the_writer_moves_on_to_another() {
+        let gone = r#"{"error":"Forbidden","message":"Revocation audience does not match a repo hosted here"}"#;
+        assert_eq!(refusal(StatusCode::FORBIDDEN, gone), Refusal::Writer);
+        let deactivated = r#"{"error":"AccountDeactivated","message":"gone"}"#;
+        assert_eq!(refusal(StatusCode::BAD_REQUEST, deactivated), Refusal::Writer);
+        let unknown = r#"{"error":"MethodNotImplemented","message":"no"}"#;
+        assert_eq!(refusal(StatusCode::BAD_REQUEST, unknown), Refusal::Unsupported);
+        assert_eq!(refusal(StatusCode::NOT_FOUND, ""), Refusal::Unsupported);
+        let bad_jwt = r#"{"error":"AuthenticationRequired","message":"bad token"}"#;
+        assert_eq!(refusal(StatusCode::UNAUTHORIZED, bad_jwt), Refusal::Other);
+    }
+
+    #[test]
+    fn a_pds_hears_from_a_few_writers_the_one_it_last_took_first() {
+        let pds = "https://pds.test.example";
+        let writers: Vec<String> = (0..10).map(|i| format!("did:plc:w{i}")).collect();
+        assert_eq!(writers_to_try(pds, writers.clone()), writers[..WRITERS_PER_PDS]);
+        remember_writer(pds, "did:plc:w7");
+        let order = writers_to_try(pds, writers);
+        assert_eq!(order.len(), WRITERS_PER_PDS);
+        assert_eq!(order[0], "did:plc:w7");
     }
 }
