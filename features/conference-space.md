@@ -1,5 +1,5 @@
 ---
-status: blocked
+status: implementing
 impact: cross-cutting
 depends-on: [attendee-sign-in]
 branch: feature/conference-space
@@ -1708,3 +1708,9 @@ design, and a human has to decide.
 - attendee-sign-in's own design anticipated this ("When a later feature
   needs more, it adds its scopes to that list"). Its tests pinned the
   `atproto`-only default.
+
+**Decision (2026-10-06):** the user approved amending attendee-sign-in's
+three frozen integration assertions (TC-7, TC-9, TC-18) from "exactly
+`atproto`" to "the default sign-in scope list", which now includes the
+intake scope. Vivarium's sign-up page is to be fixed to wrap long client
+IDs, so e2e TC-8 passes unchanged.

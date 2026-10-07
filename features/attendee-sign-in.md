@@ -1796,3 +1796,13 @@ then.
 - Something else.
 
 **Decision (2026-10-05):** the user chose to ship as is after round 15, without a 16th round.
+
+### After completion: amended by conference-space (2026-10-06)
+
+With the user's approval, `conference-space` amended three of this feature's
+frozen integration assertions (TC-7, TC-9, TC-18). They had pinned the
+default scope list to exactly `atproto`. They now check the default sign-in
+scope list, which `conference-space` grows with its intake scope, as this
+feature's design anticipated ("later features add their scopes to that
+list"). E2e TC-8 is unchanged; vivarium's sign-up page was fixed to wrap the
+longer client ID.
