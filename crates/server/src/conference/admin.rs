@@ -164,6 +164,20 @@ impl Acting {
         Ok(())
     }
 
+    /// Writes a public record at a known rkey in the admin's repo.
+    pub async fn put_public(
+        &self,
+        state: &AppState,
+        collection: &str,
+        rkey: &str,
+        value: Value,
+    ) -> Result<(), String> {
+        let body = json!({ "repo": self.did, "collection": collection, "rkey": rkey,
+                           "record": typed(collection, value) });
+        self.procedure(state, "com.atproto.repo.putRecord", &body).await?;
+        Ok(())
+    }
+
     /// Creates a public record in the admin's repo, returning its AT-URI.
     pub async fn create_public(
         &self,

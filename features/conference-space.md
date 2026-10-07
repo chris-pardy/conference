@@ -1346,6 +1346,56 @@ at the PR alongside round 1's:
 - **Reindex keeps what syncs alongside it wrote,** and never moves a repo's
   read position backwards.
 
+**Review round 3 design notes (2026-10-06).** The round-3 fixes, to raise
+at the PR alongside rounds 1 and 2:
+
+- **The super admin's latest decision stands.** In a person's timeline, a
+  later admission or removal by another admin that contradicts the super
+  admin's latest decision about them (admitting, removing or denying) is
+  ignored, until she decides again or the person acts themselves (joins,
+  asks again, leaves). Email matches and admin periods are nobody's verdict,
+  and end her say like the person's own join. The CLI reports such an
+  ignored decision as a failure.
+- **The super admin is always an owner.** `org admin add` refuses to make
+  her staff, and the index treats her as an owner whatever an `admin`
+  record says. `org admin remove` of her (allowed once there's another
+  owner, TC-8) only takes her off the list of admins: she stays the super
+  admin, an owner, and a member of every conference.
+- **A conference's super admin can be changed.** This was out of scope in
+  the design, but round 2's refusal to remove a conference's super admin
+  made it a trap. New: `conference super-admin <handle> --conference
+  <space>` (the organization's super admin only; the new one must be a
+  connected admin, and the old one connected too). The new super admin
+  re-issues the role and rules records (and an invite-only conference's
+  in-space event and sidecar) in their own repo, a settings snapshot names
+  them, a public conference's sidecar is updated to name them, and the old
+  super admin's copies are deleted. Roles keep the time they took effect
+  (`since`). A public conference's event stays in the old super admin's
+  public repo, where it was published.
+- **Admin-only collections are judged at the record's time.** Admin
+  periods are marked by the super admin's `member` records with
+  `via: "orgAdmin"` (written by `org admin add` for a new admin, and by
+  `conference create` for each admin) and `via: "orgAdminRemoved"` (by
+  `org admin remove`, for every conference). A role counts from its
+  record's `since` (written by every command that gives a role), else from
+  when its record was dated. Limits: a role record holds only its current
+  role, so once a role is changed or removed, what its holder wrote under
+  the earlier role (and wasn't an admin for) is no longer shown; and a
+  current admin with no `orgAdmin` mark counts from their `admin` record.
+- **List roles come with late matches.** A list row's role is given when
+  the row matches only at join time (a handle bound then, or a verified
+  email): a role record from the conference's super admin, `assignedBy`
+  the importing owner, `via: "list"`, as an import's.
+- **One record-judging rule.** `conference::rules::{may_write,
+  record_counts}` is what `listRecords` serves by, for later features to
+  judge ingest by. It dates a record by its commit, clamped to 60 seconds
+  before our host first saw it. That first-seen time isn't published, so
+  another app judging by commit revisions alone disagrees only on records
+  whose commit claims to be more than a minute older than when it reached
+  us.
+- **Per-IP rate limits have their own map,** so a flood of addresses can't
+  evict a person's own limit.
+
 **Red-test gate (2026-10-06):** the user approved the red tests and the
 surfaces they pin (see Build notes), with these contract changes:
 
@@ -2008,3 +2058,68 @@ and `scripts/check-tests-unchanged.sh` reports the frozen tests unchanged.
 11. **[nit] `conference create` didn't undo its later writes.**
     **Fixed:** the in-space event and sidecar, the admins' member and role
     records, and the rules are all pushed onto `undo`.
+
+### Round 3
+
+Reviewer: a fresh subagent following `adversarial-review`. Verdict: not
+clean (0 blocking, 6 major, 2 minor, 1 nit). After the rework: `pnpm check`
+green (lint, build, Rust 72 + unit 122 + integration 90 + tooling 33 + e2e 35),
+and `scripts/check-tests-unchanged.sh` reports the frozen tests unchanged.
+
+1. **[major] Another admin could undo the super admin's removal or
+   denial.** Olga removing Bram and Pim then admitting him left Bram in.
+   **Fixed:** the super admin's latest decision about a person stands
+   against other admins' later contradicting decisions, until she decides
+   again or the person joins, asks again or leaves (`index.rs` timeline,
+   `By`). `member add`/`requests approve`/`member remove` report it when
+   their decision is overridden. Rust test
+   `the_super_admins_latest_decision_stands_against_other_admins`,
+   integration TC-51 (round 3). See "Review round 3 design notes".
+2. **[major] `org admin add <super admin> --role staff` demoted her.**
+   **Fixed:** `org admin add` refuses to make the organization's super admin
+   staff, and `admin_role` and the index's `role_of` answer owner for her
+   first. `org admin remove` of her (which frozen TC-8 allows once there's
+   another owner) only deletes her `admin` record. `org show` reports her
+   as owner. Rust test
+   `the_super_admin_is_always_an_owner`, integration TC-51 (round 3).
+3. **[major] A conference's super admin could never be removed.**
+   **Fixed:** new `conference super-admin <handle> --conference <space>`
+   hands a conference to another admin: their re-issued role and rules
+   records (and an invite-only one's event and sidecar), a settings
+   snapshot naming them, the public sidecar updated, the old copies
+   deleted. `org admin remove`'s refusal names the command. Integration
+   TC-4 (round 3) hands a conference over, removes the old super admin, and
+   checks a speaker keeps her role and the public page still works.
+4. **[major] Admin-only collections were judged by current admin and role
+   state.**
+   **Fixed:** judged at the record's dated time: admin periods from the
+   super admin's `orgAdmin`/`orgAdminRemoved` member records, roles from
+   their `since` (else their dated time). Limits recorded in the design
+   notes. Rust test `admin_and_role_periods_are_judged_at_the_time`,
+   integration TC-34 (round 3).
+5. **[major] A list row's role was lost when it matched only at join time.**
+   **Fixed:** binding a late-resolving handle and matching a verified email
+   both write the row's role record (as the conference's super admin,
+   `assignedBy` the importer, `via: "list"`) before the admission.
+   Integration TC-31 (round 3) imports a handle before its account exists.
+6. **[major] Revocations to a PDS always went to one writer.**
+   **Fixed:** each PDS's writers are tried in turn until one is accepted,
+   and a 4xx refusal moves on at once instead of retrying the same writer.
+   **Declined in part:** per-PDS delivery tracking. `revocation_sent_at`
+   means "every writer's PDS has it", which is what it records; resending
+   to a PDS that already has a revocation is harmless (revoking twice is a
+   no-op), and the resend stops once every PDS has it or it expires.
+7. **[minor] The record-judging rule lived inline in `listRecords`.**
+   **Fixed:** `conference::rules::{may_write, record_counts}`, used by
+   `listRecords`, with the first-seen dependency documented there and in
+   the design notes. The other membership helpers the design lists for
+   later features are already methods on `index::Conference` (`is_member`,
+   `was_member_at`, `role_of`, `role_at`, `was_admin_at`); renaming them
+   is left to the features that use them.
+8. **[minor] A per-IP flood could evict per-person rate limits.**
+   **Fixed:** per-IP limits live in their own map. The Rust test
+   `rate_limits_stay_bounded_and_count_ipv6_by_its_64` floods it and checks
+   a person's limit still holds.
+9. **[nit] Wrong refusal name, and `listRecords` sorted by claimed rev.**
+   **Fixed:** the post-insert re-check answers `AppNotAuthorized` when only
+   the app lost access; `listRecords` sorts by each record's dated time.

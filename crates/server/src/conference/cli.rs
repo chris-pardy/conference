@@ -33,6 +33,7 @@ const USAGE: &str = "usage: conference-server admin <command> [--json] [--as <ha
   reindex --org <did>
   conference create --org <did> (--name … --starts … --ends … --city … [--description …] | --event <at-uri>)
                     [--invite-only] [--theme <json>] [--super-admin <handle>]
+  conference super-admin <handle> --conference <space>
   join set --conference <space> --methods code,request,list,open
   codes issue --conference <space> (--shared <code> | --personal) [--expires <iso>] [--max-uses <n>]
   list import <csv> --conference <space>
@@ -153,6 +154,7 @@ async fn run(state: &AppState, args: &Args) -> Result<Done, String> {
         ["connect", ..] => connect(state, args).await,
         ["reindex", ..] => reindex(state, args).await,
         ["conference", "create", ..] => conference_create(state, args).await,
+        ["conference", "super-admin", ..] => conference_handover(state, args).await,
         ["join", "set", ..] => join_set(state, args).await,
         ["codes", "issue", ..] => codes_issue(state, args).await,
         ["list", "import", ..] => list_import(state, args).await,
@@ -270,14 +272,14 @@ async fn org_show(state: &AppState, args: &Args) -> Result<Done, String> {
     let org = org(state, args.need("org")?).await?;
     let mut admins = Vec::new();
     let mut lines = vec![format!("{} (super admin {})", org.did, org.super_admin)];
-    for (did, admin) in &org.admins {
+    for did in org.admins.keys() {
+        let role = org.admin_role(did).map_or("staff", Role::as_str);
         let connected = connected(state, did).await?;
         lines.push(format!(
-            "  {did} {} {}",
-            admin.role.as_str(),
+            "  {did} {role} {}",
             if connected { "connected" } else { "not connected" }
         ));
-        admins.push(json!({ "did": did, "role": admin.role.as_str(), "connected": connected }));
+        admins.push(json!({ "did": did, "role": role, "connected": connected }));
     }
     done(
         lines.join("\n"),
@@ -307,6 +309,14 @@ async fn org_admin(state: &AppState, args: &Args, add: bool) -> Result<Done, Str
         let role = args.flag("role").unwrap_or("staff");
         let role = Role::parse(role)
             .ok_or_else(|| format!("--role must be owner or staff, not {role}"))?;
+        // The super admin is the organization's owner for good: an `admin`
+        // record can't make them staff.
+        if subject == org.super_admin && role != Role::Owner {
+            return Err(format!(
+                "{who} is the super admin of {}: always an owner, and can't be made staff",
+                org.did
+            ));
+        }
         acting
             .put_in(
                 state,
@@ -316,20 +326,21 @@ async fn org_admin(state: &AppState, args: &Args, add: bool) -> Result<Done, Str
                 json!({ "subject": subject, "role": role.as_str() }),
             )
             .await?;
-        // Admins are members of every conference, with their role. Their
-        // membership is a decision of the super admin's, like anyone's, so
-        // it keeps its start through a change of role, and its end once
-        // they're removed.
+        // Admins are members of every conference, with their role. A new
+        // admin's period (and membership) starts with a `member` record of
+        // the super admin's, so it keeps its start through a change of role,
+        // and its end once they're removed.
         let now = index::iso(now_ms() as u64 * 1000);
+        let new_admin = !org.admins.contains_key(&subject);
         for conference in org.conferences.values() {
-            if !conference.is_member(&subject) {
+            if new_admin {
                 acting
                     .create_in(
                         state,
                         &admin_space,
                         index::MEMBER,
                         None,
-                        json!({ "space": conference.space(), "subject": subject, "via": "admin", "since": now }),
+                        json!({ "space": conference.space(), "subject": subject, "via": index::VIA_ADMIN, "since": now }),
                     )
                     .await?;
             }
@@ -358,25 +369,37 @@ async fn org_admin(state: &AppState, args: &Args, add: bool) -> Result<Done, Str
     if !org.admins.contains_key(&subject) {
         return Err(format!("{who} isn't an admin of {}", org.did));
     }
+    // The super admin stays the super admin (and an owner, and a member of
+    // every conference); only their place on the list of admins goes.
+    if subject == org.super_admin {
+        acting.delete_in(state, &admin_space, index::ADMIN, &subject).await?;
+        after_change(state, &org).await?;
+        return done(
+            format!("{who} is off the list of admins, and still the super admin of {}.", org.did),
+            json!({ "did": subject }),
+        );
+    }
     // A conference's super admin writes its roles and rules, which count
     // only while they're an admin.
     if let Some(conference) = org.conferences.values().find(|c| c.super_admin() == subject) {
         return Err(format!(
-            "{who} is the super admin of the conference {}: give it another super admin first",
+            "{who} is the super admin of the conference {}: give it another first, with \
+             `conference super-admin <handle> --conference {}`",
+            conference.space(),
             conference.space()
         ));
     }
-    // Their membership of each conference ends now; what they wrote while
-    // they were a member stays theirs.
+    // Their admin period and membership of each conference end now; what
+    // they wrote while they were one stays theirs.
     let now = index::iso(now_ms() as u64 * 1000);
-    for conference in org.conferences.values().filter(|c| c.is_member(&subject)) {
+    for conference in org.conferences.values() {
         acting
             .create_in(
                 state,
                 &admin_space,
                 index::MEMBER,
                 None,
-                json!({ "space": conference.space(), "subject": subject, "via": "removed", "until": now }),
+                json!({ "space": conference.space(), "subject": subject, "via": index::VIA_ADMIN_REMOVED, "until": now }),
             )
             .await?;
     }
@@ -592,6 +615,112 @@ async fn conference_create(state: &AppState, args: &Args) -> Result<Done, String
     }
 }
 
+/// Gives a conference another super admin (an admin of the organization):
+/// they re-issue its role and rules records (and an invite-only one's event
+/// and sidecar) in their own repo, a new settings snapshot names them, and
+/// a public conference's sidecar is pointed at them. From the snapshot on,
+/// only the new super admin's role and rules records count; the old ones
+/// are then deleted. A public conference's event stays where it was
+/// published, in the old super admin's repo.
+async fn conference_handover(state: &AppState, args: &Args) -> Result<Done, String> {
+    let who = args.word(2, "the new super admin's handle")?;
+    let subject = did_of(state, who).await?;
+    let (space, org) = conference(state, args).await?;
+    let space = space.to_string();
+    let (acting, _) = acting(state, args, &org).await?;
+    only_super_admin(&org, &acting, "change a conference's super admin")?;
+    if !org.is_admin(&subject) {
+        return Err(format!(
+            "{who} isn't an admin of {}: add them with `org admin add` first",
+            org.did
+        ));
+    }
+    let conference = org.conference(&space).ok_or("no such conference")?;
+    let old_did = conference.super_admin().to_owned();
+    if old_did == subject {
+        return done(
+            format!("{who} is already its super admin."),
+            json!({ "superAdmin": subject }),
+        );
+    }
+    let old = Acting::new(state, &old_did, &handle_of(state, &old_did).await).await?;
+    let new = Acting::new(state, &subject, who).await?;
+
+    // What the old super admin wrote into the space, re-issued by the new.
+    let rows = sqlx::query_as::<_, (String, String, String, String, Option<i64>)>(
+        "SELECT r.collection, r.rkey, r.rev, r.value, s.seen_at FROM space_records r \
+         LEFT JOIN space_record_seen s ON s.space = r.space AND s.repo = r.repo \
+         AND s.collection = r.collection AND s.rkey = r.rkey AND s.rev = r.rev \
+         WHERE r.space = $1 AND r.repo = $2 AND r.collection IN ($3, $4, $5, $6) \
+         AND r.value IS NOT NULL",
+    )
+    .bind(&space)
+    .bind(&old_did)
+    .bind(index::ROLE)
+    .bind(index::RULES)
+    .bind(EVENT)
+    .bind(SIDECAR)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| e.to_string())?;
+    let mut copied = Vec::new();
+    for (collection, rkey, rev, value, seen_at) in rows {
+        let Ok(mut value) = serde_json::from_str::<Value>(&value) else { continue };
+        let collection: &'static str = match collection.as_str() {
+            index::ROLE => {
+                // A role keeps the time it took effect.
+                if value.get("since").is_none()
+                    && let Some(us) = crate::crypto::tid_micros(&rev)
+                {
+                    let seen_us = seen_at.map(|ms| ms.max(0) as u64 * 1000);
+                    value["since"] = json!(index::iso(index::conference_us(us, seen_us)));
+                }
+                index::ROLE
+            }
+            index::RULES => index::RULES,
+            EVENT => EVENT,
+            _ => {
+                value["superAdmin"] = json!(subject);
+                if let Some(event) = value.get("event").and_then(Value::as_str) {
+                    value["event"] =
+                        json!(event.replace(
+                            &format!("{space}/{old_did}/"),
+                            &format!("{space}/{subject}/")
+                        ));
+                }
+                SIDECAR
+            }
+        };
+        new.put_in(state, &space, collection, &rkey, value).await?;
+        copied.push((collection, rkey));
+    }
+
+    // From this snapshot on, the new super admin's records are the ones.
+    settings_snapshot(state, &acting, &org, &space, |v| v["superAdmin"] = json!(subject)).await?;
+    if let Some(event) = &conference.settings.event
+        && let Some(rkey) = event.rsplit('/').next()
+    {
+        let uri = format!("at://{old_did}/{SIDECAR}/{rkey}");
+        let mut sidecar = super::public_record(state, &uri).await?;
+        sidecar["superAdmin"] = json!(subject);
+        old.put_public(state, SIDECAR, rkey, sidecar).await?;
+    }
+    let mut row = super::row(state, &space).await?.ok_or("no such conference")?;
+    row.super_admin = subject.clone();
+    super::save(state, &row).await?;
+    // The old records count no more; they're tidied away.
+    for (collection, rkey) in copied {
+        if let Err(why) = old.delete_in(state, &space, collection, &rkey).await {
+            eprintln!("note: couldn't delete the old {collection} record {rkey}: {why}");
+        }
+    }
+    after_change(state, &org).await?;
+    done(
+        format!("{who} is now the super admin of {space}."),
+        json!({ "space": space, "superAdmin": subject }),
+    )
+}
+
 /// A record `conference create` wrote, to delete if a later step fails.
 enum Written {
     /// In the super admin's public repo.
@@ -712,7 +841,8 @@ impl NewConference<'_> {
         // The organization's admins: members (by the super admin's decision,
         // which a later removal ends) with their roles. Then the rules.
         let now = index::iso(now_ms() as u64 * 1000);
-        for (did, admin) in &org.admins {
+        for did in org.admins.keys() {
+            let role = org.admin_role(did).unwrap_or(Role::Staff);
             let rkey = self
                 .org_admin
                 .create_in(
@@ -720,7 +850,7 @@ impl NewConference<'_> {
                     &admin_space,
                     index::MEMBER,
                     None,
-                    json!({ "space": space, "subject": did, "via": "admin", "since": now }),
+                    json!({ "space": space, "subject": did, "via": index::VIA_ADMIN, "since": now }),
                 )
                 .await?;
             undo.push(Written::InSpace {
@@ -735,7 +865,7 @@ impl NewConference<'_> {
                     &space,
                     index::ROLE,
                     did,
-                    json!({ "subject": did, "role": admin.role.as_str() }),
+                    json!({ "subject": did, "role": role.as_str() }),
                 )
                 .await?;
             undo.push(Written::InSpace {
@@ -997,7 +1127,7 @@ async fn list_import(state: &AppState, args: &Args) -> Result<Done, String> {
                     &space.to_string(),
                     index::ROLE,
                     did,
-                    json!({ "subject": did, "role": role, "assignedBy": acting.did, "via": "list" }),
+                    json!({ "subject": did, "role": role, "assignedBy": acting.did, "via": "list", "since": index::iso(now_ms() as u64 * 1000) }),
                 )
                 .await?;
         }
@@ -1091,7 +1221,18 @@ async fn decide(state: &AppState, args: &Args, action: &str) -> Result<Done, Str
         let writer = conference_super_admin(state, &org, conference).await?;
         writer.delete_in(state, &space_uri, index::ROLE, &subject).await?;
     }
-    after_change(state, &org).await?;
+    let after = after_change(state, &org).await?;
+    // Another admin's decision doesn't undo the super admin's latest one.
+    let now_in = after.conference(&space_uri);
+    let member = now_in.is_some_and(|c| c.is_member(&subject));
+    if matches!(action, "approve" | "add") && now_in.is_some_and(|c| c.banned.contains(&subject)) {
+        return Err(format!("{who} is banned from this conference"));
+    }
+    if (matches!(action, "approve" | "add") && !member) || (action == "remove" && member) {
+        return Err(format!(
+            "{who}: the super admin's latest decision about them stands; only they can change it"
+        ));
+    }
     done(message, json!({ "did": subject, "action": action }))
 }
 
@@ -1130,7 +1271,7 @@ async fn member_role(state: &AppState, args: &Args) -> Result<Done, String> {
                 &space.to_string(),
                 index::ROLE,
                 &subject,
-                json!({ "subject": subject, "role": role, "assignedBy": acting.did }),
+                json!({ "subject": subject, "role": role, "assignedBy": acting.did, "since": index::iso(now_ms() as u64 * 1000) }),
             )
             .await?;
     }

@@ -96,6 +96,9 @@ pub struct Host {
     docs: Mutex<HashMap<String, (Value, i64)>>,
     used: Mutex<HashMap<String, i64>>,
     limits: Mutex<HashMap<String, Vec<i64>>>,
+    /// Per-IP limits, apart from the rest: a flood of new addresses can
+    /// only crowd out other addresses, never a person's own limits.
+    ip_limits: Mutex<HashMap<String, Vec<i64>>>,
     /// Organizations' derived permissions, by the index generation they
     /// were derived at.
     orgs: Mutex<HashMap<String, (i64, Arc<index::Org>)>>,
@@ -237,35 +240,39 @@ impl Host {
     /// `TRUSTED_PROXIES` so each client is counted by its own address.
     pub fn allow_ip(&self, state: &AppState, what: &str, ip: IpAddr, max: usize) -> bool {
         (ip.is_loopback() && !state.secure_cookies())
-            || self.allow(&format!("{what}:ip:{}", ip_key(ip)), max, 60_000)
+            || count(&self.ip_limits, &format!("{what}:ip:{}", ip_key(ip)), max, 60_000)
     }
 
     /// Counts an attempt against a limit of `max` per `window_ms`; false once
     /// it's over.
     pub fn allow(&self, key: &str, max: usize, window_ms: i64) -> bool {
-        let now = now_ms();
-        let mut limits = self.limits.lock().expect("the rate limits aren't poisoned");
-        if limits.len() >= CACHE_MAX && !limits.contains_key(key) {
-            limits.retain(|_, hits| hits.last().is_some_and(|t| now - t < window_ms));
-            // Still full: the key used longest ago makes room, so the map
-            // never grows past its cap.
-            if limits.len() >= CACHE_MAX
-                && let Some(oldest) = limits
-                    .iter()
-                    .min_by_key(|(_, hits)| hits.last().copied().unwrap_or(i64::MIN))
-                    .map(|(k, _)| k.clone())
-            {
-                limits.remove(&oldest);
-            }
-        }
-        let hits = limits.entry(key.to_owned()).or_default();
-        hits.retain(|t| now - t < window_ms);
-        if hits.len() >= max {
-            return false;
-        }
-        hits.push(now);
-        true
+        count(&self.limits, key, max, window_ms)
     }
+}
+
+/// Counts an attempt in one map of limits; false once it's over. At the cap,
+/// a new key evicts the one used longest ago, so the map never grows past it.
+fn count(limits: &Mutex<HashMap<String, Vec<i64>>>, key: &str, max: usize, window_ms: i64) -> bool {
+    let now = now_ms();
+    let mut limits = limits.lock().expect("the rate limits aren't poisoned");
+    if limits.len() >= CACHE_MAX && !limits.contains_key(key) {
+        limits.retain(|_, hits| hits.last().is_some_and(|t| now - t < window_ms));
+        if limits.len() >= CACHE_MAX
+            && let Some(oldest) = limits
+                .iter()
+                .min_by_key(|(_, hits)| hits.last().copied().unwrap_or(i64::MIN))
+                .map(|(k, _)| k.clone())
+        {
+            limits.remove(&oldest);
+        }
+    }
+    let hits = limits.entry(key.to_owned()).or_default();
+    hits.retain(|t| now - t < window_ms);
+    if hits.len() >= max {
+        return false;
+    }
+    hits.push(now);
+    true
 }
 
 /// What a per-IP limit counts by: the address, or for IPv6 its /64, which
@@ -346,6 +353,17 @@ mod tests {
             assert!(host.allow(&format!("k{i}"), 1, 60_000));
         }
         assert!(host.limits.lock().unwrap().len() <= CACHE_MAX);
+        // A flood of per-IP keys never evicts a person's own limit.
+        assert!(host.allow("join:did:plc:ana", 1, 60_000));
+        for i in 0..CACHE_MAX + 50 {
+            assert!(count(
+                &host.ip_limits,
+                &format!("join:ip:10.0.{}.{}", i / 256, i % 256),
+                1,
+                60_000
+            ));
+        }
+        assert!(!host.allow("join:did:plc:ana", 1, 60_000), "still counted");
         let a: IpAddr = "2001:db8:1:2:aaaa::1".parse().unwrap();
         let b: IpAddr = "2001:db8:1:2:bbbb::9".parse().unwrap();
         let other: IpAddr = "2001:db8:1:3::1".parse().unwrap();

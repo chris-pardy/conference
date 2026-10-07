@@ -10,6 +10,7 @@
 
 pub mod admin;
 pub mod cli;
+pub mod rules;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -311,25 +312,18 @@ pub async fn list_records(
         Ok(rows) => rows,
         Err(err) => return failed(err),
     };
-    let only_super = matches!(params.collection.as_str(), index::ROLE | index::RULES);
-    let admins_only = conference.writers_of(&params.collection) == "admins";
-    let mut records: Vec<(String, Value)> = rows
+    let mut records: Vec<(u64, String, Value)> = rows
         .into_iter()
         .filter_map(|(repo, rkey, rev, cid, value, seen_at)| {
-            // Dated by its commit, but not long before we first saw it.
             let seen_us = seen_at.map(|ms| ms.max(0) as u64 * 1000);
-            let us = index::conference_us(tid_micros(&rev)?, seen_us);
-            if !conference.was_member_at(&repo, us) {
-                return None;
-            }
-            // Role and rules records count only from the conference's super
-            // admin, and only while they're an admin, as the index has it.
-            if only_super && (repo != conference.super_admin() || !org.is_admin(&repo)) {
-                return None;
-            }
-            if admins_only && !may_post_as_admin(&org, conference, &repo) {
-                return None;
-            }
+            let us = rules::record_counts(
+                &org,
+                conference,
+                &repo,
+                &params.collection,
+                tid_micros(&rev)?,
+                seen_us,
+            )?;
             let value: Value = serde_json::from_str(&value).ok()?;
             let record = json!({
                 "uri": format!("{}/{repo}/{}/{rkey}", row.space, params.collection),
@@ -337,19 +331,13 @@ pub async fn list_records(
                 "cid": cid,
                 "value": value,
             });
-            Some((rev, record))
+            Some((us, rev, record))
         })
         .collect();
-    records.sort_by(|a, b| b.0.cmp(&a.0));
-    Json(json!({ "records": records.into_iter().map(|(_, r)| r).collect::<Vec<_>>() }))
+    // Newest first, by when each counts from (not the time its PDS claims).
+    records.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
+    Json(json!({ "records": records.into_iter().map(|(_, _, r)| r).collect::<Vec<_>>() }))
         .into_response()
-}
-
-/// Whether someone may write what the rules keep for owners and staff: an
-/// admin of the organization, or someone the super admin made owner or staff.
-pub fn may_post_as_admin(org: &Org, conference: &Conference, did: &str) -> bool {
-    org.is_admin(did)
-        || matches!(conference.roles.get(did).map(String::as_str), Some("owner" | "staff"))
 }
 
 #[derive(serde::Deserialize)]
@@ -460,7 +448,7 @@ pub async fn join(
             if let Some(entry) = unbound {
                 // Bound to this person from now on, and then a join like any
                 // other on the list.
-                if let Err(why) = bind_list_entry(&state, &org, &row.space, did, entry).await {
+                if let Err(why) = bind_list_entry(&state, &org, conference, did, entry).await {
                     return failed(why);
                 }
                 if let Err(res) = write_intake(&state, &user, &row.intake, JOIN, json!({})).await {
@@ -605,10 +593,11 @@ async fn unbound_listed<'a>(
 async fn bind_list_entry(
     state: &AppState,
     org: &Org,
-    space: &str,
+    conference: &Conference,
     did: &str,
     entry: &index::ListEntry,
 ) -> Result<(), String> {
+    let space = conference.space();
     let handle = match state.resolver.resolve_did(&org.super_admin).await {
         Ok(identity) => identity.handle,
         Err(_) => org.super_admin.clone(),
@@ -625,6 +614,40 @@ async fn bind_list_entry(
     }
     acting
         .create_in(state, &SpaceUri::admin(&org.did).to_string(), index::LIST_ENTRY, None, bound)
+        .await?;
+    give_list_role(state, conference, did, entry).await
+}
+
+/// The role a list row gives, for someone it matched only at join time (a
+/// handle that resolved then, or a verified email): a role record like an
+/// import's, written as the conference's super admin and assigned by the
+/// owner who imported the row, so it counts only while they're an owner and
+/// the list is on.
+async fn give_list_role(
+    state: &AppState,
+    conference: &Conference,
+    did: &str,
+    entry: &index::ListEntry,
+) -> Result<(), String> {
+    let Some(role) = &entry.role else { return Ok(()) };
+    if conference.roles.contains_key(did) {
+        return Ok(());
+    }
+    let writer = conference.super_admin();
+    let handle = match state.resolver.resolve_did(writer).await {
+        Ok(identity) => identity.handle,
+        Err(_) => writer.to_owned(),
+    };
+    let acting = admin::Acting::new(state, writer, &handle).await?;
+    acting
+        .put_in(
+            state,
+            conference.space(),
+            index::ROLE,
+            did,
+            json!({ "subject": did, "role": role, "assignedBy": entry.by, "via": "list",
+                    "since": index::iso(now_ms() as u64 * 1000) }),
+        )
         .await?;
     Ok(())
 }
@@ -742,10 +765,14 @@ async fn try_email_step(state: &AppState, id_hash: &str, space: &str) -> Result<
     }
     let Some(email) = body.get("email").and_then(Value::as_str) else { return Ok(()) };
     let hmac = state.secrets.email_hmac(email);
-    if !conference.settings.has("list")
-        || !conference.list.iter().any(|e| e.email_hmac.as_deref() == Some(&hmac))
-    {
+    let matched: Vec<&index::ListEntry> =
+        conference.list.iter().filter(|e| e.email_hmac.as_deref() == Some(&hmac)).collect();
+    if !conference.settings.has("list") || matched.is_empty() {
         return Ok(());
+    }
+    // The role its row gives, before the admission, so they join with it.
+    if let Some(entry) = matched.iter().find(|e| e.role.is_some()) {
+        give_list_role(state, conference, &session.did, entry).await?;
     }
     admit_by_super_admin(state, &org, space, &session.did, "email").await
 }

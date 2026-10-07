@@ -458,20 +458,33 @@ async fn send(state: &AppState, space: &str, jtis: &[String]) -> Result<(), Stri
     Ok(())
 }
 
+/// Sends revocations to each writer's PDS, addressed to one of its writers.
+/// If a PDS refuses that one (its account was deleted or moved, say), the
+/// next writer on it is tried, so one gone account can't keep a PDS from
+/// ever hearing of revocations.
 async fn deliver(state: &AppState, space: &str, jtis: &[String]) -> Result<(), String> {
-    let mut by_pds: BTreeMap<String, String> = BTreeMap::new();
+    let mut by_pds: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for writer in sync::writers(state, space).await? {
         match state.host.pds_of(state, &writer).await {
-            Ok(pds) => {
-                by_pds.entry(pds).or_insert(writer);
-            }
+            Ok(pds) => by_pds.entry(pds).or_default().push(writer),
             Err(why) => eprintln!("revocation: {why}"),
         }
     }
     let mut failures = Vec::new();
-    for (pds, writer) in by_pds {
-        if let Err(why) = send_revocations(state, space, &pds, &writer, jtis).await {
-            failures.push(why);
+    for (pds, writers) in by_pds {
+        let mut tried = Vec::new();
+        let mut delivered = false;
+        for writer in writers {
+            match send_revocations(state, space, &pds, &writer, jtis).await {
+                Ok(()) => {
+                    delivered = true;
+                    break;
+                }
+                Err(why) => tried.push(why),
+            }
+        }
+        if !delivered {
+            failures.push(tried.join("; "));
         }
     }
     if failures.is_empty() { Ok(()) } else { Err(failures.join("; ")) }
@@ -509,11 +522,16 @@ async fn send_revocations(
                     break;
                 }
                 Ok(res) => {
+                    let status = res.status();
                     last = format!(
-                        "{url} answered {}: {}",
-                        res.status(),
+                        "{url} answered {status} for {writer}: {}",
                         res.text().await.unwrap_or_default()
-                    )
+                    );
+                    // A refusal won't change on a retry; the caller tries
+                    // another writer on this PDS instead.
+                    if status.is_client_error() && status != StatusCode::TOO_MANY_REQUESTS {
+                        break;
+                    }
                 }
                 Err(err) => last = format!("{url}: {err}"),
             }
