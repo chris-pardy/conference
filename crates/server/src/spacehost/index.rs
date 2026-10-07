@@ -940,6 +940,9 @@ fn derive_conference(
             ROLE => {
                 if let (Some(subject), Some(role)) = (rec.str("subject"), rec.str("role"))
                     && may_assign(rec.str("assignedBy").unwrap_or(&conference_super), role)
+                    // Naming someone else as the decider never lifts the
+                    // writer's own cap.
+                    && may_assign(&conference_super, role)
                 {
                     roles.insert(subject.to_owned(), role.to_owned());
                     let dated = conference_us(rec.us, rec.seen_us);
@@ -989,11 +992,16 @@ fn derive_conference(
     let mut lifted_bans: BTreeMap<String, Vec<(u64, u64)>> = BTreeMap::new();
     let mut denied_at: BTreeMap<String, u64> = BTreeMap::new();
     let mut decided_at: BTreeMap<String, u64> = BTreeMap::new();
+    // Only her admission decisions lift a ban: her admin marks and email
+    // matches are neutral, here as in the timeline.
     let super_admits: Vec<(&str, u64)> = decisions
         .iter()
         .filter(about)
         .filter(|r| {
-            r.repo == super_admin && r.collection == MEMBER && r.value.get("until").is_none()
+            r.repo == super_admin
+                && r.collection == MEMBER
+                && r.value.get("until").is_none()
+                && !matches!(r.str("via"), Some(VIA_ADMIN | VIA_ADMIN_REMOVED | "email"))
         })
         .filter_map(|r| Some((r.str("subject")?, r.us)))
         .collect();
@@ -1660,6 +1668,95 @@ mod tests {
         assert!(conference.was_member_at(bram, 45), "Olga admitted him again at 40");
         assert!(conference.is_member(bram));
         assert!(!conference.banned.contains(bram));
+    }
+
+    #[test]
+    fn only_the_super_admins_own_admission_lifts_a_ban() {
+        let bram = "did:plc:bramaaaaaaaaaaaaaaaaaaaa";
+        let kees = "did:plc:keesaaaaaaaaaaaaaaaaaaaa";
+        let ban = rec(
+            &SpaceUri::admin(ORG).to_string(),
+            kees,
+            BAN,
+            "b",
+            20,
+            json!({ "space": space(CONFERENCE_TYPE), "subject": bram }),
+        );
+        let marked = |rkey: &str, via: &str, us: u64| {
+            let mut value = json!({ "space": space(CONFERENCE_TYPE), "subject": bram, "via": via });
+            if via == VIA_ADMIN_REMOVED {
+                value["until"] = json!(iso(us));
+            }
+            rec(&SpaceUri::admin(ORG).to_string(), OLGA, MEMBER, rkey, us, value)
+        };
+        // Bram, banned by Kees, is made an admin and then removed again:
+        // `org admin add`'s mark doesn't lift the ban.
+        let org = org_with(
+            &["code"],
+            true,
+            vec![
+                admin_rec(kees, "owner", 1),
+                ban.clone(),
+                marked("m1", VIA_ADMIN, 30),
+                marked("m2", VIA_ADMIN_REMOVED, 40),
+            ],
+        );
+        let conference = org.conference(&space(CONFERENCE_TYPE)).unwrap();
+        assert!(conference.banned.contains(bram), "Kees's ban stands");
+        assert!(!conference.is_member(bram));
+        // Nor does an email match.
+        let org = org_with(
+            &["code"],
+            true,
+            vec![admin_rec(kees, "owner", 1), ban.clone(), marked("m1", "email", 30)],
+        );
+        assert!(org.conference(&space(CONFERENCE_TYPE)).unwrap().banned.contains(bram));
+        // Her own admission does.
+        let org = org_with(
+            &["code"],
+            true,
+            vec![admin_rec(kees, "owner", 1), ban, member(OLGA, bram, "m1", 30, false)],
+        );
+        let conference = org.conference(&space(CONFERENCE_TYPE)).unwrap();
+        assert!(!conference.banned.contains(bram));
+        assert!(conference.is_member(bram));
+    }
+
+    #[test]
+    fn a_staff_conference_super_admin_cant_borrow_an_owners_powers() {
+        let mallory = "did:plc:malloryaaaaaaaaaaaaaaaaa";
+        let kees = "did:plc:keesaaaaaaaaaaaaaaaaaaaa";
+        let conference_space = space(CONFERENCE_TYPE);
+        let settings = rec(
+            &SpaceUri::admin(ORG).to_string(),
+            OLGA,
+            SPACE,
+            "s2",
+            3,
+            json!({ "space": conference_space, "intake": space(INTAKE_TYPE),
+                    "superAdmin": PIM, "join": { "methods": ["code"] } }),
+        );
+        let recs = |pim_role: &str| {
+            vec![
+                settings.clone(),
+                admin_rec(PIM, pim_role, 2),
+                admin_rec(kees, "owner", 2),
+                rec(
+                    &conference_space,
+                    PIM,
+                    ROLE,
+                    mallory,
+                    4,
+                    json!({ "subject": mallory, "role": "owner", "assignedBy": kees }),
+                ),
+            ]
+        };
+        let staff = org_with(&["code"], true, recs("staff"));
+        let conference = staff.conference(&conference_space).unwrap();
+        assert!(!conference.roles.contains_key(mallory), "an owner named as decider lends nothing");
+        let owner = org_with(&["code"], true, recs("owner"));
+        let conference = owner.conference(&conference_space).unwrap();
+        assert_eq!(conference.roles.get(mallory).map(String::as_str), Some("owner"));
     }
 
     #[test]

@@ -1,6 +1,15 @@
 import { DatabaseSync } from 'node:sqlite'
 import { afterAll, beforeAll, expect, test, vi } from '@vivarium-dev/client/vitest'
-import { eventually, type Json, publicRecords, writeSpaceRecord } from '../support/atproto.ts'
+import {
+  bringOnline,
+  changeHandle,
+  eventually,
+  type Json,
+  ownSpaceRecords,
+  publicRecords,
+  takeOffline,
+  writeSpaceRecord,
+} from '../support/atproto.ts'
 import {
   ATMOSPHERECONF,
   Attendee,
@@ -421,4 +430,120 @@ test('TC-8: the super admin counts as an owner without an admin record (review r
   await cliOk(dep, ['org', 'admin', 'remove', admins.kees.handle, '--org', org.did])
   const shown = await cliOkJson(dep, ['org', 'show', '--org', org.did])
   expect(shown.admins).not.toContainEqual(expect.objectContaining({ did: admins.kees.did }))
+})
+
+// Regressions from adversarial review round 5.
+
+test('TC-4: a handover moves the super admin’s records, not her plans (review round 5)', async ({ viv }) => {
+  const olga = await viv.createAccount(viv.handle('olga'))
+  const pim = await viv.createAccount(viv.handle('pim'))
+  const org = await createOrg(dep, olga)
+  await addAdmin(dep, org, pim, 'owner')
+  const conference = await createConference(dep, org, { ...ATMOSPHERECONF, superAdmin: pim, methods: ['code'] })
+  await writeSpaceRecord(viv.url, pim, conference.space, NSID.event, plan('Pim’s canal tour'))
+  const asOlga = await Attendee.signIn(dep, olga)
+  await eventually(
+    () => asOlga.listRecords(conference.space, NSID.event),
+    (answer) => (answer.body.records ?? []).some((r: Json) => r.author === pim.did),
+    'Pim’s plan is listed',
+  )
+
+  await cliOk(dep, ['conference', 'super-admin', olga.handle, '--conference', conference.space])
+
+  const pimsPlans = await ownSpaceRecords(viv.url, pim, conference.space, NSID.event)
+  expect(
+    pimsPlans.map((r) => r.value.name),
+    'Pim keeps his plan',
+  ).toEqual(['Pim’s canal tour'])
+  expect(await ownSpaceRecords(viv.url, olga, conference.space, NSID.event), 'and Olga doesn’t get it').toEqual([])
+  expect(await ownSpaceRecords(viv.url, pim, conference.space, NSID.role), 'Pim’s roles are moved').toEqual([])
+  expect((await ownSpaceRecords(viv.url, olga, conference.space, NSID.role)).length).toBeGreaterThan(0)
+})
+
+test('TC-4: an invite-only handover moves the event, not the super admin’s plans (review round 5)', async ({ viv }) => {
+  const sanne = await viv.createAccount(viv.handle('sanne'))
+  const joost = await viv.createAccount(viv.handle('joost'))
+  const bruiloft = await createOrg(dep, sanne)
+  await addAdmin(dep, bruiloft, joost, 'owner')
+  const wedding = await createConference(dep, bruiloft, { ...WEDDING, methods: ['code'] })
+  await writeSpaceRecord(viv.url, sanne, wedding.space, NSID.event, plan('Sanne’s dress fitting'))
+  const asSanne = await Attendee.signIn(dep, sanne)
+  await eventually(
+    () => asSanne.listRecords(wedding.space, NSID.event),
+    (answer) => (answer.body.records ?? []).some((r: Json) => r.value?.name === 'Sanne’s dress fitting'),
+    'Sanne’s plan is listed',
+  )
+
+  await cliOk(dep, ['conference', 'super-admin', joost.handle, '--conference', wedding.space])
+
+  const names = async (who: typeof sanne) =>
+    (await ownSpaceRecords(viv.url, who, wedding.space, NSID.event)).map((r) => r.value.name)
+  expect(await names(sanne), 'Sanne keeps her plan, and only it').toEqual(['Sanne’s dress fitting'])
+  expect(await names(joost), 'Joost has the wedding’s event').toEqual([WEDDING.name])
+  const page = await (await Attendee.signIn(dep, joost)).getConference(wedding.space)
+  expect(page.status).toBe(200)
+  expect(JSON.stringify(page.body)).toContain(WEDDING.name)
+})
+
+test('TC-54: a late list handle doesn’t make a code join depend on the super admin’s PDS (review round 5)', async ({
+  viv,
+}) => {
+  const { conference, superAdmin } = await seedConference(dep, accountsIn(viv), { methods: ['list', 'code'] })
+  const code = await sharedCode(dep, conference, uniqueCode('atmosphere27'))
+  const zoeHandle = viv.handle('zoe')
+  await importList(dep, conference, [{ handle: zoeHandle, role: 'speaker' }])
+  const zoe = await Attendee.signIn(dep, await viv.createAccount(zoeHandle))
+
+  await takeOffline(viv.url, superAdmin)
+  try {
+    const answer = await zoe.join({ conference: conference.space, code })
+    expect(answer.status).toBe(200)
+    expect(answer.body.status, 'the code lets her in').toBe('joined')
+  } finally {
+    await bringOnline(viv.url, superAdmin)
+  }
+  // Once the super admin's PDS is back, a later join binds the handle.
+  const again = await zoe.join({ conference: conference.space })
+  expect(again.body.status).toBe('joined')
+  expect(again.body.role).toBe('speaker')
+})
+
+test('TC-17: a list handle is bound to whoever a role let in (review round 5)', async ({ viv }) => {
+  const { conference } = await seedConference(dep, accountsIn(viv), { methods: ['list'] })
+  const zoeHandle = viv.handle('zoe')
+  await importList(dep, conference, [{ handle: zoeHandle }])
+  const zoe = await viv.createAccount(zoeHandle)
+  await setRole(dep, conference, zoe, 'speaker')
+  expect((await (await Attendee.signIn(dep, zoe)).join({ conference: conference.space })).body.status).toBe('joined')
+
+  // Zoe moves on to another handle, and someone else takes hers.
+  await changeHandle(viv.url, zoe, viv.handle('zoe-new'))
+  const next = await viv.createAccount(zoeHandle)
+  const answer = await (await Attendee.signIn(dep, next)).join({ conference: conference.space })
+  expect(answer.body.status, 'the row stayed with Zoe').not.toBe('joined')
+})
+
+test('TC-11: a code alone finds its conference among several organizations (review round 5)', async ({ viv }) => {
+  const first = await seedConference(dep, accountsIn(viv), { methods: ['code'] })
+  const second = await seedConference(dep, accountsIn(viv), { superAdmin: 'kees', methods: ['code'] })
+  await sharedCode(dep, first.conference, uniqueCode('atmosphere27'))
+  const code = await sharedCode(dep, second.conference, uniqueCode('atmosphere27'))
+  const ana = await Attendee.signIn(dep, await viv.createAccount(viv.handle('ana')))
+
+  const wrong = await ana.join({ code: uniqueCode('nope') })
+  expect(wrong.status).toBe(400)
+  expect(wrong.body.error).toBe('InvalidCode')
+
+  // An index made before codes were looked up by HMAC: reindex fills it in.
+  const db = new DatabaseSync(dep.databasePath as string)
+  try {
+    db.prepare('UPDATE space_records SET code_hmac = NULL WHERE space LIKE ?').run(`at://${second.org.did}/%`)
+  } finally {
+    db.close()
+  }
+  await cliOk(dep, ['reindex', '--org', second.org.did])
+
+  const answer = await ana.join({ code })
+  expect(answer.body.status).toBe('joined')
+  expect(answer.body.conference).toBe(second.conference.space)
 })

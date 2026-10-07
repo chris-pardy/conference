@@ -30,7 +30,7 @@ use crate::auth::{CurrentUser, xrpc_error};
 use crate::crypto::{tid_micros, tid_now};
 use crate::db::now_ms;
 use crate::spacehost::index::{self, AppAccess, Conference, JOIN, LEAVE, Org, Via};
-use crate::spacehost::{CONFERENCE_TYPE, ClientIp, SpaceUri, authority, notify, sync};
+use crate::spacehost::{CONFERENCE_TYPE, ClientIp, SpaceUri, notify, sync};
 
 pub const EVENT: &str = "community.lexicon.calendar.event";
 pub const SIDECAR: &str = "app.eventside.conference";
@@ -420,22 +420,37 @@ pub async fn join(
     let settings = &conference.settings;
     // A handle on the list that didn't resolve when it was imported, which
     // names this person now: bound to them from now on, with its role,
-    // however else they were or would be let in. Then a join like any
-    // other on the list.
-    let listed = matches!(conference.would_admit(did, None, now), Some(Via::Role | Via::List));
+    // however else they were or would be let in (a role included, so the
+    // row can't later admit the handle's next holder). Then a join like any
+    // other on the list. Binding is written as the super admin: if their PDS
+    // fails and something else lets the person in, they're let in anyway and
+    // the binding is tried again on a later join.
     if settings.has("list")
-        && !listed
+        && !conference.on_list(did)
         && let Some(entry) = unbound_listed(&state, conference, did).await
     {
-        if let Err(why) = bind_list_entry(&state, &org, conference, did, entry).await {
-            return failed(why);
+        match bind_list_entry(&state, &org, conference, did, entry).await {
+            Ok(()) => {
+                if !conference.is_member(did)
+                    && let Err(res) =
+                        write_intake(&state, &user, &row.intake, JOIN, json!({})).await
+                {
+                    return res;
+                }
+                return reload_answer(&state, &row, did).await;
+            }
+            Err(why) => {
+                let otherwise = conference.is_member(did)
+                    || conference.would_admit(did, code_hash.as_deref(), now).is_some();
+                if !otherwise {
+                    return failed(why);
+                }
+                eprintln!(
+                    "conference: {did}'s list handle isn't bound yet (tried again on a later \
+                     join): {why}"
+                );
+            }
         }
-        if !conference.is_member(did)
-            && let Err(res) = write_intake(&state, &user, &row.intake, JOIN, json!({})).await
-        {
-            return res;
-        }
-        return reload_answer(&state, &row, did).await;
     }
     if conference.is_member(did) {
         return joined(&org, conference);
@@ -559,10 +574,22 @@ async fn write_intake(
     Ok(())
 }
 
-/// The conference a code belongs to.
+/// The conference a code belongs to: only the organizations with a code
+/// record by that HMAC are loaded, so a wrong code loads none.
 async fn by_code(state: &AppState, code_hash: &str) -> Result<Option<Row>, String> {
-    for authority in authority::all(&state.db).await? {
-        let Some(org) = index::load(state, &authority.did).await? else { continue };
+    let spaces = sqlx::query_scalar::<_, String>(
+        "SELECT DISTINCT space FROM space_records WHERE code_hmac = $1 AND collection = $2 \
+         AND value IS NOT NULL",
+    )
+    .bind(code_hash)
+    .bind(index::CODE)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| e.to_string())?;
+    let orgs: std::collections::BTreeSet<String> =
+        spaces.iter().filter_map(|s| SpaceUri::parse(s)).map(|s| s.authority).collect();
+    for org in orgs {
+        let Some(org) = index::load(state, &org).await? else { continue };
         if let Some(conference) = org.conferences.values().find(|c| c.has_code(code_hash)) {
             return row(state, conference.space()).await;
         }

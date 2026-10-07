@@ -163,10 +163,18 @@ async fn apply(
     version: &Version,
     seen_at: i64,
 ) -> Result<(), String> {
+    // A code record's HMAC, for finding a code's conference without
+    // deriving every organization.
+    let code_hmac = (collection == index::CODE)
+        .then_some(version.value.as_deref())
+        .flatten()
+        .and_then(|v| serde_json::from_str::<Value>(v).ok())
+        .and_then(|v| v.get("codeHash").and_then(Value::as_str).map(str::to_owned));
     sqlx::query(
-        "INSERT INTO space_records (space, repo, collection, rkey, rev, cid, value) VALUES ($1, $2, $3, $4, $5, $6, $7) \
+        "INSERT INTO space_records (space, repo, collection, rkey, rev, cid, value, code_hmac) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
          ON CONFLICT (space, repo, collection, rkey) DO UPDATE SET rev = excluded.rev, cid = excluded.cid, \
-         value = excluded.value WHERE space_records.rev <= excluded.rev",
+         value = excluded.value, code_hmac = excluded.code_hmac WHERE space_records.rev <= excluded.rev",
     )
     .bind(space)
     .bind(repo)
@@ -175,6 +183,7 @@ async fn apply(
     .bind(&version.rev)
     .bind(&version.cid)
     .bind(&version.value)
+    .bind(code_hmac)
     .execute(&mut *db)
     .await
     .map_err(|e| e.to_string())?;

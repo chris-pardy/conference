@@ -651,6 +651,17 @@ async fn conference_handover(state: &AppState, args: &Args) -> Result<Done, Stri
     let sidecar = public_sidecar(state, conference).await?;
     let new = Acting::new(state, &subject, who).await?;
     let mut changed = false;
+    // An invite-only conference's event is in the space, the one its sidecar
+    // names. Every other calendar event in the space is someone's plan, the
+    // super admins' own included, and stays theirs.
+    let event_rkey = if conference.settings.invite_only {
+        match in_space_event_rkey(state, &space, &current).await? {
+            Some(rkey) => Some(rkey),
+            None => in_space_event_rkey(state, &space, &subject).await?,
+        }
+    } else {
+        None
+    };
 
     if current != subject {
         // What the current super admin wrote into the space, re-issued by the new.
@@ -672,6 +683,9 @@ async fn conference_handover(state: &AppState, args: &Args) -> Result<Done, Stri
         .map_err(|e| e.to_string())?;
         let mut copies = Vec::new();
         for (collection, rkey, rev, value, seen_at) in rows {
+            if !super_admins_record(&collection, &rkey, event_rkey.as_deref()) {
+                continue;
+            }
             let Ok(mut value) = serde_json::from_str::<Value>(&value) else { continue };
             let collection: &'static str = match collection.as_str() {
                 index::ROLE => {
@@ -740,6 +754,17 @@ async fn conference_handover(state: &AppState, args: &Args) -> Result<Done, Stri
         .fetch_all(&state.db)
         .await
         .map_err(|e| e.to_string())?;
+        let theirs = if conference.settings.invite_only {
+            in_space_event_rkey(state, &space, &repo).await?.or_else(|| event_rkey.clone())
+        } else {
+            None
+        };
+        let mut left: Vec<(String, String)> = left
+            .into_iter()
+            .filter(|(collection, rkey)| super_admins_record(collection, rkey, theirs.as_deref()))
+            .collect();
+        // The event before the sidecar that names it, so a rerun still finds it.
+        left.sort_by_key(|(collection, _)| collection == SIDECAR);
         if left.is_empty() {
             continue;
         }
@@ -770,6 +795,42 @@ async fn conference_handover(state: &AppState, args: &Args) -> Result<Done, Stri
         format!("{who} is now the super admin of {space}."),
         json!({ "space": space, "superAdmin": subject }),
     )
+}
+
+/// Whether a record in the conference space is one the super admin keeps as
+/// super admin (and a handover moves): the roles, the rules, the sidecar and,
+/// for an invite-only conference, the event the sidecar names. Their other
+/// records, such as plans, are their own.
+fn super_admins_record(collection: &str, rkey: &str, event_rkey: Option<&str>) -> bool {
+    match collection {
+        index::ROLE => true,
+        index::RULES | SIDECAR => rkey == "self",
+        EVENT => event_rkey == Some(rkey),
+        _ => false,
+    }
+}
+
+/// The rkey of the event an invite-only conference's sidecar in `repo` names.
+async fn in_space_event_rkey(
+    state: &AppState,
+    space: &str,
+    repo: &str,
+) -> Result<Option<String>, String> {
+    let value = sqlx::query_scalar::<_, String>(
+        "SELECT value FROM space_records WHERE space = $1 AND repo = $2 AND collection = $3 \
+         AND rkey = 'self' AND value IS NOT NULL",
+    )
+    .bind(space)
+    .bind(repo)
+    .bind(SIDECAR)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(value
+        .and_then(|v| serde_json::from_str::<Value>(&v).ok())
+        .and_then(|v| v.get("event").and_then(Value::as_str).map(str::to_owned))
+        .and_then(|uri| uri.rsplit('/').next().map(str::to_owned))
+        .filter(|rkey| !rkey.is_empty()))
 }
 
 /// A conference's super admin writes its roles and rules, which are an

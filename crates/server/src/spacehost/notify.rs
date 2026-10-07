@@ -480,7 +480,13 @@ async fn deliver(state: &AppState, space: &str, jtis: &[String]) -> Result<(), S
         }
         let mut tried = Vec::new();
         let mut delivered = false;
-        for writer in writers_to_try(&pds, writers) {
+        let mut all_writers_refused = false;
+        let last =
+            last_writers().lock().expect("the writer memo isn't poisoned").get(&pds).cloned();
+        let order = writers_to_try(&pds, writers);
+        // The writers after the last one taken, which the next pass moves past.
+        let fresh = order.iter().filter(|w| Some(*w) != last.as_ref()).count();
+        for writer in order {
             match send_revocations(state, space, &pds, &writer, jtis).await {
                 Ok(()) => {
                     remember_writer(&pds, &writer);
@@ -490,6 +496,7 @@ async fn deliver(state: &AppState, space: &str, jtis: &[String]) -> Result<(), S
                 Err(failure) => {
                     let kind = failure.kind;
                     tried.push(failure.why);
+                    all_writers_refused = kind == Refusal::Writer;
                     match kind {
                         Refusal::Writer => continue,
                         Refusal::Unsupported => rest(&pds),
@@ -500,14 +507,19 @@ async fn deliver(state: &AppState, space: &str, jtis: &[String]) -> Result<(), S
             }
         }
         if !delivered {
+            if all_writers_refused {
+                // The next pass starts on the writers after these.
+                move_on(&pds, fresh);
+            }
             failures.push(tried.join("; "));
         }
     }
     if failures.is_empty() { Ok(()) } else { Err(failures.join("; ")) }
 }
 
-/// At most this many writers are tried on one PDS per pass.
-const WRITERS_PER_PDS: usize = 3;
+/// At most this many writers are tried on one PDS per pass. A writer's
+/// refusal is a cheap 4xx, and later passes go on with the next ones.
+const WRITERS_PER_PDS: usize = 10;
 /// How long a PDS that doesn't take revocations is left alone.
 const REST_MS: i64 = 10 * 60 * 1000;
 
@@ -517,6 +529,22 @@ type Memo<T> = std::sync::Mutex<std::collections::HashMap<String, T>>;
 fn last_writers() -> &'static Memo<String> {
     static MEMO: std::sync::OnceLock<Memo<String>> = std::sync::OnceLock::new();
     MEMO.get_or_init(Default::default)
+}
+
+/// Where in its writers the next pass starts on each PDS, after passes on
+/// which every writer tried was refused.
+fn next_writers() -> &'static Memo<usize> {
+    static MEMO: std::sync::OnceLock<Memo<usize>> = std::sync::OnceLock::new();
+    MEMO.get_or_init(Default::default)
+}
+
+fn move_on(pds: &str, by: usize) {
+    let mut memo = next_writers().lock().expect("the writer memo isn't poisoned");
+    if memo.len() >= 10_000 {
+        memo.clear();
+    }
+    let at = memo.entry(pds.to_owned()).or_default();
+    *at = at.wrapping_add(by);
 }
 
 /// When each PDS that doesn't take revocations is tried again.
@@ -547,16 +575,27 @@ fn resting_until(pds: &str) -> Option<String> {
     (until > now_ms()).then(|| crate::spacehost::index::iso(until as u64 * 1000))
 }
 
-/// The writers to address a PDS's revocations to, the one it last took
-/// first, at most [`WRITERS_PER_PDS`].
+/// The writers to address a PDS's revocations to, at most
+/// [`WRITERS_PER_PDS`]: the one it last took first, then the others from
+/// where the last pass refused by every writer left off, so no run of gone
+/// writers keeps a PDS from hearing of revocations for good.
 fn writers_to_try(pds: &str, mut writers: Vec<String>) -> Vec<String> {
     let last = last_writers().lock().expect("the writer memo isn't poisoned").get(pds).cloned();
-    if let Some(at) = last.and_then(|last| writers.iter().position(|w| *w == last)) {
-        let last = writers.remove(at);
-        writers.insert(0, last);
+    let first =
+        last.and_then(|last| writers.iter().position(|w| *w == last)).map(|at| writers.remove(at));
+    if !writers.is_empty() {
+        let start = next_writers()
+            .lock()
+            .expect("the writer memo isn't poisoned")
+            .get(pds)
+            .copied()
+            .unwrap_or_default();
+        let len = writers.len();
+        writers.rotate_left(start % len);
     }
-    writers.truncate(WRITERS_PER_PDS);
-    writers
+    let mut order: Vec<String> = first.into_iter().chain(writers).collect();
+    order.truncate(WRITERS_PER_PDS);
+    order
 }
 
 /// Why a PDS didn't take revocations.
@@ -699,5 +738,24 @@ mod tests {
         let order = writers_to_try(pds, writers);
         assert_eq!(order.len(), WRITERS_PER_PDS);
         assert_eq!(order[0], "did:plc:w7");
+    }
+
+    #[test]
+    fn a_pds_whose_first_writers_are_gone_hears_from_the_later_ones() {
+        let pds = "https://gone-first.test.example";
+        let writers: Vec<String> = (0..25).map(|i| format!("did:plc:w{i:02}")).collect();
+        let first = writers_to_try(pds, writers.clone());
+        assert_eq!(first, writers[..WRITERS_PER_PDS]);
+        // Every one of them was refused: the next pass tries the next ones.
+        move_on(pds, first.len());
+        let second = writers_to_try(pds, writers.clone());
+        assert_eq!(second, writers[WRITERS_PER_PDS..2 * WRITERS_PER_PDS]);
+        move_on(pds, second.len());
+        let third = writers_to_try(pds, writers.clone());
+        assert!(third.contains(&writers[24]), "the last writers get their turn");
+        assert!(third.contains(&writers[0]), "and it wraps around");
+        // Once one is taken, it's tried first.
+        remember_writer(pds, &writers[22]);
+        assert_eq!(writers_to_try(pds, writers)[0], "did:plc:w22");
     }
 }

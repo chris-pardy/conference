@@ -1434,6 +1434,40 @@ at the PR alongside rounds 1 to 3:
   with the one the PDS last took, and leaves a PDS that doesn't take
   revocations (404, 501, `MethodNotImplemented`) alone for 10 minutes.
 
+**Review round 5 design notes (2026-10-06).** The round-5 fixes, to raise
+at the PR alongside rounds 1 to 4:
+
+- **A handover moves only the super admin's own records**: the roles, the
+  rules (`self`), the sidecar (`self`) and, for an invite-only conference,
+  the event that sidecar names. Every other calendar event in the space is
+  a plan and stays where it is, the super admins' own included, and the
+  cleanup of earlier super admins' records spares them too.
+- **Revocations work through a PDS's writers in turn.** Up to 10 writers
+  per PDS per pass (a writer's refusal is a cheap 4xx); when every one
+  tried is refused as gone, the next pass starts after them, wrapping
+  around, so a run of gone accounts can't keep a PDS from hearing of
+  revocations. The cursor isn't persisted: after a restart it starts over,
+  and the walk takes at most a few passes again.
+- **Binding a late list handle is best-effort when something else lets
+  the person in.** It's written as the super admin, so a failure (her PDS
+  down) only fails the join when the list is the only way in; otherwise
+  they're let in and the binding is tried again on a later join. It's
+  skipped only when the person is already on the list by their DID, not
+  when a role admits them, so the row can't later admit the handle's next
+  holder.
+- **Only the super admin's own admission lifts another owner's ban.** Her
+  admin marks (`orgAdmin`, written by `org admin add` for every conference)
+  and email matches don't, as they're neutral in the timeline too. `org
+  admin add` doesn't refuse a banned person: admins can't be banned while
+  they're admins, and once removed as an admin the ban stands again.
+- **A role record counts only within its writer's own powers too**: naming
+  an owner in `assignedBy` doesn't lift a staff conference super admin's
+  cap.
+- **A code alone is looked up by its HMAC.** The index keeps each code
+  record's HMAC in a column (migration 0005), so a code-only join loads
+  only the organizations with that code, and a wrong one loads none.
+  `reindex` fills the column in for an index made before.
+
 **Red-test gate (2026-10-06):** the user approved the red tests and the
 surfaces they pin (see Build notes), with these contract changes:
 
@@ -2216,3 +2250,48 @@ and `scripts/check-tests-unchanged.sh` reports the frozen tests unchanged.
 8. **[nit] The last-owner check ignored the super admin without an admin
    record.** **Fixed:** she counts among the owners. Integration TC-8
    (round 4).
+
+### Round 5
+
+Reviewer: a fresh subagent following `adversarial-review`. Verdict: not
+clean (0 blocking, 3 major, 4 minor, 0 nit). After the rework: `pnpm check`
+green (lint, build, Rust 80 + unit 122 + integration 100 + tooling 33 + e2e
+35), and `scripts/check-tests-unchanged.sh` reports the frozen tests
+unchanged.
+
+1. **[major] A handover moved and deleted the super admins' plans.** It
+   copied and deleted every calendar event of the old (and every earlier)
+   super admin's in the space, but members' plans are calendar events too.
+   **Fixed:** only roles, the `self` rules and sidecar and, for an
+   invite-only conference, the event its sidecar names are copied and
+   tidied away. Integration TC-4 (round 5), public and invite-only.
+2. **[major] A PDS whose first writers were gone never got revocations.**
+   At most 3 writers, always the lowest DIDs unless one had been accepted
+   in this process. **Fixed:** up to 10 writers a pass, and when all of
+   them are refused as gone the next pass starts after them (wrapping
+   around); the one last accepted still goes first. Not persisted: after a
+   restart the walk starts over and again reaches every writer within a
+   few passes. Rust test
+   `a_pds_whose_first_writers_are_gone_hears_from_the_later_ones`.
+3. **[major] Binding a late list handle made code, open and member joins
+   depend on the super admin's PDS.** **Fixed:** when the binding fails and
+   the person is a member or a code or open conference admits them, they're
+   let in and it's tried again on a later join; it fails the join only when
+   the list is the only way in. Integration TC-54 (round 5).
+4. **[minor] Someone let in by a role didn't get their list handle bound.**
+   **Fixed:** binding is skipped only when they're on the list by DID.
+   Integration TC-17 (round 5).
+5. **[minor] `org admin add`'s mark lifted another owner's ban for good.**
+   **Fixed:** only the super admin's own admissions lift a ban, not her
+   admin marks or email matches. `org admin add` still accepts a banned
+   person: admins can't be banned while admins, and the ban stands again
+   once they aren't. Rust test `only_the_super_admins_own_admission_lifts_a_ban`.
+6. **[minor] A staff conference super admin escaped the cap by naming an
+   owner in `assignedBy`.** **Fixed:** a role counts only if both the named
+   decider and the writer may assign it. Rust test
+   `a_staff_conference_super_admin_cant_borrow_an_owners_powers`.
+7. **[minor] A code-only join derived every organization.** **Fixed:** code
+   records' HMACs are a column of the index (migration 0005, kept by every
+   write and by `reindex`), so only organizations with that code are
+   loaded. Integration TC-11 (round 5) covers two organizations, a wrong
+   code, and an index from before the column after `reindex`.
