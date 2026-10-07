@@ -118,26 +118,39 @@ test('TC-51: Staff can’t override the super admin', async ({ viv }) => {
   expect(await mallory.isMember(conference.space)).toBe(false)
 })
 
-test('TC-52: Between other admins, a ban wins and otherwise the latest decision stands', async ({ viv }) => {
-  // Kees is an owner: the design lets owners and the super admin ban, not staff.
-  const { org, conference, admins } = await seedConference(dep, accountsIn(viv), { staff: ['pim'], methods: ['code'] })
+test('TC-52: Staff can’t override an owner’s decision', async ({ viv }) => {
+  // Pim and Lotte are staff, Kees an owner.
+  const { org, conference, admins } = await seedConference(dep, accountsIn(viv), {
+    staff: ['pim', 'lotte'],
+    methods: ['code'],
+  })
   const kees = await viv.createAccount(viv.handle('kees'))
   await addAdmin(dep, org, kees, 'owner')
   const code = await sharedCode(dep, conference, uniqueCode('atmosphere27'))
   const bram = await Attendee.signIn(dep, await viv.createAccount(viv.handle('bram')))
   const ana = await Attendee.signIn(dep, await viv.createAccount(viv.handle('ana')))
+  const joost = await Attendee.signIn(dep, await viv.createAccount(viv.handle('joost')))
   expect((await ana.join({ conference: conference.space, code })).body.status).toBe('joined')
 
   expect((await memberAction(dep, conference, ['member', 'add'], bram.person, { as: admins.pim })).code).toBe(0)
   expect(await bram.isMember(conference.space)).toBe(true)
   expect((await memberAction(dep, conference, ['member', 'ban'], bram.person, { as: kees })).code).toBe(0)
-  expect(await bram.isMember(conference.space), 'the ban wins').toBe(false)
+  expect(await bram.isMember(conference.space), 'the owner’s ban stands').toBe(false)
   expect((await bram.join({ conference: conference.space, code })).body.status).toBe('refused')
 
   expect((await memberAction(dep, conference, ['member', 'remove'], ana.person, { as: kees })).code).toBe(0)
   expect(await ana.isMember(conference.space)).toBe(false)
-  expect((await memberAction(dep, conference, ['member', 'add'], ana.person, { as: admins.pim })).code).toBe(0)
-  expect(await ana.isMember(conference.space), 'the latest decision stands').toBe(true)
+  await memberAction(dep, conference, ['member', 'add'], ana.person, { as: admins.pim })
+  expect(await ana.isMember(conference.space), 'staff can’t override the owner’s removal').toBe(false)
+  expect((await memberAction(dep, conference, ['member', 'add'], ana.person, { as: kees })).code).toBe(0)
+  expect(await ana.isMember(conference.space), 'the owner re-admits her').toBe(true)
+
+  // Joost got in with a code: no admin decided about him.
+  expect((await joost.join({ conference: conference.space, code })).body.status).toBe('joined')
+  expect((await memberAction(dep, conference, ['member', 'remove'], joost.person, { as: admins.lotte })).code).toBe(0)
+  expect(await joost.isMember(conference.space)).toBe(false)
+  expect((await memberAction(dep, conference, ['member', 'add'], joost.person, { as: admins.pim })).code).toBe(0)
+  expect(await joost.isMember(conference.space), 'between staff, the latest decision stands').toBe(true)
 })
 
 test('TC-53: A former admin’s decisions stop counting', async ({ viv }) => {
