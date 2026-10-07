@@ -1243,8 +1243,10 @@ the build chose:
   that space before, so records from people who have since left are still
   re-derived.
 - **Rate limits.** `join` is limited per person (10 a minute) and per IP
-  (30 a minute). The per-IP limit is skipped for loopback addresses, which
-  every test and the e2e server share.
+  (30 a minute). The per-IP limits skip loopback addresses only when
+  `PUBLIC_URL` is `http` (local development, which every test and the e2e
+  server share). Behind a reverse proxy, `TRUSTED_PROXIES` names it, and a
+  request through it counts against the address it last forwarded for.
 - **Revocation on any lost access.** For each membership, role, ban or app
   access change, the host computes who can read before and after, and
   revokes the credentials of everyone who lost access, whatever the cause.
@@ -1265,6 +1267,49 @@ the build chose:
   unreleased. CI pins `@vivarium-dev/cli` 0.0.2 from npm, so e2e TC-8 will
   fail in CI until a vivarium release with the fix is published and pinned
   here. Locally, `VIVARIUM_BIN` pointing at a build of that branch passes.
+
+**Review round 1 design notes (2026-10-06).** The round-1 fixes go a
+little past the approved design in these places, to raise at the PR:
+
+- **Kept state grows.** The design says the only state to keep is the
+  authorities' keys and super admins. Two more are needed to rebuild
+  everything: the host's **writer set** (`space_writers`, from accepted
+  write notifications), because the people who wrote join and leave records
+  into an intake space can't be found from the super admin's repo; and the
+  **first-seen times** of records (`space_record_seen`, next point).
+  `reindex` keeps both, and rebuilds everything else, the `conferences`
+  table included.
+- **Joins count from when we first saw them.** A join or leave counts from
+  its commit's revision, but never earlier than when our host first saw it.
+  A writer's PDS picks its own revisions, so without this a self-hosted PDS
+  could backdate a join past a code's expiry, back into an earlier open
+  period, or ahead of others for a code's last use.
+- **Role records name who assigned them.** `member role` and `list import`
+  write role records with `assignedBy` (the acting admin), and imported ones
+  with `via: "list"`. A role counts, and admits its subject, only while that
+  admin could assign it: owner and staff roles by owners and the super
+  admin, other roles by any admin. A role from the list admits only while
+  the `list` method is on. `member role` refuses staff giving or taking
+  owner and staff roles, and removing an admin deletes the roles they
+  assigned. `rules set` needs an owner.
+- **A conference's super admin must be an admin.** `conference create
+  --super-admin` refuses anyone who isn't, since their writes into the space
+  are taken only from members. A create that fails partway is undone.
+- **Invite-only conferences stay hidden.** `listRecords`, `leave`, and a
+  `join` naming the conference that no way in admits all answer 404
+  (`ConferenceNotFound`) to non-members, as `getConference` does. A join by
+  code alone still answers `InvalidCode`.
+- **Admins can't leave** (400 `AdminCannotLeave`): they're members because
+  they're admins.
+- **App access changes revoke.** Taking an app off a space's list (or
+  switching an open space back to its list) revokes that app's credentials,
+  and our host re-checks a credential's user and app on every use.
+  `registerNotify` registrations end with the access they were made with.
+- **`AUTHORITY_KEY_SECRET` is required when `PUBLIC_URL` is `https`.** It
+  stays optional for `http` (development and tests).
+- **Write notifications revoke too.** A record that arrives by
+  `notifyWrite` (an admin's ban from another app, a leave) revokes the
+  credentials of whoever it took access from, like a CLI change.
 
 **Red-test gate (2026-10-06):** the user approved the red tests and the
 surfaces they pin (see Build notes), with these contract changes:
@@ -1766,3 +1811,94 @@ three frozen integration assertions (TC-7, TC-9, TC-18) from "exactly
 `atproto`" to "the default sign-in scope list", which now includes the
 intake scope. Vivarium's sign-up page is to be fixed to wrap long client
 IDs, so e2e TC-8 passes unchanged.
+
+### Round 1
+
+Reviewer: a fresh subagent following `adversarial-review`. Verdict: not
+clean (0 blocking, 9 major, 5 minor, 3 nits). After the rework: `pnpm check`
+green (lint, build, Rust 56 + unit 122 + integration 82 + tooling 33 + e2e 35),
+and `scripts/check-tests-unchanged.sh` reports the frozen tests unchanged.
+
+1. **[major] `member role` had no authorization, and roles admitted their
+   subject whoever gave them.** Staff could make anyone owner; the role
+   record admitted its subject, outlived the admin who gave it (defeating
+   TC-53 by that path), and `list import` roles admitted even with `list`
+   off.
+   **Fixed:** role records carry `assignedBy` (and `via: "list"` from
+   imports). A role counts and admits only while that admin may assign it
+   (owner and staff roles by owners), and a list role only while `list` is
+   on. `member role` refuses staff giving or taking owner and staff roles;
+   removing an admin deletes the roles they gave; `rules set` needs an
+   owner. Rust tests in `index.rs`, and `conference-review.test.ts` (TC-51,
+   TC-53 regressions). See "Review round 1 design notes".
+2. **[major] Changing app access didn't revoke.**
+   **Fixed:** a change to a space's app access revokes the credentials of
+   every app that lost it (by `client_id`, and unattested ones when a list
+   is in force), and `credential::check` re-checks the user's and the app's
+   access on every use. Covered by the TC-36 regression test.
+3. **[major] Access changes arriving by `notifyWrite` never revoked.**
+   **Fixed:** after syncing a notified repo, the host diffs readers and app
+   access before and after, and revokes the difference, as the CLI does.
+4. **[major] Admissions were judged by a PDS-chosen revision.**
+   **Fixed:** an intake record counts from its commit's revision, but never
+   earlier than when our host first saw it (`space_record_seen`, kept across
+   reindex). Codes' expiry, settings snapshots and code-use order all use
+   that time. Rust test `a_join_counts_from_when_it_was_first_seen_not_before`.
+5. **[major] Rate limits were charged before verification, and lost behind
+   a proxy.**
+   **Fixed:** the per-DID `getSpaceCredential` limit and the `notify:{repo}`
+   limit are counted only after the delegation or service auth verifies. The
+   per-IP limits exempt loopback only when `PUBLIC_URL` is `http`, and
+   `TRUSTED_PROXIES` takes the client's address from `X-Forwarded-For` when
+   the peer is a trusted proxy (unit test `client_ip`).
+6. **[major] Reindex emptied the index first and swallowed failures.**
+   **Fixed:** reindex reads every repo first, from scratch, then replaces the
+   organization's index in one transaction. A repo it can't read keeps its
+   old records, and the command then exits non-zero naming it. If the super
+   admin's repo can't be read, nothing changes.
+7. **[major] A non-admin could be a conference's super admin.**
+   **Fixed:** `conference create --super-admin` refuses anyone who isn't an
+   admin of the organization (TC-4 regression test).
+8. **[major] Reindex didn't rebuild `conferences`; the writer set is kept
+   state.**
+   **Fixed:** reindex rebuilds each conference's row from the super admin's
+   settings and the event and sidecar (public, or inside the space), keeping
+   a row whose event can't be read. The TC-50 regression test wipes
+   `space_records`, `space_repos` and `conferences` for real and checks the
+   rebuild. The writer set and first-seen times are recorded as required
+   kept state in "Review round 1 design notes".
+9. **[major] Every request re-derived the whole organization.**
+   **Fixed:** the derived organization is cached per authority, keyed by an
+   `index_generations` counter in the database that every index write bumps
+   (the CLI's too), so a request costs one indexed lookup until the records
+   change.
+10. **[minor] Membership was checked before the delegation's signature.**
+    **Fixed:** the delegation is verified before membership is checked or
+    the per-DID limit is counted, so someone without a user's token learns
+    nothing about them.
+11. **[minor] Invite-only conferences were revealed by `listRecords` and
+    `join`.**
+    **Fixed:** to non-members, `listRecords`, `leave`, and a `join` naming
+    the conference that nothing admits answer 404 like `getConference`
+    (TC-7 regression test).
+12. **[minor] Without `AUTHORITY_KEY_SECRET`, the sealing secret sat beside
+    the sealed keys.**
+    **Fixed:** the server refuses to start with an `https` `PUBLIC_URL` and
+    no `AUTHORITY_KEY_SECRET`; it stays optional for `http`.
+13. **[minor] `registerNotify` registrations survived revocation.**
+    **Fixed:** registrations record the credential's delegator and client
+    ID, and revoking either drops them.
+14. **[minor] `conference create` wasn't atomic.**
+    **Fixed:** everything is validated before the first write, and if a
+    write fails, the ones before it are deleted again (public event and
+    sidecar, and the settings record that makes the space exist), so a retry
+    starts clean. The `conferences` row is saved before success is reported.
+15. **[nit] Admins could "leave".**
+    **Fixed:** `leave` answers 400 `AdminCannotLeave` for admins (TC-26
+    regression test).
+16. **[nit] `list import` split on commas.**
+    **Fixed:** an RFC 4180 reader handles quoted fields (unit test).
+17. **[nit] Two ideas of a conference's super admin.**
+    **Fixed:** `Conference::super_admin()` is the one answer (its settings'
+    super admin, else the organization's), used by the index, `listRecords`,
+    reindex and the CLI.

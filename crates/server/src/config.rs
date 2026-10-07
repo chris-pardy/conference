@@ -49,6 +49,9 @@ pub struct Config {
     pub plc_url: String,
     pub handle_resolver_url: String,
     pub allow_private_network: bool,
+    /// Reverse proxies in front of us (`TRUSTED_PROXIES`): a request from one
+    /// of them is from the address it names last in `X-Forwarded-For`.
+    pub trusted_proxies: Vec<std::net::IpAddr>,
     pub session_idle_timeout: Duration,
     pub token_renew_interval: Duration,
     pub token_refresh_skew: Duration,
@@ -94,6 +97,7 @@ impl Config {
             ),
             allow_private_network: var("ALLOW_PRIVATE_NETWORK")
                 .is_some_and(|v| v == "true" || v == "1"),
+            trusted_proxies: trusted_proxies(var("TRUSTED_PROXIES").as_deref())?,
             session_idle_timeout: nonzero(
                 "SESSION_IDLE_TIMEOUT",
                 duration("SESSION_IDLE_TIMEOUT", Duration::from_secs(30 * 24 * 60 * 60))?,
@@ -143,6 +147,20 @@ fn public_url(value: &str) -> Result<String, String> {
                 "PUBLIC_URL must be a bare origin like https://app.example (no path, query or credentials), not {value:?}"
             )
         })
+}
+
+/// `TRUSTED_PROXIES`: IP addresses, separated by commas or spaces.
+fn trusted_proxies(value: Option<&str>) -> Result<Vec<std::net::IpAddr>, String> {
+    value
+        .unwrap_or_default()
+        .split([',', ' '])
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| {
+            s.trim()
+                .parse()
+                .map_err(|_| format!("TRUSTED_PROXIES must list IP addresses, not {s:?}"))
+        })
+        .collect()
 }
 
 fn nonzero(name: &str, value: Duration) -> Result<Duration, String> {

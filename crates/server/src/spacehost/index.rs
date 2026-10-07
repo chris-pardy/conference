@@ -21,6 +21,7 @@
 //!   conference); otherwise it's a request, if requests were on.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::Arc;
 
 use serde_json::{Value, json};
 
@@ -51,12 +52,22 @@ pub struct Rec {
     pub rev: String,
     /// When its commit was made, in microseconds (from `rev`).
     pub us: u64,
+    /// When our host first saw this version of it, in microseconds.
+    pub seen_us: Option<u64>,
     pub value: Value,
 }
 
 impl Rec {
     fn str(&self, field: &str) -> Option<&str> {
         self.value.get(field).and_then(Value::as_str)
+    }
+
+    /// When a record in an intake space counts from: its commit, but never
+    /// before our host first saw it. Anyone can write there, from any PDS,
+    /// and a PDS chooses its own revisions, so a backdated join can't jump
+    /// ahead of others, or back to before a code expired.
+    fn intake_us(&self) -> u64 {
+        self.seen_us.map_or(self.us, |seen| self.us.max(seen))
     }
 }
 
@@ -280,8 +291,16 @@ pub struct Conference {
     history: Vec<Settings>,
     codes: BTreeMap<String, Code>,
     pub list: Vec<ListEntry>,
-    /// Roles, from the conference super admin's role records.
+    /// The conference's super admin: who writes its roles and rules.
+    pub super_admin_did: String,
+    /// Roles, from the conference super admin's role records, each counting
+    /// only while the admin who assigned it could.
     pub roles: BTreeMap<String, String>,
+    /// Roles assigned by an attendee list import, which admit their subject
+    /// only while the list does.
+    list_roles: BTreeSet<String>,
+    /// Who assigned each role, when another admin did.
+    pub role_deciders: BTreeMap<String, String>,
     /// The rules, from the conference super admin's rules record.
     pub rules: Option<Value>,
     /// Membership periods by DID, past members included.
@@ -303,8 +322,10 @@ impl Conference {
         self.settings.intake.as_deref()
     }
 
-    pub fn super_admin(&self) -> Option<&str> {
-        self.settings.super_admin.as_deref()
+    /// The conference's super admin: the one its settings name, else the
+    /// organization's.
+    pub fn super_admin(&self) -> &str {
+        &self.super_admin_did
     }
 
     pub fn is_member(&self, did: &str) -> bool {
@@ -364,7 +385,8 @@ impl Conference {
         us: u64,
     ) -> Option<Via> {
         let settings = self.settings_at(us);
-        if self.roles.contains_key(did) {
+        if self.roles.contains_key(did) && (!self.list_roles.contains(did) || settings.has("list"))
+        {
             Some(Via::Role)
         } else if settings.has("list") && self.on_list(did) {
             Some(Via::List)
@@ -550,11 +572,15 @@ impl Org {
 }
 
 /// The index's records for an organization: its admin and intake spaces,
-/// and the role and rules records in its conference spaces.
+/// and the role and rules records in its conference spaces, each with when
+/// our host first saw it.
 pub async fn records(state: &AppState, org: &str) -> Result<Vec<Rec>, String> {
-    let rows = sqlx::query_as::<_, (String, String, String, String, String, String)>(
-        "SELECT space, repo, collection, rkey, rev, value FROM space_records WHERE value IS NOT NULL AND \
-         (space = $1 OR space LIKE $2 OR (space LIKE $3 AND collection IN ($4, $5)))",
+    let rows = sqlx::query_as::<_, (String, String, String, String, String, String, Option<i64>)>(
+        "SELECT r.space, r.repo, r.collection, r.rkey, r.rev, r.value, s.seen_at FROM space_records r \
+         LEFT JOIN space_record_seen s ON s.space = r.space AND s.repo = r.repo \
+         AND s.collection = r.collection AND s.rkey = r.rkey AND s.rev = r.rev \
+         WHERE r.value IS NOT NULL AND \
+         (r.space = $1 OR r.space LIKE $2 OR (r.space LIKE $3 AND r.collection IN ($4, $5)))",
     )
     .bind(SpaceUri::admin(org).to_string())
     .bind(format!("at://{org}/space/{INTAKE_TYPE}/%"))
@@ -566,9 +592,10 @@ pub async fn records(state: &AppState, org: &str) -> Result<Vec<Rec>, String> {
     .map_err(|e| format!("could not read the index: {e}"))?;
     Ok(rows
         .into_iter()
-        .filter_map(|(space, repo, collection, rkey, rev, value)| {
+        .filter_map(|(space, repo, collection, rkey, rev, value, seen_at)| {
             Some(Rec {
                 us: tid_micros(&rev)?,
+                seen_us: seen_at.map(|ms| ms.max(0) as u64 * 1000),
                 value: serde_json::from_str(&value).ok()?,
                 space,
                 repo,
@@ -580,23 +607,62 @@ pub async fn records(state: &AppState, org: &str) -> Result<Vec<Rec>, String> {
         .collect())
 }
 
-/// An organization's permissions, from the index.
-pub async fn load(state: &AppState, org: &str) -> Result<Option<Org>, String> {
+/// How many times an organization's index has changed. Every write to the
+/// index bumps it, from the server or the admin CLI (another process), so a
+/// derived view is reused exactly until the records under it change.
+pub async fn generation(state: &AppState, org: &str) -> Result<i64, String> {
+    let generation =
+        sqlx::query_scalar::<_, i64>("SELECT generation FROM index_generations WHERE org = $1")
+            .bind(org)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| format!("could not read the index: {e}"))?;
+    Ok(generation.unwrap_or(0))
+}
+
+/// Records that an organization's index changed. Called after the change is
+/// written, so a view cached under an older generation is never reused.
+pub async fn bump(state: &AppState, org: &str) -> Result<(), String> {
+    sqlx::query(
+        "INSERT INTO index_generations (org, generation) VALUES ($1, 1) \
+         ON CONFLICT (org) DO UPDATE SET generation = index_generations.generation + 1",
+    )
+    .bind(org)
+    .execute(&state.db)
+    .await
+    .map_err(|e| format!("could not update the index: {e}"))?;
+    Ok(())
+}
+
+/// An organization's permissions, from the index: derived once per change
+/// to its records, and shared until the next.
+pub async fn load(state: &AppState, org: &str) -> Result<Option<Arc<Org>>, String> {
+    // Read before the records: a change landing in between is then seen as
+    // newer than what's cached, never older.
+    let generation = generation(state, org).await?;
+    if let Some(cached) = state.host.cached_org(org, generation) {
+        return Ok(Some(cached));
+    }
     let Some(authority) = super::authority::get(&state.db, org).await? else { return Ok(None) };
     let recs = records(state, org).await?;
     let eventside = state.oauth.client_id_for("atproto");
-    Ok(Some(derive(
+    let derived = Arc::new(derive(
         org,
         &authority.super_admin,
         authority.created_at as u64 * 1000,
         &recs,
         &state.secrets,
         &eventside,
-    )))
+    ));
+    state.host.cache_org(org, generation, derived.clone());
+    Ok(Some(derived))
 }
 
 /// The organization a space belongs to.
-pub async fn load_for_space(state: &AppState, space: &SpaceUri) -> Result<Option<Org>, String> {
+pub async fn load_for_space(
+    state: &AppState,
+    space: &SpaceUri,
+) -> Result<Option<Arc<Org>>, String> {
     load(state, &space.authority).await
 }
 
@@ -745,13 +811,36 @@ fn derive_conference(
     }
 
     // Roles and rules: only from the conference's super admin, in its space.
+    // A role written for another admin (`assignedBy`) counts only while that
+    // admin may assign it: owner and staff roles by owners, others by any
+    // admin. That's what lets a role admit the person it names.
+    let may_assign = |decider: &str, role: &str| {
+        if decider == super_admin || decider == conference_super {
+            return true;
+        }
+        match admins.get(decider).map(|a| a.role) {
+            Some(Role::Owner) => true,
+            Some(Role::Staff) => !matches!(role, "owner" | "staff"),
+            None => false,
+        }
+    };
     let mut roles = BTreeMap::new();
+    let mut list_roles = BTreeSet::new();
+    let mut role_deciders = BTreeMap::new();
     let mut rules = None;
     for rec in recs.iter().filter(|r| r.space == space && r.repo == conference_super) {
         match rec.collection.as_str() {
             ROLE => {
-                if let (Some(subject), Some(role)) = (rec.str("subject"), rec.str("role")) {
+                if let (Some(subject), Some(role)) = (rec.str("subject"), rec.str("role"))
+                    && may_assign(rec.str("assignedBy").unwrap_or(&conference_super), role)
+                {
                     roles.insert(subject.to_owned(), role.to_owned());
+                    if let Some(decider) = rec.str("assignedBy") {
+                        role_deciders.insert(subject.to_owned(), decider.to_owned());
+                    }
+                    if rec.str("via") == Some("list") {
+                        list_roles.insert(subject.to_owned());
+                    }
                 }
             }
             RULES if rec.rkey == "self" => rules = Some(rec.value.clone()),
@@ -764,7 +853,10 @@ fn derive_conference(
         history,
         codes,
         list,
+        super_admin_did: conference_super.clone(),
         roles,
+        list_roles,
+        role_deciders,
         rules,
         members: BTreeMap::new(),
         banned: BTreeSet::new(),
@@ -820,19 +912,23 @@ fn derive_conference(
     let intake = conference.settings.intake.clone().unwrap_or_default();
     let mut intake_recs: Vec<&Rec> = recs.iter().filter(|r| r.space == intake).collect();
     intake_recs.sort_by(|a, b| {
-        a.us.cmp(&b.us).then_with(|| a.repo.cmp(&b.repo)).then_with(|| a.rkey.cmp(&b.rkey))
+        a.intake_us()
+            .cmp(&b.intake_us())
+            .then_with(|| a.repo.cmp(&b.repo))
+            .then_with(|| a.rkey.cmp(&b.rkey))
     });
     let mut requested_at: BTreeMap<String, u64> = BTreeMap::new();
     let mut uses = HashMap::new();
     for rec in intake_recs {
         let subject = rec.repo.clone();
+        let us = rec.intake_us();
         match rec.collection.as_str() {
             JOIN => {
-                if ban_at.get(&subject).is_some_and(|at| *at <= rec.us) {
+                if ban_at.get(&subject).is_some_and(|at| *at <= us) {
                     continue;
                 }
                 let hash = rec.str("code").map(|c| secrets.code_hmac(c));
-                match conference.admission(&uses, &subject, hash.as_deref(), rec.us) {
+                match conference.admission(&uses, &subject, hash.as_deref(), us) {
                     Some(via) => {
                         if via == Via::Code
                             && let Some(hash) = hash
@@ -841,15 +937,15 @@ fn derive_conference(
                             used.count += 1;
                             used.bound.get_or_insert_with(|| subject.clone());
                         }
-                        events.entry(subject).or_default().push((rec.us, Event::Admit));
+                        events.entry(subject).or_default().push((us, Event::Admit));
                     }
-                    None if conference.settings_at(rec.us).has("request") => {
-                        requested_at.insert(subject, rec.us);
+                    None if conference.settings_at(us).has("request") => {
+                        requested_at.insert(subject, us);
                     }
                     None => {}
                 }
             }
-            LEAVE => events.entry(subject).or_default().push((rec.us, Event::Leave)),
+            LEAVE => events.entry(subject).or_default().push((us, Event::Leave)),
             _ => {}
         }
     }
@@ -965,6 +1061,124 @@ mod tests {
             parse_iso_ms("2024-02-29T12:30:00.123Z").map(|ms| iso(ms as u64 * 1000)).unwrap(),
             "2024-02-29T12:30:00.123Z"
         );
+    }
+
+    const ORG: &str = "did:plc:atmosphereorgaaaaaaaaaaa";
+    const OLGA: &str = "did:plc:olgaaaaaaaaaaaaaaaaaaaaa";
+    const PIM: &str = "did:plc:pimaaaaaaaaaaaaaaaaaaaaa";
+
+    fn space(kind: &str) -> String {
+        SpaceUri::new(ORG, kind, "3conf").to_string()
+    }
+
+    fn rec(space: &str, repo: &str, collection: &str, rkey: &str, us: u64, value: Value) -> Rec {
+        Rec {
+            space: space.to_owned(),
+            repo: repo.to_owned(),
+            collection: collection.to_owned(),
+            rkey: rkey.to_owned(),
+            rev: String::new(),
+            us,
+            seen_us: None,
+            value,
+        }
+    }
+
+    /// Atmosphere, with Pim as staff (unless `pim_is_admin` is false) and a
+    /// conference whose join methods are `methods`, plus `more` records.
+    fn org_with(methods: &[&str], pim_is_admin: bool, more: Vec<Rec>) -> Org {
+        let admin = SpaceUri::admin(ORG).to_string();
+        let mut recs = vec![rec(
+            &admin,
+            OLGA,
+            SPACE,
+            "s1",
+            1,
+            json!({ "space": space(CONFERENCE_TYPE), "intake": space(INTAKE_TYPE),
+                    "superAdmin": OLGA, "join": { "methods": methods } }),
+        )];
+        if pim_is_admin {
+            recs.push(rec(&admin, OLGA, ADMIN, PIM, 1, json!({ "subject": PIM, "role": "staff" })));
+        }
+        recs.extend(more);
+        derive(ORG, OLGA, 0, &recs, &Secrets::for_tests(), "https://app.example/client.json")
+    }
+
+    fn role(subject: &str, role: &str, extra: Value) -> Rec {
+        let mut value = json!({ "subject": subject, "role": role });
+        value.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        rec(&space(CONFERENCE_TYPE), OLGA, ROLE, subject, 2, value)
+    }
+
+    fn join(who: &str, us: u64, seen_us: Option<u64>, value: Value) -> Rec {
+        Rec { seen_us, ..rec(&space(INTAKE_TYPE), who, JOIN, "j", us, value) }
+    }
+
+    #[test]
+    fn a_role_admits_only_while_whoever_assigned_it_could() {
+        let bram = "did:plc:bramaaaaaaaaaaaaaaaaaaaa";
+        let mallory = "did:plc:malloryaaaaaaaaaaaaaaaaa";
+        let records = || {
+            vec![
+                role(bram, "speaker", json!({ "assignedBy": PIM })),
+                // Staff can't make anyone an owner.
+                role(mallory, "owner", json!({ "assignedBy": PIM })),
+                join(bram, 20, None, json!({})),
+                join(mallory, 21, None, json!({})),
+            ]
+        };
+        let org = org_with(&["code"], true, records());
+        let conference = org.conference(&space(CONFERENCE_TYPE)).unwrap();
+        assert!(conference.is_member(bram));
+        assert_eq!(conference.role_of(&org, bram).as_deref(), Some("speaker"));
+        assert!(!conference.is_member(mallory));
+        assert_eq!(conference.role_of(&org, mallory), None);
+
+        // Once Pim isn't an admin, the role Pim assigned stops counting.
+        let org = org_with(&["code"], false, records());
+        let conference = org.conference(&space(CONFERENCE_TYPE)).unwrap();
+        assert!(!conference.is_member(bram));
+        assert_eq!(conference.role_of(&org, bram), None);
+    }
+
+    #[test]
+    fn a_role_from_the_list_admits_only_while_the_list_does() {
+        let ana = "did:plc:anaaaaaaaaaaaaaaaaaaaaaa";
+        let records = || {
+            vec![
+                role(ana, "speaker", json!({ "assignedBy": OLGA, "via": "list" })),
+                join(ana, 20, None, json!({})),
+            ]
+        };
+        let off = org_with(&["code"], true, records());
+        assert!(!off.conference(&space(CONFERENCE_TYPE)).unwrap().is_member(ana));
+        let on = org_with(&["list"], true, records());
+        assert!(on.conference(&space(CONFERENCE_TYPE)).unwrap().is_member(ana));
+    }
+
+    #[test]
+    fn a_join_counts_from_when_it_was_first_seen_not_before() {
+        let ana = "did:plc:anaaaaaaaaaaaaaaaaaaaaaa";
+        let code = rec(
+            &SpaceUri::admin(ORG).to_string(),
+            OLGA,
+            CODE,
+            "c1",
+            1_000_000,
+            json!({ "space": space(CONFERENCE_TYPE), "codeHash": Secrets::for_tests().code_hmac("tulips"),
+                    "expires": iso(5_000_000) }),
+        );
+        let joined = |seen_us| {
+            let org = org_with(
+                &["code"],
+                true,
+                vec![code.clone(), join(ana, 2_000_000, seen_us, json!({ "code": "tulips" }))],
+            );
+            org.conference(&space(CONFERENCE_TYPE)).unwrap().is_member(ana)
+        };
+        assert!(joined(None), "committed before the code expired");
+        assert!(joined(Some(3_000_000)), "and seen before it did");
+        assert!(!joined(Some(6_000_000)), "seen only after it expired: a backdated join");
     }
 
     #[test]

@@ -152,6 +152,18 @@ impl Acting {
         Ok(())
     }
 
+    /// Deletes a public record from the admin's repo.
+    pub async fn delete_public(
+        &self,
+        state: &AppState,
+        collection: &str,
+        rkey: &str,
+    ) -> Result<(), String> {
+        let body = json!({ "repo": self.did, "collection": collection, "rkey": rkey });
+        self.procedure(state, "com.atproto.repo.deleteRecord", &body).await?;
+        Ok(())
+    }
+
     /// Creates a public record in the admin's repo, returning its AT-URI.
     pub async fn create_public(
         &self,

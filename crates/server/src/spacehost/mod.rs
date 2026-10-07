@@ -12,7 +12,8 @@ pub mod notify;
 pub mod sync;
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::net::IpAddr;
+use std::sync::{Arc, Mutex};
 
 use axum::Router;
 use axum::http::StatusCode;
@@ -95,23 +96,48 @@ pub struct Host {
     docs: Mutex<HashMap<String, (Value, i64)>>,
     used: Mutex<HashMap<String, i64>>,
     limits: Mutex<HashMap<String, Vec<i64>>>,
+    /// Organizations' derived permissions, by the index generation they
+    /// were derived at.
+    orgs: Mutex<HashMap<String, (i64, Arc<index::Org>)>>,
     /// Held while a space revision is assigned, so no two are the same.
     pub sequence: tokio::sync::Mutex<()>,
 }
 
-/// The address a request came from, when the server knows it.
-pub struct ClientIp(pub Option<std::net::IpAddr>);
+/// The address a request came from, when the server knows it: the peer, or
+/// for a request through one of our `TRUSTED_PROXIES`, the address the
+/// proxies saw it from.
+pub struct ClientIp(pub Option<IpAddr>);
 
-impl<S: Send + Sync> axum::extract::FromRequestParts<S> for ClientIp {
+impl axum::extract::FromRequestParts<AppState> for ClientIp {
     type Rejection = std::convert::Infallible;
 
     async fn from_request_parts(
         parts: &mut axum::http::request::Parts,
-        _: &S,
+        state: &AppState,
     ) -> Result<Self, Self::Rejection> {
-        let info = parts.extensions.get::<axum::extract::ConnectInfo<std::net::SocketAddr>>();
-        Ok(Self(info.map(|info| info.0.ip())))
+        let peer = parts
+            .extensions
+            .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+            .map(|info| info.0.ip());
+        Ok(Self(peer.map(|peer| client_ip(peer, &parts.headers, &state.config.trusted_proxies))))
     }
+}
+
+/// The client's address: the peer, unless it's a trusted proxy, in which
+/// case the last `X-Forwarded-For` address that isn't one. Anything before
+/// that is the client's own say, and not trusted.
+pub fn client_ip(peer: IpAddr, headers: &axum::http::HeaderMap, trusted: &[IpAddr]) -> IpAddr {
+    if !trusted.contains(&peer) {
+        return peer;
+    }
+    let forwarded: Vec<IpAddr> = headers
+        .get_all("x-forwarded-for")
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|v| v.split(','))
+        .filter_map(|a| a.trim().parse().ok())
+        .collect();
+    forwarded.into_iter().rev().find(|a| !trusted.contains(a)).unwrap_or(peer)
 }
 
 /// How long a DID document is reused.
@@ -173,6 +199,23 @@ impl Host {
         service_endpoint(&doc, "atproto_pds").ok_or_else(|| format!("{did} names no PDS"))
     }
 
+    /// An organization's derived permissions, if cached at `generation`.
+    pub fn cached_org(&self, org: &str, generation: i64) -> Option<Arc<index::Org>> {
+        let orgs = self.orgs.lock().expect("the organization cache isn't poisoned");
+        orgs.get(org).filter(|(at, _)| *at == generation).map(|(_, org)| org.clone())
+    }
+
+    pub fn cache_org(&self, org: &str, generation: i64, derived: Arc<index::Org>) {
+        let mut orgs = self.orgs.lock().expect("the organization cache isn't poisoned");
+        if orgs.len() >= CACHE_MAX {
+            orgs.clear();
+        }
+        // Never replace a newer view with an older one.
+        if orgs.get(org).is_none_or(|(at, _)| *at <= generation) {
+            orgs.insert(org.to_owned(), (generation, derived));
+        }
+    }
+
     /// Marks a single-use token's `jti` used; false if it already was.
     pub fn consume(&self, kind: &str, jti: &str, exp_secs: i64) -> bool {
         let now = now_ms();
@@ -186,6 +229,15 @@ impl Host {
         }
         used.insert(key, exp_secs.saturating_mul(1000).saturating_add(60_000));
         true
+    }
+
+    /// Counts a request from `ip` against a limit of `max` a minute. Loopback
+    /// is exempt only in local development (an `http` `PUBLIC_URL`), where
+    /// the tests and the dev server share it; behind a reverse proxy, set
+    /// `TRUSTED_PROXIES` so each client is counted by its own address.
+    pub fn allow_ip(&self, state: &AppState, what: &str, ip: IpAddr, max: usize) -> bool {
+        (ip.is_loopback() && !state.secure_cookies())
+            || self.allow(&format!("{what}:ip:{ip}"), max, 60_000)
     }
 
     /// Counts an attempt against a limit of `max` per `window_ms`; false once
@@ -246,6 +298,21 @@ pub fn routes() -> Router<AppState> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_client_is_counted_by_its_own_address_behind_a_trusted_proxy() {
+        let proxy: IpAddr = "10.0.0.2".parse().unwrap();
+        let client: IpAddr = "203.0.113.7".parse().unwrap();
+        let mut headers = axum::http::HeaderMap::new();
+        // The client claims to be someone else; the proxy appends who it saw.
+        headers.insert("x-forwarded-for", "198.51.100.1, 203.0.113.7".parse().unwrap());
+        assert_eq!(client_ip(proxy, &headers, &[proxy]), client);
+        // Not through a trusted proxy: the header is the client's own say.
+        assert_eq!(client_ip(client, &headers, &[proxy]), client);
+        assert_eq!(client_ip(proxy, &headers, &[]), proxy);
+        // Through a proxy that names no client: the proxy.
+        assert_eq!(client_ip(proxy, &axum::http::HeaderMap::new(), &[proxy]), proxy);
+    }
 
     #[test]
     fn space_uris_parse_strictly() {

@@ -22,7 +22,7 @@ async fn authorized(
     state: &AppState,
     headers: &HeaderMap,
     space: &str,
-) -> Result<(SpaceUri, Org), Response> {
+) -> Result<(SpaceUri, std::sync::Arc<Org>), Response> {
     let space = SpaceUri::parse(space).ok_or_else(|| invalid("InvalidRequest", "Invalid space"))?;
     let org = match index::load_for_space(state, &space).await {
         Ok(Some(org)) if org.knows(&space) => org,

@@ -2,44 +2,82 @@
 //! its own PDS (`com.atproto.space.listRepoOps`), with a credential we mint
 //! for ourselves, so the appview reads a space like any other app.
 
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
+
 use serde_json::Value;
 
 use super::credential::{for_self, signed_headers};
-use super::{SpaceUri, index::Org};
+use super::index::{self, Org, Rec};
+use super::{CONFERENCE_TYPE, INTAKE_TYPE, SpaceUri};
 use crate::AppState;
+use crate::crypto::tid_micros;
+use crate::db::now_ms;
 
 /// The most of a page of ops read at once.
 const PAGE: usize = 100;
 /// The most bytes a page of ops may be.
 const PAGE_CAP: usize = 4 * 1024 * 1024;
 
-/// Reads a repo's new ops in a space into the index. Safe to run twice at
-/// once: a record only ever moves to a later revision.
-pub async fn sync_repo(state: &AppState, space: &str, repo: &str) -> Result<(), String> {
+/// A record's state after an op: its revision, CID and value (none when
+/// deleted).
+#[derive(Debug, Clone)]
+struct Version {
+    rev: String,
+    cid: Option<String>,
+    value: Option<String>,
+}
+
+/// What an op says about a record, if it says anything: `None` for a write
+/// whose value a later op carries.
+fn version(op: &Value) -> Option<(String, String, Version)> {
+    let (Some(collection), Some(rkey), Some(rev)) = (
+        op.get("collection").and_then(Value::as_str),
+        op.get("rkey").and_then(Value::as_str),
+        op.get("rev").and_then(Value::as_str),
+    ) else {
+        return None;
+    };
+    let cid = op.get("cid").and_then(Value::as_str);
+    let value = match (cid, op.get("value")) {
+        // Written, and still current: its value is inlined.
+        (Some(_), Some(value)) => Some(value.to_string()),
+        // Written, but changed since: a later op carries what it is now.
+        (Some(_), None) => return None,
+        // Deleted.
+        (None, _) => None,
+    };
+    Some((
+        collection.to_owned(),
+        rkey.to_owned(),
+        Version { rev: rev.to_owned(), cid: cid.map(str::to_owned), value },
+    ))
+}
+
+/// A repo's ops in a space after `since` (all of them without it), from its
+/// PDS. No repo in the space yet is no ops.
+async fn fetch_ops(
+    state: &AppState,
+    space: &str,
+    repo: &str,
+    since: Option<&str>,
+) -> Result<Vec<Value>, String> {
     let parsed = SpaceUri::parse(space).ok_or_else(|| format!("{space} isn't a space"))?;
-    let since = sqlx::query_scalar::<_, String>(
-        "SELECT synced_rev FROM space_repos WHERE space = $1 AND repo = $2",
-    )
-    .bind(space)
-    .bind(repo)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| e.to_string())?;
     let pds = state.host.pds_of(state, repo).await?;
     let credential = for_self(state, &parsed).await?;
     let url = format!("{pds}/xrpc/com.atproto.space.listRepoOps");
     let client = state.http.guarded(&url)?;
     let authorization = format!("Atproto-Space {credential}");
     let mut cursor: Option<String> = None;
-    let mut latest = since.clone();
+    let mut all = Vec::new();
     for _ in 0..1000 {
         let mut query = vec![
             ("space", space.to_owned()),
             ("repo", repo.to_owned()),
             ("limit", PAGE.to_string()),
         ];
-        if let Some(since) = &since {
-            query.push(("since", since.clone()));
+        if let Some(since) = since {
+            query.push(("since", since.to_owned()));
         }
         if let Some(cursor) = &cursor {
             query.push(("cursor", cursor.clone()));
@@ -54,25 +92,50 @@ pub async fn sync_repo(state: &AppState, space: &str, repo: &str) -> Result<(), 
         if !status.is_success() {
             // No repo in the space yet: nothing to read.
             if body.get("error").and_then(Value::as_str) == Some("RepoNotFound") {
-                return Ok(());
+                return Ok(all);
             }
             return Err(format!("listRepoOps of {repo} in {space} answered {status}: {body}"));
         }
         let ops = body.get("ops").and_then(Value::as_array).cloned().unwrap_or_default();
-        for op in &ops {
-            apply(state, space, repo, op).await?;
-            if let Some(rev) = op.get("rev").and_then(Value::as_str)
-                && latest.as_deref().is_none_or(|l| rev > l)
-            {
-                latest = Some(rev.to_owned());
-            }
-        }
+        let empty = ops.is_empty();
+        all.extend(ops);
         cursor = body.get("cursor").and_then(Value::as_str).map(str::to_owned);
-        if cursor.is_none() || ops.is_empty() {
+        if cursor.is_none() || empty {
             break;
         }
     }
-    if let Some(latest) = latest {
+    Ok(all)
+}
+
+/// The latest revision among some ops.
+fn latest_rev<'a>(ops: impl IntoIterator<Item = &'a Value>) -> Option<String> {
+    ops.into_iter().filter_map(|op| op.get("rev").and_then(Value::as_str)).max().map(str::to_owned)
+}
+
+/// Reads a repo's new ops in a space into the index. Safe to run twice at
+/// once: a record only ever moves to a later revision.
+pub async fn sync_repo(state: &AppState, space: &str, repo: &str) -> Result<(), String> {
+    let parsed = SpaceUri::parse(space).ok_or_else(|| format!("{space} isn't a space"))?;
+    let since = sqlx::query_scalar::<_, String>(
+        "SELECT synced_rev FROM space_repos WHERE space = $1 AND repo = $2",
+    )
+    .bind(space)
+    .bind(repo)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| e.to_string())?;
+    let ops = fetch_ops(state, space, repo, since.as_deref()).await?;
+    if ops.is_empty() {
+        return Ok(());
+    }
+    let seen_at = now_ms();
+    let mut db = state.db.acquire().await.map_err(|e| e.to_string())?;
+    for op in &ops {
+        if let Some((collection, rkey, version)) = version(op) {
+            apply(&mut db, space, repo, &collection, &rkey, &version, seen_at).await?;
+        }
+    }
+    if let Some(latest) = latest_rev(&ops) {
         sqlx::query(
             "INSERT INTO space_repos (space, repo, synced_rev) VALUES ($1, $2, $3) \
              ON CONFLICT (space, repo) DO UPDATE SET synced_rev = excluded.synced_rev \
@@ -81,31 +144,25 @@ pub async fn sync_repo(state: &AppState, space: &str, repo: &str) -> Result<(), 
         .bind(space)
         .bind(repo)
         .bind(&latest)
-        .execute(&state.db)
+        .execute(&mut *db)
         .await
         .map_err(|e| e.to_string())?;
     }
-    Ok(())
+    drop(db);
+    index::bump(state, &parsed.authority).await
 }
 
-/// Applies one op: a record's value at a revision, or its deletion.
-async fn apply(state: &AppState, space: &str, repo: &str, op: &Value) -> Result<(), String> {
-    let (Some(collection), Some(rkey), Some(rev)) = (
-        op.get("collection").and_then(Value::as_str),
-        op.get("rkey").and_then(Value::as_str),
-        op.get("rev").and_then(Value::as_str),
-    ) else {
-        return Ok(());
-    };
-    let cid = op.get("cid").and_then(Value::as_str);
-    let value = match (cid, op.get("value")) {
-        // Written, and still current: its value is inlined.
-        (Some(_), Some(value)) => Some(value.to_string()),
-        // Written, but changed since: a later op carries what it is now.
-        (Some(_), None) => return Ok(()),
-        // Deleted.
-        (None, _) => None,
-    };
+/// Writes a record's version into the index, unless it has a later one, and
+/// notes when this version was first seen.
+async fn apply(
+    db: &mut sqlx::AnyConnection,
+    space: &str,
+    repo: &str,
+    collection: &str,
+    rkey: &str,
+    version: &Version,
+    seen_at: i64,
+) -> Result<(), String> {
     sqlx::query(
         "INSERT INTO space_records (space, repo, collection, rkey, rev, cid, value) VALUES ($1, $2, $3, $4, $5, $6, $7) \
          ON CONFLICT (space, repo, collection, rkey) DO UPDATE SET rev = excluded.rev, cid = excluded.cid, \
@@ -115,10 +172,23 @@ async fn apply(state: &AppState, space: &str, repo: &str, op: &Value) -> Result<
     .bind(repo)
     .bind(collection)
     .bind(rkey)
-    .bind(rev)
-    .bind(cid)
-    .bind(value)
-    .execute(&state.db)
+    .bind(&version.rev)
+    .bind(&version.cid)
+    .bind(&version.value)
+    .execute(&mut *db)
+    .await
+    .map_err(|e| e.to_string())?;
+    sqlx::query(
+        "INSERT INTO space_record_seen (space, repo, collection, rkey, rev, seen_at) VALUES ($1, $2, $3, $4, $5, $6) \
+         ON CONFLICT (space, repo, collection, rkey, rev) DO NOTHING",
+    )
+    .bind(space)
+    .bind(repo)
+    .bind(collection)
+    .bind(rkey)
+    .bind(&version.rev)
+    .bind(seen_at)
+    .execute(&mut *db)
     .await
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -136,71 +206,129 @@ async fn read(mut res: reqwest::Response) -> Result<Value, String> {
     Ok(serde_json::from_slice(&body).unwrap_or(Value::Null))
 }
 
-/// Forgets what the index has of a repo in a space, so the next sync reads
-/// it all again.
-pub async fn forget(state: &AppState, space: &str, repo: &str) -> Result<(), String> {
-    for sql in [
-        "DELETE FROM space_records WHERE space = $1 AND repo = $2",
-        "DELETE FROM space_repos WHERE space = $1 AND repo = $2",
-    ] {
-        sqlx::query(sql)
-            .bind(space)
-            .bind(repo)
-            .execute(&state.db)
-            .await
-            .map_err(|e| e.to_string())?;
+/// One repo in one space, as reindex read it: each record's latest version.
+type Repo = BTreeMap<(String, String), Version>;
+
+/// Applies ops to what's known of a repo, as `apply` does to the index.
+fn absorb(repo: &mut Repo, ops: &[Value]) {
+    for op in ops {
+        if let Some((collection, rkey, version)) = version(op) {
+            let key = (collection, rkey);
+            if repo.get(&key).is_none_or(|v| v.rev <= version.rev) {
+                repo.insert(key, version);
+            }
+        }
     }
-    Ok(())
+}
+
+/// The records an organization's permissions are derived from, out of the
+/// repos read so far (as `index::records` reads them from the index).
+fn recs_of(org: &str, read: &BTreeMap<(String, String), Repo>) -> Vec<Rec> {
+    let admin = SpaceUri::admin(org).to_string();
+    let intake = format!("at://{org}/space/{INTAKE_TYPE}/");
+    let conference = format!("at://{org}/space/{CONFERENCE_TYPE}/");
+    let mut recs = Vec::new();
+    for ((space, repo), records) in read {
+        for ((collection, rkey), version) in records {
+            let counted = *space == admin
+                || space.starts_with(&intake)
+                || (space.starts_with(&conference)
+                    && matches!(collection.as_str(), index::ROLE | index::RULES));
+            let (Some(value), true) = (&version.value, counted) else { continue };
+            let (Some(us), Ok(value)) = (tid_micros(&version.rev), serde_json::from_str(value))
+            else {
+                continue;
+            };
+            recs.push(Rec {
+                space: space.clone(),
+                repo: repo.clone(),
+                collection: collection.clone(),
+                rkey: rkey.clone(),
+                rev: version.rev.clone(),
+                us,
+                seen_us: None,
+                value,
+            });
+        }
+    }
+    recs
+}
+
+/// What reindex did: the organization as rebuilt, and the repos it couldn't
+/// read, whose records were kept as they were.
+pub struct Reindexed {
+    pub org: Arc<Org>,
+    pub unread: Vec<String>,
 }
 
 /// Rebuilds an organization's index by crawling from its super admin: their
 /// repo in the admin space names the admins and the spaces; each admin's
-/// repo there, and every writer's repo in each space, is read again.
-pub async fn reindex(state: &AppState, org: &str) -> Result<Org, String> {
+/// repo there, every repo in each space's writer set, and every repo read
+/// before, is read again from scratch.
+///
+/// Everything is read first, and the index is replaced in one transaction,
+/// so requests meanwhile see the old index, never a partial one. A repo that
+/// can't be read keeps its old records (and is reported), rather than
+/// vanishing and taking its author's access with it.
+pub async fn reindex(state: &AppState, org: &str) -> Result<Reindexed, String> {
     let authority = super::authority::get(&state.db, org)
         .await?
         .ok_or_else(|| format!("no organization {org}"))?;
     let admin_space = SpaceUri::admin(org).to_string();
+    let pattern = format!("at://{org}/space/%");
     // The repos read before, as well as the writer sets, say where to look.
     let known = sqlx::query_as::<_, (String, String)>(
         "SELECT space, repo FROM space_repos WHERE space LIKE $1",
     )
-    .bind(format!("at://{org}/space/%"))
+    .bind(&pattern)
     .fetch_all(&state.db)
     .await
     .map_err(|e| e.to_string())?;
-    // Everything the index had for this organization goes.
-    for sql in [
-        "DELETE FROM space_records WHERE space LIKE $1",
-        "DELETE FROM space_repos WHERE space LIKE $1",
-    ] {
-        sqlx::query(sql)
-            .bind(format!("at://{org}/space/%"))
-            .execute(&state.db)
-            .await
-            .map_err(|e| e.to_string())?;
-    }
-    // From the super admin, out.
-    sync_repo(state, &admin_space, &authority.super_admin).await?;
-    let mut org_view = super::index::load(state, org).await?.ok_or("the organization vanished")?;
-    let mut done = std::collections::BTreeSet::new();
-    done.insert((admin_space.clone(), authority.super_admin.clone()));
-    // Admins' repos, then every repo in every space, until nothing new turns up.
+
+    let mut read: BTreeMap<(String, String), Repo> = BTreeMap::new();
+    let mut synced: BTreeMap<(String, String), String> = BTreeMap::new();
+    let mut unread: BTreeSet<(String, String)> = BTreeSet::new();
+    let mut fetch = async |space: &str, repo: &str, read: &mut BTreeMap<_, Repo>| {
+        let ops = fetch_ops(state, space, repo, None).await?;
+        let key = (space.to_owned(), repo.to_owned());
+        if let Some(latest) = latest_rev(&ops) {
+            synced.insert(key.clone(), latest);
+        }
+        absorb(read.entry(key).or_default(), &ops);
+        Ok::<_, String>(())
+    };
+    // From the super admin, out. Without their repo there's nothing to
+    // rebuild from, so the index is left alone.
+    fetch(&admin_space, &authority.super_admin, &mut read).await.map_err(|why| {
+        format!("couldn't read the super admin's repo, so nothing was changed: {why}")
+    })?;
+    let eventside = state.oauth.client_id_for("atproto");
+    let derive = |read: &BTreeMap<(String, String), Repo>| {
+        index::derive(
+            org,
+            &authority.super_admin,
+            authority.created_at as u64 * 1000,
+            &recs_of(org, read),
+            &state.secrets,
+            &eventside,
+        )
+    };
+    let mut done = BTreeSet::from([(admin_space.clone(), authority.super_admin.clone())]);
     let mut known = Some(known);
+    // Admins' repos, then every repo in every space, until nothing new turns up.
     for _ in 0..10 {
+        let view = derive(&read);
         let mut todo = known.take().unwrap_or_default();
-        for admin in org_view.admins.keys() {
+        for admin in view.admins.keys() {
             todo.push((admin_space.clone(), admin.clone()));
         }
-        for space in org_view.spaces() {
+        for space in view.spaces() {
             for writer in writers(state, &space).await? {
                 todo.push((space.clone(), writer));
             }
             // The conference super admin's roles and rules.
-            if let Some(conference) = org_view.conference(&space)
-                && let Some(super_admin) = conference.super_admin()
-            {
-                todo.push((space.clone(), super_admin.to_owned()));
+            if let Some(conference) = view.conference(&space) {
+                todo.push((space.clone(), conference.super_admin().to_owned()));
             }
         }
         let fresh: Vec<_> = todo.into_iter().filter(|t| !done.contains(t)).collect();
@@ -208,14 +336,61 @@ pub async fn reindex(state: &AppState, org: &str) -> Result<Org, String> {
             break;
         }
         for (space, repo) in fresh {
-            if let Err(why) = sync_repo(state, &space, &repo).await {
+            if let Err(why) = fetch(&space, &repo, &mut read).await {
                 eprintln!("reindex: {why}");
+                unread.insert((space.clone(), repo.clone()));
             }
             done.insert((space, repo));
         }
-        org_view = super::index::load(state, org).await?.ok_or("the organization vanished")?;
     }
-    Ok(org_view)
+
+    // Replace the organization's index at once, keeping what the repos that
+    // couldn't be read had.
+    let mut tx = state.db.begin().await.map_err(|e| e.to_string())?;
+    let keeps = |space: &str, repo: &str| unread.contains(&(space.to_owned(), repo.to_owned()));
+    let old_repos = sqlx::query_as::<_, (String, String)>(
+        "SELECT DISTINCT space, repo FROM space_records WHERE space LIKE $1",
+    )
+    .bind(&pattern)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
+    for (space, repo) in old_repos.iter().filter(|(s, r)| !keeps(s, r)) {
+        for sql in [
+            "DELETE FROM space_records WHERE space = $1 AND repo = $2",
+            "DELETE FROM space_repos WHERE space = $1 AND repo = $2",
+        ] {
+            sqlx::query(sql)
+                .bind(space)
+                .bind(repo)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    let seen_at = now_ms();
+    for ((space, repo), records) in &read {
+        for ((collection, rkey), version) in records {
+            apply(&mut tx, space, repo, collection, rkey, version, seen_at).await?;
+        }
+        if let Some(latest) = synced.get(&(space.clone(), repo.clone())) {
+            sqlx::query(
+                "INSERT INTO space_repos (space, repo, synced_rev) VALUES ($1, $2, $3) \
+                 ON CONFLICT (space, repo) DO UPDATE SET synced_rev = excluded.synced_rev",
+            )
+            .bind(space)
+            .bind(repo)
+            .bind(latest)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+        }
+    }
+    tx.commit().await.map_err(|e| format!("couldn't replace the index: {e}"))?;
+    index::bump(state, org).await?;
+    let org = index::load(state, org).await?.ok_or("the organization vanished")?;
+    let unread = unread.iter().map(|(space, repo)| format!("{repo} in {space}")).collect();
+    Ok(Reindexed { org, unread })
 }
 
 /// The DIDs in a space's writer set.
@@ -225,4 +400,37 @@ pub async fn writers(state: &AppState, space: &str) -> Result<Vec<String>, Strin
         .fetch_all(&state.db)
         .await
         .map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn a_repo_keeps_each_records_latest_version() {
+        let mut repo = Repo::new();
+        absorb(
+            &mut repo,
+            &[
+                json!({ "collection": "a.b.c", "rkey": "1", "rev": "3aaa", "cid": "x", "value": { "n": 1 } }),
+                json!({ "collection": "a.b.c", "rkey": "2", "rev": "3aab", "cid": "y" }),
+                json!({ "collection": "a.b.c", "rkey": "3", "rev": "3aac", "cid": "z", "value": { "n": 3 } }),
+                json!({ "collection": "a.b.c", "rkey": "3", "rev": "3aad" }),
+            ],
+        );
+        // An older op read later doesn't bring a record back.
+        absorb(
+            &mut repo,
+            &[
+                json!({ "collection": "a.b.c", "rkey": "3", "rev": "3aac", "cid": "z", "value": { "n": 3 } }),
+            ],
+        );
+        let key = |rkey: &str| ("a.b.c".to_owned(), rkey.to_owned());
+        assert_eq!(repo[&key("1")].value.as_deref(), Some(r#"{"n":1}"#));
+        assert!(!repo.contains_key(&key("2")), "a write whose value a later op carries");
+        assert_eq!(repo[&key("3")].rev, "3aad");
+        assert!(repo[&key("3")].value.is_none(), "deleted");
+    }
 }

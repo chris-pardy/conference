@@ -61,11 +61,13 @@ pub async fn notify_write(
     if !org.can_write(&space, repo) {
         return refuse(StatusCode::FORBIDDEN, "Forbidden", "notifyWrite writer is not authorized");
     }
-    if !state.host.allow(&format!("notify:{repo}"), 600, 60_000) {
-        return refuse(StatusCode::TOO_MANY_REQUESTS, "RateLimitExceeded", "Too many requests");
-    }
     if let Err(why) = verify_service_auth(&state, &headers, &space, repo).await {
         return refuse(StatusCode::UNAUTHORIZED, "InvalidToken", &why);
+    }
+    // Counted only once it's really from them, so nobody else can use up
+    // a writer's allowance.
+    if !state.host.allow(&format!("notify:{repo}"), 600, 60_000) {
+        return refuse(StatusCode::TOO_MANY_REQUESTS, "RateLimitExceeded", "Too many requests");
     }
     let Some(rev_us) = tid_micros(repo_rev) else {
         return invalid("InvalidRequest", &format!("Invalid repoRev: {repo_rev}"));
@@ -83,8 +85,17 @@ pub async fn notify_write(
         let (space_uri, repo, repo_rev, hash) =
             (space_uri.clone(), repo.to_owned(), repo_rev.to_owned(), hash.to_owned());
         tokio::spawn(async move {
+            // A write from any app (an admin's ban, a member's leave) can take
+            // someone's access away: whoever lost it is revoked.
+            let before = index::load(&background, &space.authority).await.ok().flatten();
             if let Err(why) = sync::sync_repo(&background, &space_uri, &repo).await {
                 eprintln!("notifyWrite: could not read {repo} in {space_uri}: {why}");
+            }
+            if let Some(before) = before
+                && let Ok(Some(after)) = index::load(&background, &space.authority).await
+            {
+                let before = crate::conference::access(&before);
+                crate::conference::revoke_lost(&background, &before, &after).await;
             }
             if first {
                 send_recent_revocations(&background, &space_uri, &repo).await;
@@ -291,20 +302,25 @@ pub async fn register_notify(
     ) else {
         return invalid("InvalidRequest", "Input must have \"space\" and \"service\"");
     };
-    if let Err(res) = credential::check(&state, &headers, &space).await {
-        return res;
-    }
+    let caller = match credential::check(&state, &headers, &space).await {
+        Ok(caller) => caller,
+        Err(res) => return res,
+    };
     if resolve_service(&state, service).await.is_none() {
         return invalid("ServiceNotResolvable", &format!("Could not resolve service: {service}"));
     }
     let expires_at = now_ms() + REGISTRATION_MS;
+    // Kept with whose access it came through, so it ends with that access.
     let stored = sqlx::query(
-        "INSERT INTO space_notify (space, service, expires_at) VALUES ($1, $2, $3) \
-         ON CONFLICT (space, service) DO UPDATE SET expires_at = excluded.expires_at",
+        "INSERT INTO space_notify (space, service, expires_at, delegator, client_id) VALUES ($1, $2, $3, $4, $5) \
+         ON CONFLICT (space, service) DO UPDATE SET expires_at = excluded.expires_at, \
+         delegator = excluded.delegator, client_id = excluded.client_id",
     )
     .bind(space.to_string())
     .bind(service)
     .bind(expires_at)
+    .bind(caller.delegator)
+    .bind(caller.client_id)
     .execute(&state.db)
     .await;
     match stored {
@@ -340,10 +356,51 @@ pub async fn unregister_notify(
     }
 }
 
-/// Revokes the credentials someone delegated for a space, at every writer's
-/// PDS: once per PDS, addressed to one of its writers, at most 100 at a time.
+/// Revokes the credentials someone delegated for a space, and drops the
+/// syncer registrations made with them.
 pub async fn revoke(state: &AppState, space: &str, delegator: &str) -> Result<(), String> {
+    sqlx::query("DELETE FROM space_notify WHERE space = $1 AND delegator = $2")
+        .bind(space)
+        .bind(delegator)
+        .execute(&state.db)
+        .await
+        .map_err(|e| e.to_string())?;
     let jtis = credential::revoke_delegated(state, space, delegator).await?;
+    send(state, space, &jtis).await
+}
+
+/// Revokes the credentials for a space of every app `lost` names (by client
+/// ID, none for an unattested app) after a change to its app access, and
+/// drops the syncer registrations made with them.
+pub async fn revoke_apps(
+    state: &AppState,
+    space: &str,
+    lost: impl Fn(Option<&str>) -> bool,
+) -> Result<(), String> {
+    let registered = sqlx::query_as::<_, (String, Option<String>)>(
+        "SELECT service, client_id FROM space_notify WHERE space = $1",
+    )
+    .bind(space)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| e.to_string())?;
+    for (service, client_id) in registered {
+        if lost(client_id.as_deref()) {
+            sqlx::query("DELETE FROM space_notify WHERE space = $1 AND service = $2")
+                .bind(space)
+                .bind(&service)
+                .execute(&state.db)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    let jtis = credential::revoke_where(state, space, |_, client| lost(client)).await?;
+    send(state, space, &jtis).await
+}
+
+/// Sends revocations to every writer's PDS: once per PDS, addressed to one
+/// of its writers, at most 100 at a time.
+async fn send(state: &AppState, space: &str, jtis: &[String]) -> Result<(), String> {
     if jtis.is_empty() {
         return Ok(());
     }
@@ -358,7 +415,7 @@ pub async fn revoke(state: &AppState, space: &str, delegator: &str) -> Result<()
     }
     let mut failures = Vec::new();
     for (pds, writer) in by_pds {
-        if let Err(why) = send_revocations(state, space, &pds, &writer, &jtis).await {
+        if let Err(why) = send_revocations(state, space, &pds, &writer, jtis).await {
             failures.push(why);
         }
     }

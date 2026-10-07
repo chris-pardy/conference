@@ -72,6 +72,13 @@ impl AppState {
     /// Connects the database and loads the signing key. Never touches atproto,
     /// so the server starts even when the network is down.
     pub async fn build(config: Config, public_url: String) -> Result<Self, String> {
+        if public_url.starts_with("https://") && config.authority_key_secret.is_none() {
+            return Err(
+                "AUTHORITY_KEY_SECRET must be set when PUBLIC_URL is https: it encrypts the \
+                 organizations' keys, and a generated one would sit in the database beside them"
+                    .to_owned(),
+            );
+        }
         let db = db::connect(&config.database_url).await?;
         let key = oauth::signing_key(&db, config.signing_key.as_deref()).await?;
         let secrets =
@@ -195,6 +202,7 @@ mod tests {
             plc_url: local.clone(),
             handle_resolver_url: local,
             allow_private_network: true,
+            trusted_proxies: vec![],
             session_idle_timeout: std::time::Duration::from_secs(30 * 24 * 60 * 60),
             token_renew_interval: std::time::Duration::from_secs(5 * 60),
             token_refresh_skew: std::time::Duration::from_secs(60),

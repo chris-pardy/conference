@@ -50,6 +50,11 @@ impl Secrets {
         })
     }
 
+    #[cfg(test)]
+    pub fn for_tests() -> Self {
+        Self { seal: [1; 32], hmac: [2; 32] }
+    }
+
     pub fn seal(&self, plaintext: &str) -> String {
         crypto::seal(&self.seal, plaintext)
     }

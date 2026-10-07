@@ -7,8 +7,9 @@
 //! It exits non-zero with the reason on stderr when it refuses or fails. With
 //! `--json`, its last line of stdout is one JSON object.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::process::ExitCode;
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -42,6 +43,9 @@ const USAGE: &str = "usage: conference-server admin <command> [--json] [--as <ha
   apps add|remove <client-id> (--conference <space> | --org <did>)
   apps open|curate --conference <space> [--yes]
   rules set <file> --conference <space>";
+
+/// The roles a person can have in a conference.
+const ROLES: &[&str] = &["owner", "staff", "speaker"];
 
 /// Flags that take no value.
 const SWITCHES: &[&str] = &["json", "invite-only", "personal", "yes"];
@@ -180,12 +184,12 @@ async fn handle_of(state: &AppState, did: &str) -> String {
     }
 }
 
-async fn org(state: &AppState, did: &str) -> Result<Org, String> {
+async fn org(state: &AppState, did: &str) -> Result<Arc<Org>, String> {
     index::load(state, did).await?.ok_or_else(|| format!("{did} isn't an organization we host"))
 }
 
 /// A conference, by its space URI, with its organization.
-async fn conference(state: &AppState, args: &Args) -> Result<(SpaceUri, Org), String> {
+async fn conference(state: &AppState, args: &Args) -> Result<(SpaceUri, Arc<Org>), String> {
     let uri = args.need("conference")?;
     let space = SpaceUri::parse(uri)
         .filter(|s| s.kind == CONFERENCE_TYPE)
@@ -220,7 +224,8 @@ async fn conference_super_admin(
     org: &Org,
     conference: &Conference,
 ) -> Result<Acting, String> {
-    let did = conference.super_admin().unwrap_or(&org.super_admin).to_owned();
+    let _ = org;
+    let did = conference.super_admin().to_owned();
     let handle = handle_of(state, &did).await;
     Acting::new(state, &did, &handle).await
 }
@@ -242,9 +247,9 @@ fn only_owners(role: Option<Role>, acting: &Acting, what: &str) -> Result<(), St
 }
 
 /// Revokes the credentials of anyone a change took access from.
-async fn after_change(state: &AppState, before: &Org) -> Result<Org, String> {
+async fn after_change(state: &AppState, before: &Org) -> Result<Arc<Org>, String> {
     let after = org(state, &before.did).await?;
-    super::revoke_lost(state, &super::readers(before), &after).await;
+    super::revoke_lost(state, &super::access(before), &after).await;
     Ok(after)
 }
 
@@ -339,10 +344,23 @@ async fn org_admin(state: &AppState, args: &Args, add: bool) -> Result<Done, Str
         return Err(format!("{who} isn't an admin of {}", org.did));
     }
     acting.delete_in(state, &admin_space, index::ADMIN, &subject).await?;
+    // Their own role in each conference goes, and so do the roles they
+    // assigned (which stop counting anyway, now they're not an admin).
     for conference in org.conferences.values() {
-        if conference.roles.contains_key(&subject) {
-            let writer = conference_super_admin(state, &org, conference).await?;
-            writer.delete_in(state, conference.space(), index::ROLE, &subject).await?;
+        let assigned = conference
+            .role_deciders
+            .iter()
+            .filter(|(_, decider)| **decider == subject)
+            .map(|(person, _)| person.clone());
+        let gone: BTreeSet<String> = assigned
+            .chain(conference.roles.contains_key(&subject).then(|| subject.clone()))
+            .collect();
+        if gone.is_empty() {
+            continue;
+        }
+        let writer = conference_super_admin(state, &org, conference).await?;
+        for person in gone {
+            writer.delete_in(state, conference.space(), index::ROLE, &person).await?;
         }
     }
     after_change(state, &org).await?;
@@ -431,8 +449,15 @@ async fn connect(state: &AppState, args: &Args) -> Result<Done, String> {
 async fn reindex(state: &AppState, args: &Args) -> Result<Done, String> {
     let did = args.need("org")?;
     let before = org(state, did).await?;
-    let org = sync::reindex(state, did).await?;
-    super::revoke_lost(state, &super::readers(&before), &org).await;
+    let sync::Reindexed { org, unread } = sync::reindex(state, did).await?;
+    super::revoke_lost(state, &super::access(&before), &org).await;
+    let missing = super::rebuild_rows(state, &org).await;
+    if !unread.is_empty() || !missing.is_empty() {
+        let mut why = vec![format!("Rebuilt {did}'s index, but not all of it:")];
+        why.extend(unread.iter().map(|r| format!("  couldn't read {r}; its records were kept")));
+        why.extend(missing.iter().map(|m| format!("  couldn't rebuild the conference {m}")));
+        return Err(why.join("\n"));
+    }
     let members: usize = org.conferences.values().map(|c| c.current_members().count()).sum();
     done(
         format!(
@@ -449,7 +474,18 @@ async fn conference_create(state: &AppState, args: &Args) -> Result<Done, String
     let (org_admin, _) =
         acting(state, &Args { words: vec![], flags: BTreeMap::new() }, &org).await?;
     let super_admin = match args.flag("super-admin") {
-        Some(handle) => Acting::new(state, &did_of(state, handle).await?, handle).await?,
+        Some(handle) => {
+            let did = did_of(state, handle).await?;
+            // They write the conference's records into its space, so they
+            // must be someone whose writes it takes: an admin.
+            if !org.is_admin(&did) {
+                return Err(format!(
+                    "{handle} isn't an admin of {}: add them with `org admin add` first",
+                    org.did
+                ));
+            }
+            Acting::new(state, &did, handle).await?
+        }
         None => Acting::new(state, &org.super_admin, &org_admin.handle).await?,
     };
     let invite_only = args.flag("invite-only").is_some();
@@ -459,9 +495,6 @@ async fn conference_create(state: &AppState, args: &Args) -> Result<Done, String
         }
         None => None,
     };
-    let skey = tid_now();
-    let space = SpaceUri::new(&org.did, CONFERENCE_TYPE, &skey).to_string();
-    let intake = SpaceUri::new(&org.did, INTAKE_TYPE, &skey).to_string();
 
     // What the conference is: an event the super admin already published, or a new one.
     let (event_value, adopted) = match args.flag("event") {
@@ -490,92 +523,185 @@ async fn conference_create(state: &AppState, args: &Args) -> Result<Done, String
         }
     };
 
-    // Its settings first, so the space is ours before anything is written into it.
-    let admin_space = SpaceUri::admin(&org.did).to_string();
-    let eventside = state.oauth.client_id_for("atproto");
-    let mut settings = json!({
-        "space": space,
-        "type": CONFERENCE_TYPE,
-        "readPolicy": "members",
-        "writePolicy": "members",
-        "appAccess": "allowList",
-        "allowList": [eventside],
-        "join": { "methods": [] },
-        "intake": intake,
-        "superAdmin": super_admin.did,
-        "visibility": if invite_only { "inviteOnly" } else { "public" },
-    });
-
-    // The entry point: public records in the super admin's repo, or inside the space.
-    let mut sidecar = json!({
-        "space": space,
-        "intake": intake,
-        "organization": org.did,
-        "superAdmin": super_admin.did,
-        "visibility": if invite_only { "inviteOnly" } else { "public" },
-    });
-    if let Some(theme) = &theme {
-        sidecar["theme"] = theme.clone();
-    }
-    let event_uri = if invite_only {
-        None
-    } else {
-        let uri = match &adopted {
-            Some(uri) => uri.clone(),
-            None => super_admin.create_public(state, EVENT, None, event_value.clone()).await?,
-        };
-        let rkey = uri.rsplit('/').next().unwrap_or_default().to_owned();
-        sidecar["event"] = json!(uri);
-        super_admin.create_public(state, SIDECAR, Some(&rkey), sidecar.clone()).await?;
-        settings["event"] = json!(uri);
-        Some(uri)
+    // Everything is checked; now the writes. If one fails, the ones before it
+    // are undone, so a retry starts clean instead of leaving a half-made
+    // conference (or a stray public event) behind.
+    let new = NewConference {
+        org: &org,
+        org_admin: &org_admin,
+        super_admin: &super_admin,
+        skey: tid_now(),
+        invite_only,
+        theme,
+        event_value,
+        adopted,
     };
-    org_admin.create_in(state, &admin_space, index::SPACE, None, settings).await?;
-    if invite_only {
-        let rkey = tid_now();
-        let event_uri = format!("{space}/{}/{EVENT}/{rkey}", super_admin.did);
-        super_admin.create_in(state, &space, EVENT, Some(&rkey), event_value.clone()).await?;
-        sidecar["event"] = json!(event_uri);
-        super_admin.put_in(state, &space, SIDECAR, "self", sidecar).await?;
+    let mut undo = Vec::new();
+    match new.write(state, &mut undo).await {
+        Ok(done) => Ok(done),
+        Err(why) => {
+            let mut left = Vec::new();
+            for step in undo.into_iter().rev() {
+                if let Err(also) = step.undo(state, &org_admin, &super_admin).await {
+                    left.push(also);
+                }
+            }
+            if left.is_empty() {
+                Err(format!("{why}\nNothing was created."))
+            } else {
+                Err(format!("{why}\nUndoing it failed too: {}", left.join("; ")))
+            }
+        }
     }
+}
 
-    // Roles for the organization's admins, and the rules.
-    for (did, admin) in &org.admins {
-        super_admin
-            .put_in(
-                state,
-                &space,
-                index::ROLE,
-                did,
-                json!({ "subject": did, "role": admin.role.as_str() }),
-            )
-            .await?;
-    }
-    let rules: Vec<Value> = index::default_rules()
-        .into_iter()
-        .map(|(collection, writers)| json!({ "collection": collection, "writers": writers }))
-        .collect();
-    super_admin.put_in(state, &space, index::RULES, "self", json!({ "rules": rules })).await?;
+/// A record `conference create` wrote, to delete if a later step fails.
+enum Written {
+    /// In the super admin's public repo.
+    Public { collection: &'static str, rkey: String },
+    /// In a space, by the organization's super admin (`settings`) or the
+    /// conference's.
+    InSpace { settings: bool, space: String, collection: &'static str, rkey: String },
+}
 
-    super::save(
-        state,
-        &Row {
-            space: space.clone(),
-            org: org.did.clone(),
-            intake: intake.clone(),
-            super_admin: super_admin.did.clone(),
-            event: event_uri.clone(),
-            invite_only: i64::from(invite_only),
-            info: super::info_from_event(&event_value, theme.as_ref()).to_string(),
-        },
-    )
-    .await?;
-    let name = event_value.get("name").and_then(Value::as_str).unwrap_or("The conference");
-    let mut out = json!({ "space": space, "intake": intake });
-    if let Some(event) = &event_uri {
-        out["event"] = json!(event);
+impl Written {
+    async fn undo(
+        self,
+        state: &AppState,
+        org_admin: &Acting,
+        super_admin: &Acting,
+    ) -> Result<(), String> {
+        match self {
+            Self::Public { collection, rkey } => {
+                super_admin.delete_public(state, collection, &rkey).await
+            }
+            Self::InSpace { settings, space, collection, rkey } => {
+                let writer = if settings { org_admin } else { super_admin };
+                writer.delete_in(state, &space, collection, &rkey).await
+            }
+        }
     }
-    done(format!("Created {name}: {space}"), out)
+}
+
+struct NewConference<'a> {
+    org: &'a Org,
+    org_admin: &'a Acting,
+    super_admin: &'a Acting,
+    skey: String,
+    invite_only: bool,
+    theme: Option<Value>,
+    event_value: Value,
+    adopted: Option<String>,
+}
+
+impl NewConference<'_> {
+    async fn write(&self, state: &AppState, undo: &mut Vec<Written>) -> Result<Done, String> {
+        let (org, super_admin, invite_only) = (self.org, self.super_admin, self.invite_only);
+        let space = SpaceUri::new(&org.did, CONFERENCE_TYPE, &self.skey).to_string();
+        let intake = SpaceUri::new(&org.did, INTAKE_TYPE, &self.skey).to_string();
+        let admin_space = SpaceUri::admin(&org.did).to_string();
+        let eventside = state.oauth.client_id_for("atproto");
+        let visibility = if invite_only { "inviteOnly" } else { "public" };
+        let mut settings = json!({
+            "space": space,
+            "type": CONFERENCE_TYPE,
+            "readPolicy": "members",
+            "writePolicy": "members",
+            "appAccess": "allowList",
+            "allowList": [eventside],
+            "join": { "methods": [] },
+            "intake": intake,
+            "superAdmin": super_admin.did,
+            "visibility": visibility,
+        });
+
+        // The entry point: public records in the super admin's repo, or inside the space.
+        let mut sidecar = json!({
+            "space": space,
+            "intake": intake,
+            "organization": org.did,
+            "superAdmin": super_admin.did,
+            "visibility": visibility,
+        });
+        if let Some(theme) = &self.theme {
+            sidecar["theme"] = theme.clone();
+        }
+        let event_uri = if invite_only {
+            None
+        } else {
+            let uri = match &self.adopted {
+                Some(uri) => uri.clone(),
+                None => {
+                    let uri = super_admin
+                        .create_public(state, EVENT, Some(&self.skey), self.event_value.clone())
+                        .await?;
+                    undo.push(Written::Public { collection: EVENT, rkey: self.skey.clone() });
+                    uri
+                }
+            };
+            let rkey = uri.rsplit('/').next().unwrap_or_default().to_owned();
+            sidecar["event"] = json!(uri);
+            super_admin.create_public(state, SIDECAR, Some(&rkey), sidecar.clone()).await?;
+            undo.push(Written::Public { collection: SIDECAR, rkey });
+            settings["event"] = json!(uri);
+            Some(uri)
+        };
+        // Its settings before anything is written into the space, so the space
+        // is ours (and takes the super admin's writes) by then.
+        let rkey =
+            self.org_admin.create_in(state, &admin_space, index::SPACE, None, settings).await?;
+        undo.push(Written::InSpace {
+            settings: true,
+            space: admin_space.clone(),
+            collection: index::SPACE,
+            rkey,
+        });
+        if invite_only {
+            let rkey = self.skey.clone();
+            let event_uri = format!("{space}/{}/{EVENT}/{rkey}", super_admin.did);
+            super_admin.put_in(state, &space, EVENT, &rkey, self.event_value.clone()).await?;
+            sidecar["event"] = json!(event_uri);
+            super_admin.put_in(state, &space, SIDECAR, "self", sidecar).await?;
+        }
+
+        // Roles for the organization's admins, and the rules.
+        for (did, admin) in &org.admins {
+            super_admin
+                .put_in(
+                    state,
+                    &space,
+                    index::ROLE,
+                    did,
+                    json!({ "subject": did, "role": admin.role.as_str() }),
+                )
+                .await?;
+        }
+        let rules: Vec<Value> = index::default_rules()
+            .into_iter()
+            .map(|(collection, writers)| json!({ "collection": collection, "writers": writers }))
+            .collect();
+        super_admin.put_in(state, &space, index::RULES, "self", json!({ "rules": rules })).await?;
+
+        super::save(
+            state,
+            &Row {
+                space: space.clone(),
+                org: org.did.clone(),
+                intake: intake.clone(),
+                super_admin: super_admin.did.clone(),
+                event: event_uri.clone(),
+                invite_only: i64::from(invite_only),
+                info: super::info_from_event(&self.event_value, self.theme.as_ref()).to_string(),
+            },
+        )
+        .await?;
+        let name = self.event_value.get("name").and_then(Value::as_str).unwrap_or("The conference");
+        let mut out = json!({ "space": space, "intake": intake });
+        if let Some(event) = &event_uri {
+            out["event"] = json!(event);
+        }
+        done(format!("Created {name}: {space}"), out)
+    }
 }
 
 /// An event to adopt: it must be in the conference super admin's own repo.
@@ -736,13 +862,9 @@ async fn list_import(state: &AppState, args: &Args) -> Result<Done, String> {
     let (acting, role) = acting(state, args, &org).await?;
     only_owners(role, &acting, "import attendee lists")?;
     let csv = std::fs::read_to_string(file).map_err(|e| format!("couldn't read {file}: {e}"))?;
-    let mut lines = csv.lines().filter(|l| !l.trim().is_empty());
-    let header: Vec<String> = lines
-        .next()
-        .ok_or("the list is empty")?
-        .split(',')
-        .map(|h| h.trim().to_lowercase())
-        .collect();
+    let mut lines = csv_rows(&csv).into_iter();
+    let header: Vec<String> =
+        lines.next().ok_or("the list is empty")?.iter().map(|h| h.trim().to_lowercase()).collect();
     let column = |name: &str| header.iter().position(|h| h == name);
     let (handle_col, email_col, role_col) = (column("handle"), column("email"), column("role"));
     if handle_col.is_none() && email_col.is_none() {
@@ -751,10 +873,10 @@ async fn list_import(state: &AppState, args: &Args) -> Result<Done, String> {
     let conference = org.conference(&space.to_string()).ok_or("no such conference")?;
     let admin_space = SpaceUri::admin(&org.did).to_string();
     let mut imported = 0;
-    for line in lines {
-        let cells: Vec<&str> = line.split(',').map(str::trim).collect();
-        let cell =
-            |col: Option<usize>| col.and_then(|i| cells.get(i)).copied().filter(|c| !c.is_empty());
+    for cells in lines {
+        let cell = |col: Option<usize>| {
+            col.and_then(|i| cells.get(i)).map(|c| c.trim()).filter(|c| !c.is_empty())
+        };
         let mut entry = json!({ "space": space.to_string() });
         let mut did = None;
         if let Some(handle) = cell(handle_col) {
@@ -778,6 +900,9 @@ async fn list_import(state: &AppState, args: &Args) -> Result<Done, String> {
         }
         let role = cell(role_col);
         if let Some(role) = role {
+            if !ROLES.contains(&role) {
+                return Err(format!("{role} isn't a role: use owner, staff or speaker"));
+            }
             entry["role"] = json!(role);
         }
         if entry.get("did").is_none()
@@ -788,6 +913,8 @@ async fn list_import(state: &AppState, args: &Args) -> Result<Done, String> {
         }
         acting.create_in(state, &admin_space, index::LIST_ENTRY, None, entry).await?;
         if let (Some(did), Some(role)) = (&did, role) {
+            // A role from the list admits its subject only while the list
+            // does, and only while the owner who imported it is one.
             let writer = conference_super_admin(state, &org, conference).await?;
             writer
                 .put_in(
@@ -795,7 +922,7 @@ async fn list_import(state: &AppState, args: &Args) -> Result<Done, String> {
                     &space.to_string(),
                     index::ROLE,
                     did,
-                    json!({ "subject": did, "role": role }),
+                    json!({ "subject": did, "role": role, "assignedBy": acting.did, "via": "list" }),
                 )
                 .await?;
         }
@@ -883,11 +1010,22 @@ async fn member_role(state: &AppState, args: &Args) -> Result<Done, String> {
         return Err(format!("--role must be owner, staff, speaker or none, not {role}"));
     }
     let (space, org) = conference(state, args).await?;
-    let (acting, _) = acting(state, args, &org).await?;
+    let (acting, acting_role) = acting(state, args, &org).await?;
     let conference = org.conference(&space.to_string()).ok_or("no such conference")?;
-    // Only the conference's super admin's role records count.
+    // Within the acting admin's role: owner and staff roles are given and
+    // taken by owners; any admin can give or take the others.
+    let privileged = |r: &str| matches!(r, "owner" | "staff");
+    if acting_role != Some(Role::Owner)
+        && (privileged(role) || conference.roles.get(&subject).is_some_and(|r| privileged(r)))
+    {
+        return Err(format!(
+            "only owners can give or take the owner and staff roles; {} is staff",
+            acting.handle
+        ));
+    }
+    // Only the conference's super admin's role records count. Each names the
+    // admin who decided it, and counts only while they could.
     let writer = conference_super_admin(state, &org, conference).await?;
-    let _ = acting;
     if role == "none" {
         if conference.roles.contains_key(&subject) {
             writer.delete_in(state, &space.to_string(), index::ROLE, &subject).await?;
@@ -899,7 +1037,7 @@ async fn member_role(state: &AppState, args: &Args) -> Result<Done, String> {
                 &space.to_string(),
                 index::ROLE,
                 &subject,
-                json!({ "subject": subject, "role": role }),
+                json!({ "subject": subject, "role": role, "assignedBy": acting.did }),
             )
             .await?;
     }
@@ -981,6 +1119,8 @@ async fn apps(state: &AppState, args: &Args, action: &str) -> Result<Done, Strin
 async fn rules_set(state: &AppState, args: &Args) -> Result<Done, String> {
     let file = args.word(2, "the rules file")?;
     let (space, org) = conference(state, args).await?;
+    let (acting, role) = acting(state, args, &org).await?;
+    only_owners(role, &acting, "set a conference's rules")?;
     let conference = org.conference(&space.to_string()).ok_or("no such conference")?;
     let rules: Value = serde_json::from_str(
         &std::fs::read_to_string(file).map_err(|e| format!("couldn't read {file}: {e}"))?,
@@ -1004,4 +1144,57 @@ async fn rules_set(state: &AppState, args: &Args) -> Result<Done, String> {
         .put_in(state, &space.to_string(), index::RULES, "self", json!({ "rules": list }))
         .await?;
     done("Rules set.", json!({ "space": space.to_string() }))
+}
+
+/// A CSV file's rows (RFC 4180): fields separated by commas, optionally
+/// quoted, with `""` for a quote inside quotes. Blank lines are skipped.
+fn csv_rows(text: &str) -> Vec<Vec<String>> {
+    let mut rows = Vec::new();
+    let mut row = Vec::new();
+    let mut field = String::new();
+    let mut quoted = false;
+    let mut chars = text.chars().peekable();
+    let mut end_row = |row: &mut Vec<String>, field: &mut String| {
+        row.push(std::mem::take(field));
+        let done = std::mem::take(row);
+        if done.iter().any(|f| !f.trim().is_empty()) {
+            rows.push(done);
+        }
+    };
+    while let Some(c) = chars.next() {
+        match (c, quoted) {
+            ('"', true) if chars.peek() == Some(&'"') => {
+                field.push('"');
+                chars.next();
+            }
+            ('"', true) => quoted = false,
+            ('"', false) if field.trim().is_empty() => {
+                field.clear();
+                quoted = true;
+            }
+            (',', false) => row.push(std::mem::take(&mut field)),
+            ('\r', false) if chars.peek() == Some(&'\n') => {}
+            ('\n' | '\r', false) => end_row(&mut row, &mut field),
+            (c, _) => field.push(c),
+        }
+    }
+    end_row(&mut row, &mut field);
+    rows
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_attendee_list_is_read_as_csv() {
+        let rows = csv_rows(
+            "handle,email,role\r\nana.test,\"Ana, de Vries\" <ana@example.com>,speaker\n\n\"bram.test\",,\n\"say \"\"hi\"\"\",x,\n",
+        );
+        assert_eq!(rows.len(), 4);
+        assert_eq!(rows[0], ["handle", "email", "role"]);
+        assert_eq!(rows[1], ["ana.test", "Ana, de Vries <ana@example.com>", "speaker"]);
+        assert_eq!(rows[2], ["bram.test", "", ""]);
+        assert_eq!(rows[3], ["say \"hi\"", "x", ""]);
+    }
 }

@@ -213,8 +213,7 @@ pub async fn get_space_credential(
         Err(why) => return internal(why),
     };
 
-    // The cheap refusals first, before resolving or verifying anything: the
-    // app perimeter, then whether the user may read the space at all.
+    // The app perimeter first, before resolving or verifying anything.
     let attestation = body.get("clientAttestation").and_then(Value::as_str);
     let claimed_client = attestation
         .and_then(|a| Jwt::decode(a).ok())
@@ -223,14 +222,9 @@ pub async fn get_space_credential(
     if !access.allows(claimed_client.as_deref(), &state.oauth.public_url) {
         return invalid("AppNotAuthorized", "Application not authorized for this space");
     }
-    if !org.can_read(&space, &user) {
-        return invalid("UserNotAuthorized", "User not authorized for this space");
-    }
-    if !state.host.allow(&format!("credential:{user}"), 120, 60_000) {
-        return refuse(StatusCode::TOO_MANY_REQUESTS, "RateLimitExceeded", "Too many requests");
-    }
 
-    // Now the proofs: the user's delegation, the app's key, and its client ID.
+    // Then the user's delegation, before anything is said or counted about
+    // them: until it's verified, `iss` is anyone's claim.
     match state.host.signing_key(&state, &user, delegation.header_str("kid")).await {
         Ok(key) => {
             if let Err(why) = delegation.verify(&key) {
@@ -244,6 +238,14 @@ pub async fn get_space_credential(
             );
         }
     }
+    if !state.host.allow(&format!("credential:{user}"), 120, 60_000) {
+        return refuse(StatusCode::TOO_MANY_REQUESTS, "RateLimitExceeded", "Too many requests");
+    }
+    if !org.can_read(&space, &user) {
+        return invalid("UserNotAuthorized", "User not authorized for this space");
+    }
+
+    // Now the app's key, and its client ID.
     let key_id = match verify_signature(&headers, None) {
         Ok(key) => key,
         Err(why) => return unauthorized("BadSpaceSignature", why),
@@ -351,6 +353,7 @@ async fn client_jwks(state: &AppState, client_id: &str) -> Result<Vec<Value>, St
 pub struct Caller {
     pub key_id: String,
     pub delegator: Option<String>,
+    pub client_id: Option<String>,
 }
 
 /// Checks the credential a host method was called with: ours, for this
@@ -403,15 +406,28 @@ pub async fn check(
     verify_signature(headers, Some(&key_id))
         .map_err(|why| unauthorized("BadSpaceSignature", why))?;
     let jti = jwt.claim_str("jti").unwrap_or_default();
-    let issued = sqlx::query_as::<_, (String, Option<i64>)>(
-        "SELECT delegator, revoked_at FROM space_credentials WHERE jti = $1",
+    let issued = sqlx::query_as::<_, (String, Option<String>, Option<i64>)>(
+        "SELECT delegator, client_id, revoked_at FROM space_credentials WHERE jti = $1",
     )
     .bind(jti)
     .fetch_optional(&state.db)
     .await
     .map_err(internal)?;
-    if issued.as_ref().is_some_and(|(_, revoked)| revoked.is_some()) {
-        return Err(unauthorized("CredentialRevoked", "space credential has been revoked"));
+    let revoked = || unauthorized("CredentialRevoked", "space credential has been revoked");
+    if issued.as_ref().is_some_and(|(_, _, revoked)| revoked.is_some()) {
+        return Err(revoked());
+    }
+    // Revocation is pushed when access changes; this catches a credential
+    // used before that lands: its user and its app must still have access.
+    if let Some((delegator, client_id, _)) = &issued {
+        let org = index::load_for_space(state, space).await.map_err(internal)?;
+        let still = org.is_some_and(|org| {
+            org.can_read(space, delegator)
+                && org.app_access(space).allows(client_id.as_deref(), &state.oauth.public_url)
+        });
+        if !still {
+            return Err(revoked());
+        }
     }
     if audience != space.authority {
         return Err(unauthorized("BadSpaceAudience", "space audience does not match the request"));
@@ -423,7 +439,8 @@ pub async fn check(
             "Credential is not scoped to this space",
         ));
     }
-    Ok(Caller { key_id, delegator: issued.map(|(d, _)| d) })
+    let (delegator, client_id) = issued.map_or((None, None), |(d, c, _)| (Some(d), c));
+    Ok(Caller { key_id, delegator, client_id })
 }
 
 fn bearer(headers: &HeaderMap) -> Option<String> {
@@ -432,10 +449,9 @@ fn bearer(headers: &HeaderMap) -> Option<String> {
     scheme.eq_ignore_ascii_case("bearer").then(|| token.trim().to_owned())
 }
 
-/// The per-IP limit on the host's public endpoints. Loopback isn't limited:
-/// it's dev, tests, or a reverse proxy in front of us.
+/// The per-IP limit on the host's public endpoints.
 pub fn ip_allowed(state: &AppState, what: &str, ip: IpAddr) -> bool {
-    ip.is_loopback() || state.host.allow(&format!("{what}:ip:{ip}"), 600, 60_000)
+    state.host.allow_ip(state, what, ip, 600)
 }
 
 /// Marks every unexpired credential `delegator` was issued for `space` as
@@ -445,22 +461,37 @@ pub async fn revoke_delegated(
     space: &str,
     delegator: &str,
 ) -> Result<Vec<String>, String> {
+    revoke_where(state, space, |d, _| d == delegator).await
+}
+
+/// Marks every unexpired, unrevoked credential for `space` that `lost` picks
+/// (by delegator and client ID) as revoked, returning their `jti`s.
+pub async fn revoke_where(
+    state: &AppState,
+    space: &str,
+    lost: impl Fn(&str, Option<&str>) -> bool,
+) -> Result<Vec<String>, String> {
     let now = now_ms();
-    let jtis = sqlx::query_scalar::<_, String>(
-        "SELECT jti FROM space_credentials WHERE space = $1 AND delegator = $2 AND revoked_at IS NULL AND expires_at > $3",
+    let issued = sqlx::query_as::<_, (String, String, Option<String>)>(
+        "SELECT jti, delegator, client_id FROM space_credentials WHERE space = $1 AND revoked_at IS NULL AND expires_at > $2",
     )
     .bind(space)
-    .bind(delegator)
     .bind(now)
     .fetch_all(&state.db)
     .await
     .map_err(|e| e.to_string())?;
-    sqlx::query("UPDATE space_credentials SET revoked_at = $1 WHERE space = $2 AND delegator = $3 AND revoked_at IS NULL")
-        .bind(now)
-        .bind(space)
-        .bind(delegator)
-        .execute(&state.db)
-        .await
-        .map_err(|e| e.to_string())?;
+    let mut jtis = Vec::new();
+    for (jti, delegator, client_id) in issued {
+        if !lost(&delegator, client_id.as_deref()) {
+            continue;
+        }
+        sqlx::query("UPDATE space_credentials SET revoked_at = $1 WHERE jti = $2")
+            .bind(now)
+            .bind(&jti)
+            .execute(&state.db)
+            .await
+            .map_err(|e| e.to_string())?;
+        jtis.push(jti);
+    }
     Ok(jtis)
 }

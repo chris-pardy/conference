@@ -11,6 +11,9 @@
 pub mod admin;
 pub mod cli;
 
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
+
 use axum::Json;
 use axum::Router;
 use axum::extract::{Query, State};
@@ -25,7 +28,7 @@ use crate::auth::session::{self, Lookup};
 use crate::auth::{CurrentUser, xrpc_error};
 use crate::crypto::{tid_micros, tid_now};
 use crate::db::now_ms;
-use crate::spacehost::index::{self, Conference, JOIN, LEAVE, Org, Via};
+use crate::spacehost::index::{self, AppAccess, Conference, JOIN, LEAVE, Org, Via};
 use crate::spacehost::{CONFERENCE_TYPE, ClientIp, SpaceUri, authority, notify, sync};
 
 pub const EVENT: &str = "community.lexicon.calendar.event";
@@ -158,7 +161,7 @@ fn failed(why: impl std::fmt::Display) -> Response {
 }
 
 /// A conference and its organization, by row.
-async fn load(state: &AppState, row: &Row) -> Result<Option<Org>, String> {
+async fn load(state: &AppState, row: &Row) -> Result<Option<Arc<Org>>, String> {
     let org = index::load(state, &row.org).await?;
     Ok(org.filter(|org| org.conference(&row.space).is_some()))
 }
@@ -237,7 +240,7 @@ pub async fn list_my_conferences(State(state): State<AppState>, user: CurrentUse
         Ok(rows) => rows,
         Err(err) => return failed(err),
     };
-    let mut orgs: std::collections::BTreeMap<String, Option<Org>> = Default::default();
+    let mut orgs: BTreeMap<String, Option<Arc<Org>>> = Default::default();
     let mut out = Vec::new();
     for row in rows {
         if !orgs.contains_key(&row.org) {
@@ -284,6 +287,10 @@ pub async fn list_records(
     };
     let conference = org.conference(&row.space).expect("loaded with its conference");
     if !conference.is_member(&user.did) {
+        // An invite-only conference doesn't exist for anyone outside it.
+        if row.invite_only != 0 {
+            return not_found();
+        }
         return xrpc_error(
             StatusCode::FORBIDDEN,
             "NotAMember",
@@ -310,7 +317,7 @@ pub async fn list_records(
             if !conference.was_member_at(&repo, us) {
                 return None;
             }
-            if only_super && Some(repo.as_str()) != conference.super_admin() {
+            if only_super && repo != conference.super_admin() {
                 return None;
             }
             if admins_only && !may_post_as_admin(&org, conference, &repo) {
@@ -363,9 +370,7 @@ pub async fn join(
     Json(input): Json<JoinInput>,
 ) -> Response {
     let limited = !state.host.allow(&format!("join:{}", user.did), 10, 60_000)
-        || ip.is_some_and(|ip| {
-            !ip.is_loopback() && !state.host.allow(&format!("join:ip:{ip}"), 30, 60_000)
-        });
+        || ip.is_some_and(|ip| !state.host.allow_ip(&state, "join", ip, 30));
     if limited {
         return xrpc_error(
             StatusCode::TOO_MANY_REQUESTS,
@@ -421,6 +426,9 @@ pub async fn join(
     }
     let now = tid_micros(&tid_now()).unwrap_or_default();
     let settings = &conference.settings;
+    // Named by its address, an invite-only conference that wouldn't let this
+    // person in answers as if it didn't exist, as its page does.
+    let hidden = row.invite_only != 0 && input.conference.is_some();
     let admission = match conference.would_admit(did, code_hash.as_deref(), now) {
         Some(Via::Code) => Some(Via::Code),
         // A code that doesn't admit is refused, whatever else is on, unless
@@ -428,7 +436,7 @@ pub async fn join(
         _ if code.is_some()
             && !matches!(conference.would_admit(did, None, now), Some(Via::Role | Via::List)) =>
         {
-            return invalid_code();
+            return if hidden { not_found() } else { invalid_code() };
         }
         other => other,
     };
@@ -442,6 +450,9 @@ pub async fn join(
                     Ok(()) => reload_answer(&state, &row, did).await,
                     Err(why) => failed(why),
                 };
+            }
+            if hidden {
+                return not_found();
             }
             if settings.has("list") && conference.has_email_rows() && !input.request {
                 let mut out = answer("emailNeeded");
@@ -614,10 +625,22 @@ pub async fn leave(
         Err(why) => return failed(why),
     };
     if !org.conference(&row.space).is_some_and(|c| c.is_member(&user.did)) {
+        if row.invite_only != 0 {
+            return not_found();
+        }
         return xrpc_error(
             StatusCode::BAD_REQUEST,
             "NotAMember",
             "You aren't a member of this conference.",
+        );
+    }
+    // Admins are members because they're admins: leaving wouldn't end that,
+    // only cut off their apps.
+    if org.is_admin(&user.did) {
+        return xrpc_error(
+            StatusCode::BAD_REQUEST,
+            "AdminCannotLeave",
+            "Admins are members of every conference of theirs. To leave, stop being an admin.",
         );
     }
     if let Err(res) = write_intake(&state, &user, &row.intake, LEAVE, json!({})).await {
@@ -675,26 +698,29 @@ async fn try_email_step(state: &AppState, id_hash: &str, space: &str) -> Result<
     admit_by_super_admin(state, &org, space, &session.did, "email").await
 }
 
-/// Who may read each of an organization's spaces now, so the ones who lose
-/// access can have their credentials revoked.
-pub fn readers(org: &Org) -> Vec<(String, std::collections::BTreeSet<String>)> {
-    org.spaces()
-        .into_iter()
-        .map(|space| {
-            let readers = org.readers(&space);
-            (space, readers)
-        })
-        .collect()
+/// Who may read each of an organization's spaces now, and with which apps,
+/// so whoever loses access (a person, or an app) can have their credentials
+/// revoked.
+pub struct Access {
+    readers: Vec<(String, BTreeSet<String>)>,
+    apps: Vec<(String, AppAccess)>,
+}
+
+pub fn access(org: &Org) -> Access {
+    let spaces = org.spaces();
+    Access {
+        readers: spaces.iter().map(|space| (space.clone(), org.readers(space))).collect(),
+        apps: spaces
+            .iter()
+            .filter_map(|space| Some((space.clone(), org.app_access(&SpaceUri::parse(space)?))))
+            .collect(),
+    }
 }
 
 /// Revokes the credentials of everyone who could read a space before and
-/// can't now.
-pub async fn revoke_lost(
-    state: &AppState,
-    before: &[(String, std::collections::BTreeSet<String>)],
-    after: &Org,
-) {
-    for (space, readers) in before {
+/// can't now, and of every app that could and can't.
+pub async fn revoke_lost(state: &AppState, before: &Access, after: &Org) {
+    for (space, readers) in &before.readers {
         let now = after.readers(space);
         for did in readers.difference(&now) {
             if let Err(why) = notify::revoke(state, space, did).await {
@@ -702,4 +728,130 @@ pub async fn revoke_lost(
             }
         }
     }
+    for (space, apps) in &before.apps {
+        let Some(parsed) = SpaceUri::parse(space) else { continue };
+        let now = after.app_access(&parsed);
+        if now == *apps {
+            continue;
+        }
+        let eventside = state.oauth.public_url.clone();
+        let lost = move |client: Option<&str>| !now.allows(client, &eventside);
+        if let Err(why) = notify::revoke_apps(state, space, lost).await {
+            eprintln!("warning: couldn't revoke apps' credentials for {space}: {why}");
+        }
+    }
+}
+
+/// Rebuilds the cached facts of an organization's conferences (the
+/// `conferences` table) from their records: the super admin's settings, and
+/// the event and sidecar, public or inside the space. A conference whose
+/// event can't be read keeps the facts it had; one that had none is
+/// reported.
+pub async fn rebuild_rows(state: &AppState, org: &Org) -> Vec<String> {
+    let mut missing = Vec::new();
+    for conference in org.conferences.values() {
+        let settings = &conference.settings;
+        let Some(intake) = settings.intake.clone() else { continue };
+        let super_admin = conference.super_admin().to_owned();
+        let facts = match &settings.event {
+            Some(event) => public_facts(state, event).await,
+            None => inside_facts(state, conference.space(), &super_admin).await,
+        };
+        let existing = row(state, conference.space()).await.ok().flatten();
+        let (info, event) = match (facts, existing) {
+            (Ok((info, event)), _) => (info.to_string(), event),
+            (Err(_), Some(existing)) => (existing.info, existing.event),
+            (Err(why), None) => {
+                missing.push(format!("{}: {why}", conference.space()));
+                continue;
+            }
+        };
+        let saved = save(
+            state,
+            &Row {
+                space: conference.space().to_owned(),
+                org: org.did.clone(),
+                intake,
+                super_admin,
+                event: if settings.invite_only { None } else { event },
+                invite_only: i64::from(settings.invite_only),
+                info,
+            },
+        )
+        .await;
+        if let Err(why) = saved {
+            missing.push(format!("{}: {why}", conference.space()));
+        }
+    }
+    missing
+}
+
+/// A public conference's facts: its event, and its sidecar's theme, from the
+/// super admin's PDS.
+async fn public_facts(state: &AppState, event: &str) -> Result<(Value, Option<String>), String> {
+    let value = public_record(state, event).await?;
+    let sidecar = match event.rsplit_once('/') {
+        Some((_, rkey)) => {
+            let repo = event.trim_start_matches("at://").split('/').next().unwrap_or_default();
+            public_record(state, &format!("at://{repo}/{SIDECAR}/{rkey}")).await.ok()
+        }
+        None => None,
+    };
+    let theme = sidecar.as_ref().and_then(|s| s.get("theme"));
+    Ok((info_from_event(&value, theme), Some(event.to_owned())))
+}
+
+/// An invite-only conference's facts: its event and sidecar inside the
+/// space, from the index.
+async fn inside_facts(
+    state: &AppState,
+    space: &str,
+    super_admin: &str,
+) -> Result<(Value, Option<String>), String> {
+    let rows = sqlx::query_as::<_, (String, String, String)>(
+        "SELECT collection, rkey, value FROM space_records WHERE space = $1 AND repo = $2 \
+         AND collection IN ($3, $4) AND value IS NOT NULL",
+    )
+    .bind(space)
+    .bind(super_admin)
+    .bind(EVENT)
+    .bind(SIDECAR)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| e.to_string())?;
+    let parse = |v: &str| serde_json::from_str::<Value>(v).ok();
+    let sidecar =
+        rows.iter().find(|(c, k, _)| c == SIDECAR && k == "self").and_then(|(_, _, v)| parse(v));
+    let named = sidecar.as_ref().and_then(|s| s.get("event")).and_then(Value::as_str);
+    let event = rows
+        .iter()
+        .filter(|(c, _, _)| c == EVENT)
+        .find(|(_, rkey, _)| named.is_none_or(|uri| uri.ends_with(&format!("/{rkey}"))))
+        .and_then(|(_, _, v)| parse(v))
+        .ok_or("its event isn't in the space")?;
+    let theme = sidecar.as_ref().and_then(|s| s.get("theme"));
+    Ok((info_from_event(&event, theme), None))
+}
+
+/// A public record's value, from its repo's PDS.
+pub async fn public_record(state: &AppState, uri: &str) -> Result<Value, String> {
+    let rest = uri.strip_prefix("at://").ok_or_else(|| format!("{uri} isn't an AT-URI"))?;
+    let [repo, collection, rkey] = rest.split('/').collect::<Vec<_>>()[..] else {
+        return Err(format!("{uri} isn't a record's AT-URI"));
+    };
+    let pds = state.host.pds_of(state, repo).await?;
+    let url = format!("{pds}/xrpc/com.atproto.repo.getRecord");
+    let res = state
+        .http
+        .guarded(&url)?
+        .get(&url)
+        .query(&[("repo", repo), ("collection", collection), ("rkey", rkey)])
+        .send()
+        .await
+        .map_err(|e| format!("{url}: {e}"))?;
+    if !res.status().is_success() {
+        return Err(format!("couldn't read {uri}: {}", res.status()));
+    }
+    let record: Value = crate::net::read_json(res).await?;
+    record.get("value").cloned().ok_or_else(|| format!("{uri} has no value"))
 }
