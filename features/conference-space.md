@@ -1,5 +1,5 @@
 ---
-status: implementing
+status: blocked
 impact: cross-cutting
 depends-on: [attendee-sign-in]
 branch: feature/conference-space
@@ -1589,8 +1589,11 @@ at the PR alongside rounds 1 to 8:
   `keep_list_claim`.
 - **A removal or ban that takes a role checks first.** It resolves the
   conference super admin's session and binds the claimed row before the
-  decision is written, so a super admin who isn't connected (or whose PDS
-  is down) fails the command with nothing written. If the super admin's
+  decision is written, so a super admin who isn't connected fails the
+  command with nothing written. (Corrected in round 10: that check proves
+  only that the conference super admin has a session, not that their PDS
+  is up. With it down, the decision was written and the role kept; round 10
+  undoes the decision instead.) If the super admin's
   own decision then keeps the person in, the binding is harmless: it only
   makes durable the row they already held.
 - **Reindex reads intake repos capped, like a sync.** A read cut short at
@@ -1600,6 +1603,31 @@ at the PR alongside rounds 1 to 8:
   sync reads on from there (re-reading what's already stored changes
   nothing). This replaces round 8's uncapped reindex read, which an
   anonymous intake writer could make buffer up to 1000 pages of 4 MB.
+
+**Review round 10 design notes (2026-10-07).** The round-10 fixes, to
+raise at the PR alongside rounds 1 to 9:
+
+- **`list import` doesn't replace a role it didn't give.** A row with a
+  role is imported, but its role is written only when the person has no
+  role or already has a list role, and isn't an admin. Otherwise their
+  role stays, and the command lists them ("Kept the role they already
+  had"). A list role admits only while the list does, so replacing an
+  owner-given role could push someone out of a conference without a list,
+  or demote them. The import ends with the same revocation pass as other
+  commands.
+- **A list row's claim moves only onto a role from the row's importer.**
+  `put_role` carries `listHandle` onto a list role only when its
+  `assignedBy` is the owner who imported the row. Another owner's list role
+  is written after the row is bound, because that role goes when its owner
+  stops being an admin. `org admin remove` also binds any row held by a
+  role it's about to delete, before writing anything. That covers claims
+  round 9's code already moved.
+- **A removal or ban whose role can't be taken is undone.** If deleting
+  the role fails after the decision is written (say the conference super
+  admin's PDS is down), the decision record is deleted again and the
+  command fails with "nothing was changed". If the undo fails too, the
+  error says the person is out but still holds their role, and to run the
+  command again.
 
 **Red-test gate (2026-10-06):** the user approved the red tests and the
 surfaces they pin (see Build notes), with these contract changes:
@@ -2599,3 +2627,93 @@ unchanged.
    never gets as far as either. The extra bump only happens when ops are
    read twice (a commit cut short, or overlapping syncs), and costs a
    re-derive, not correctness.
+
+### Round 10
+
+Reviewer: a fresh subagent following `adversarial-review`. Verdict: not
+clean (0 blocking, 2 major, 1 minor, 1 nit). After the rework: `pnpm check`
+green (lint, build, Rust 93 + unit 122 + integration 114 + tooling 33 + e2e
+35), and `scripts/check-tests-unchanged.sh` reports the frozen
+tests unchanged. No reviewer has seen the round 10 fixes.
+
+1. **[major] `list import` replaced any role with a list role.** It
+   overwrote the role record whatever it held. A list role admits only
+   while `list` is a join method, so importing someone an owner had given a
+   role, into a conference without a list, pushed them out. It also
+   silently demoted owner- and staff-given roles, replaced an org admin's
+   own conference role, and never ran the revocation pass. **Fixed:** the
+   list's role is written only when the person has no role or already has
+   a list role, and isn't an admin; otherwise their role stays and the
+   command lists them. The import ends with `after_change`. See "Review
+   round 10 design notes". Integration TC-32 (round 10), which fails on the
+   old code.
+2. **[major] Round 9's `put_role` moved a list row's claim onto another
+   owner's role.** When Sem re-imported Zoe, the claim from Kees's row
+   moved onto Sem's list role. `org admin remove sem` deletes the roles Sem
+   assigned (and they stop counting anyway), so Kees's row reopened to the
+   handle's next holder: TC-17 again. **Fixed:** the claim is carried only
+   onto a list role assigned by the row's own importer. Any other role is
+   written after the row is bound. `org admin remove` also binds the row
+   of every role it's about to delete, before writing anything.
+   Integration TC-17 (round 10), which fails on the old code.
+3. **[minor] A removal or ban could be left half done.** `decide`'s
+   up-front check proved only that the conference super admin had a
+   session, not that their PDS was up. With it down, the removal was
+   written, deleting the role failed, and the person kept the role, which
+   let them back in. **Fixed:** when the role can't be deleted, the
+   decision record is deleted again, and the command fails saying nothing
+   was changed. If that undo fails too, the error says exactly what state
+   is left. Round 9's design note is corrected. Integration TC-55
+   (round 10), which fails on the old code.
+4. **[nit] `conference_super_admin` ignored its `org` parameter.**
+   **Fixed:** the parameter is gone.
+
+### Blocked after round 10
+
+The pipeline allows ten review rounds. None came back clean, so this needs
+a human decision before shipping.
+
+| Round | Blocking | Major | Minor | Nit |
+|-------|----------|-------|-------|-----|
+| 1 | 0 | 9 | 5 | 3 |
+| 2 | 0 | 5 | 5 | 1 |
+| 3 | 0 | 6 | 2 | 1 |
+| 4 | 0 | 4 | 3 | 1 |
+| 5 | 0 | 3 | 4 | 0 |
+| 6 | 0 | 2 | 3 | 2 |
+| 7 | 0 | 2 | 2 | 2 |
+| 8 | 0 | 2 | 2 | 2 |
+| 9 | 0 | 2 | 1 | 1 |
+| 10 | 0 | 2 | 1 | 1 |
+
+**What the rounds found:**
+- No round found anything blocking. The majors fell from 9 to 2 and have
+  stayed at 2 for five rounds.
+- Later rounds mostly found holes in two pieces of machinery: admin
+  precedence (whose decision stands, and roles that count only while their
+  assigner may assign them), and handle-only list rows with their claims
+  and bindings. A previous round's fix often opened the hole:
+  - Round 5's three majors were regressions from round 4's fixes.
+  - Round 9 #2 reopened round 7's intake abuse through round 8's uncapped
+    reindex.
+  - Round 10 #2 reopened TC-17 through round 9's `put_role`.
+  - Rounds 7, 8, 9 and 10 each found another way for a list row's claim to
+    be lost.
+- The other areas have held since they were fixed: the space host
+  protocol, credentials, revocation, and the intake caps.
+
+**Current state:** all frozen tests and every review regression test pass
+(Rust 93, unit 122, integration 114, tooling 33, e2e 35), and the frozen
+tests are unchanged. `pnpm check` is green with the round 10
+fixes against the locally built vivarium. CI still needs vivarium 0.0.3
+for attendee-sign-in's e2e TC-8.
+
+**The choices:**
+- **(a) Ship as is,** with the round 10 fixes unreviewed.
+- **(b) Run more review rounds.** Recent rounds suggest each will find one
+  or two more holes in the same machinery.
+- **(c) Simplify the model before shipping.** For example, require list
+  handles to resolve at import, which drops handle-only rows and the whole
+  claim and binding machinery. And/or drop cross-admin precedence, so only
+  owners or the super admin write membership decisions. Either would
+  remove most of the code that later rounds found holes in.

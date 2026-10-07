@@ -1,3 +1,6 @@
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import type { VivariumScope } from '@vivarium-dev/client'
 import { afterAll, beforeAll, expect, test, vi } from '@vivarium-dev/client/vitest'
@@ -881,4 +884,79 @@ test('TC-48: reindex reads an intake repo only up to its cap, and keeps the rest
   } finally {
     db.close()
   }
+})
+
+// Regressions from adversarial review round 10.
+
+/** `list import` as a given owner. */
+async function importListAs(
+  dep: Deployment,
+  conference: { space: string },
+  as: string,
+  rows: { handle: string; role: string }[],
+) {
+  const file = join(mkdtempSync(join(tmpdir(), 'eventside-list-')), 'attendees.csv')
+  writeFileSync(file, `${['handle,email,role', ...rows.map((r) => `${r.handle},,${r.role}`)].join('\n')}\n`)
+  return cliOk(dep, ['list', 'import', file, '--conference', conference.space, '--as', as])
+}
+
+test('TC-32: importing a list leaves a role an admin gave alone (review round 10)', async ({ viv }) => {
+  const { conference } = await seedConference(dep, accountsIn(viv), { methods: ['code'] })
+  const bram = await viv.createAccount(viv.handle('bram'))
+  expect((await setRole(dep, conference, bram, 'speaker')).code).toBe(0)
+  const asBram = await Attendee.signIn(dep, bram)
+  expect((await asBram.join({ conference: conference.space })).body.status, 'admitted by the role').toBe('joined')
+
+  // A list role admits only while the list does, which this conference doesn't use.
+  const imported = await importList(dep, conference, [{ handle: bram.handle, role: 'speaker' }])
+  expect(imported.stdout, 'the import says the role was kept').toContain(bram.did)
+  const read = await asBram.call('app.eventside.conference.listRecords', {
+    params: { conference: conference.space, collection: NSID.event },
+  })
+  expect(read.status, 'Bram is still a member').toBe(200)
+})
+
+test('TC-17: a list row stays with its holder after the owner who re-imported them is removed (review round 10)', async ({
+  viv,
+}) => {
+  const { org, conference, zoeAccount, zoe, rowStaysWithZoe } = await claimedListRow(viv)
+  const sem = await viv.createAccount(viv.handle('sem'))
+  await addAdmin(dep, org, sem, 'owner')
+  // Sem re-imports Zoe under her new handle: his list role, not the row's importer's.
+  const zoeNew = viv.handle('zoe-new')
+  await changeHandle(viv.url, zoeAccount, zoeNew)
+  await importListAs(dep, conference, sem.handle, [{ handle: zoeNew, role: 'speaker' }])
+  // Sem's roles go with him.
+  await cliOk(dep, ['org', 'admin', 'remove', sem.handle, '--org', org.did])
+  await rowStaysWithZoe()
+  const read = await zoe.call('app.eventside.conference.listRecords', {
+    params: { conference: conference.space, collection: NSID.event },
+  })
+  expect(read.status, 'Zoe is still a member').toBe(200)
+})
+
+test('TC-55: a removal whose role can’t be taken is undone (review round 10)', async ({ viv }) => {
+  const olga = await viv.createAccount(viv.handle('olga'))
+  const pim = await viv.createAccount(viv.handle('pim'))
+  const org = await createOrg(dep, olga)
+  await addAdmin(dep, org, pim, 'owner')
+  const conference = await createConference(dep, org, { ...ATMOSPHERECONF, superAdmin: pim, methods: ['code'] })
+  const bram = await viv.createAccount(viv.handle('bram'))
+  expect((await setRole(dep, conference, bram, 'speaker')).code).toBe(0)
+  const asBram = await Attendee.signIn(dep, bram)
+  expect((await asBram.join({ conference: conference.space })).body.status).toBe('joined')
+
+  // Pim, who writes the conference's roles, is down.
+  await takeOffline(viv.url, pim)
+  try {
+    const removal = await cli(dep, ['member', 'remove', bram.handle, '--conference', conference.space])
+    expect(removal.code, 'the removal fails').not.toBe(0)
+    expect(removal.stderr).toMatch(/undone/)
+  } finally {
+    await bringOnline(viv.url, pim)
+  }
+  const read = await asBram.call('app.eventside.conference.listRecords', {
+    params: { conference: conference.space, collection: NSID.event },
+  })
+  expect(read.status, 'nothing was half done: Bram is still a member').toBe(200)
 })

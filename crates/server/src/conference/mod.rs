@@ -742,8 +742,10 @@ pub async fn keep_list_claim(
 /// Writes `did`'s role record in a conference, as `writer` (its super
 /// admin). Every role a command or a join writes goes through here, so a
 /// list row `did` holds only by their current role's claim stays theirs:
-/// a list role carries the claim (`listHandle`) on, and any other role is
-/// written only after the row is bound, so it no longer depends on a role.
+/// a list role assigned by the row's own importer carries the claim
+/// (`listHandle`) on, and any other role (another owner's list role
+/// included, which goes when they stop being an admin) is written only
+/// after the row is bound, so it no longer depends on a role.
 pub async fn put_role(
     state: &AppState,
     org: &Org,
@@ -753,7 +755,8 @@ pub async fn put_role(
     mut value: Value,
 ) -> Result<(), String> {
     if let Some(entry) = conference.claimed_row(did) {
-        if value.get("via").and_then(Value::as_str) == Some("list") {
+        let str_of = |key: &str| value.get(key).and_then(Value::as_str);
+        if str_of("via") == Some("list") && str_of("assignedBy") == Some(entry.by.as_str()) {
             value["listHandle"] = json!(entry.handle);
         } else {
             write_binding(state, org, conference.space(), did, entry).await?;

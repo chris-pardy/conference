@@ -405,6 +405,11 @@ impl Conference {
         })
     }
 
+    /// Whether `did`'s role came from an attendee list (a `via: list` role).
+    pub fn has_list_role(&self, did: &str) -> bool {
+        self.list_roles.contains(did)
+    }
+
     /// The handle-only row `did` holds only by their list role's claim (no
     /// entry binds its handle to a DID yet), if any.
     pub fn claimed_row(&self, did: &str) -> Option<&ListEntry> {
