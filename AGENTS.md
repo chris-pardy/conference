@@ -64,8 +64,12 @@ in the feature file, push, and stop.
 - **Approved tests are frozen.** The commit recorded as `tests-commit` in the
   feature file holds the approved tests. From then on, nothing may change the
   files in that commit. `scripts/check-tests-unchanged.sh <tests-commit>`
-  enforces this, and implementation, review and shipping all run it. If a
+  reports changes, and implementation, review and shipping all run it. If a
   frozen test is wrong, don't edit it. Set the feature to `blocked` and ask.
+  If the user approves a change, record the approval and the new wording in
+  the feature file, then commit the test change on its own
+  (`test(<slug>): … (approved)`). The `frozen-tests` check warns about
+  changed frozen files rather than failing, so an approved change can land.
 - **Specs on `main`, builds on branches.** Spec commits touch only
   `features/<slug>.md` and go directly to `main`. Run `git pull --rebase`
   before each push, since other spec sessions may be pushing too. A build

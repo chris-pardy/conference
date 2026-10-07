@@ -86,5 +86,14 @@ if ! git merge-base --is-ancestor "$frozen" HEAD 2>/dev/null; then
   fail "tests-commit $frozen is not an ancestor of HEAD (not in this branch's history). Was the branch rebased? Once tests are frozen, bring in main with \`git merge origin/main\`, never a rebase."
 fi
 
+# Changed frozen tests are a warning, not a failure: the user can approve a
+# change, recorded in the feature file. Everything above still fails.
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-"$script_dir/check-tests-unchanged.sh" "$frozen"
+if ! changed=$("$script_dir/check-tests-unchanged.sh" "$frozen" 2>&1); then
+  message="frozen tests changed since $frozen; each change needs the user's approval recorded in $file"
+  if [[ -n ${GITHUB_ACTIONS:-} ]]; then echo "::warning title=Frozen tests changed::$message"; fi
+  say "warning: $message"
+  echo "$changed" | sed 1d >&2
+  exit 0
+fi
+say "$changed"

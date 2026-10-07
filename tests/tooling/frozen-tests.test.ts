@@ -99,19 +99,21 @@ test('TC-20: unchanged frozen tests pass', async () => {
   expect(result.output).not.toMatch(/skipped/i)
 })
 
-test('TC-21: a changed frozen test fails the check', async () => {
+test('TC-21: a changed frozen test is a warning, not a failure', async () => {
   await freezeTests()
 
   // Changed but not committed.
   write('tests/demo.test.ts', "test('TC-1: demo', () => { expect(1).toBe(1) })\n")
   const uncommitted = await check()
-  expect(uncommitted.code).not.toBe(0)
+  expect(uncommitted.code, uncommitted.output).toBe(0)
+  expect(uncommitted.output).toMatch(/warning/i)
   expect(uncommitted.output).toContain('tests/demo.test.ts')
 
   // Changed and committed.
   await commit('loosen the test')
   const committed = await check()
-  expect(committed.code).not.toBe(0)
+  expect(committed.code, committed.output).toBe(0)
+  expect(committed.output).toMatch(/warning/i)
   expect(committed.output).toContain('tests/demo.test.ts')
 })
 
@@ -156,6 +158,7 @@ test('TC-25: in CI, the branch comes from the pull request', async () => {
   await git('checkout', '-q', '--detach', 'HEAD')
 
   const result = await check({ GITHUB_HEAD_REF: 'feature/demo', GITHUB_EVENT_NAME: 'pull_request' })
-  expect(result.code).not.toBe(0)
+  expect(result.code, result.output).toBe(0)
+  expect(result.output).toMatch(/warning/i)
   expect(result.output).toContain('tests/demo.test.ts')
 })

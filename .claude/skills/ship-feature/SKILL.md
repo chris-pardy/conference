@@ -48,6 +48,9 @@ are none.
 
 - **Checks fail:** go back to `implement-feature` to fix them, pushing to
   the same branch. Frozen tests stay frozen, and `status` stays `complete`.
+- **`frozen-tests` warns that frozen tests changed:** list each changed test
+  and where the feature file records the user's approval in the PR body, and
+  treat the PR as architectural.
 - **No checks are configured** (still none after 2 minutes): this PR can't
   auto-merge. Treat it as architectural and say why in the comment below.
 

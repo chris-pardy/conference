@@ -17,7 +17,9 @@ Work in the feature's worktree, `.claude/worktrees/<slug>` (see
 
 The frozen files are the ones in `tests-commit`
 (`git show --name-only --format= <tests-commit>`). Never edit, move, delete,
-skip or `.only` them, and don't weaken their setup through config.
+skip or `.only` them, and don't weaken their setup through config. The one
+exception is a change the user approved and the feature file records: commit
+it on its own, as `AGENTS.md` describes.
 
 ## 7. Implement
 
@@ -27,7 +29,8 @@ analysis and the approved design. Match the style of the surrounding code.
 Quality gates, all of which must pass before you commit:
 
 - The full test suite is green, not only this feature's tests.
-- `scripts/check-tests-unchanged.sh <tests-commit>` passes.
+- `scripts/check-tests-unchanged.sh <tests-commit>` passes, or lists only
+  files whose changes the feature file records as approved by the user.
 - The linter and typechecker, if the repo has them, are clean.
 
 Commit (`feat(<slug>): …`) and push.

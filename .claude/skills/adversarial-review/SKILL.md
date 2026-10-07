@@ -24,8 +24,10 @@ path you were given), not the main checkout.
 
 ## Check
 
-1. Run `scripts/check-tests-unchanged.sh <tests-commit>`. If it fails, that's
-   a blocking finding.
+1. Run `scripts/check-tests-unchanged.sh <tests-commit>`. Any changed file
+   the feature file doesn't record as an approved change is a blocking
+   finding, and so is an approved change that goes beyond its recorded
+   wording.
 2. Run the full suite and the linter and typechecker. Any failure is
    blocking.
 3. Then read the code, looking for:
@@ -51,7 +53,7 @@ path you were given), not the main checkout.
 ## Severity
 
 - **blocking:** wrong behavior on the main path, data loss, a security hole,
-  a changed frozen test, or a red suite.
+  an unapproved change to a frozen test, or a red suite.
 - **major:** wrong behavior in an edge case, a missing requirement, or a
   design flaw that will hurt other features.
 - **minor:** maintainability, clarity, or small inefficiencies likely to
