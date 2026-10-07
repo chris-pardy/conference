@@ -1372,6 +1372,7 @@ async fn decide(state: &AppState, args: &Args, action: &str) -> Result<Done, Str
     // Out of the conference, out of their role: once they're out, so a
     // removal the super admin's decision overrides leaves the role be.
     if matches!(action, "remove" | "ban") && !member && conference.roles.contains_key(&subject) {
+        super::keep_list_claim(state, &org, conference, &subject).await?;
         let writer = conference_super_admin(state, &org, conference).await?;
         writer.delete_in(state, &space_uri, index::ROLE, &subject).await?;
         after = after_change(state, &after).await?;
@@ -1413,6 +1414,9 @@ async fn member_role(state: &AppState, args: &Args) -> Result<Done, String> {
     // Only the conference's super admin's role records count. Each names the
     // admin who decided it, and counts only while they could.
     let writer = conference_super_admin(state, &org, conference).await?;
+    // A list row held by this role's claim stays theirs whatever the role
+    // becomes.
+    super::keep_list_claim(state, &org, conference, &subject).await?;
     if role == "none" {
         if conference.roles.contains_key(&subject) {
             writer.delete_in(state, &space.to_string(), index::ROLE, &subject).await?;

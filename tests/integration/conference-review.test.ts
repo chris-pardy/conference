@@ -665,3 +665,76 @@ test('TC-48: junk written to an intake space doesn’t change the index (review 
     db.close()
   }
 })
+
+// Regressions from adversarial review round 8.
+
+test('TC-32: a member’s plan leaves the index’s view alone; a role change re-derives it (review round 8)', async ({
+  viv,
+}) => {
+  const { org, conference, superAdmin } = await seedConference(dep, accountsIn(viv))
+  const ana = await viv.createAccount(viv.handle('ana'))
+  const db = new DatabaseSync(dep.databasePath as string)
+  try {
+    const generation = () =>
+      (db.prepare('SELECT generation FROM index_generations WHERE org = ?').get(org.did) as { generation: number })
+        .generation
+    const plans = () =>
+      db
+        .prepare('SELECT COUNT(*) AS n FROM space_records WHERE space = ? AND repo = ? AND collection = ?')
+        .get(conference.space, superAdmin.did, NSID.event) as { n: number }
+    // Whatever the seeding set off has settled.
+    await new Promise((done) => setTimeout(done, 1_500))
+    const before = generation()
+
+    await writeSpaceRecord(viv.url, superAdmin, conference.space, NSID.event, plan('Olga’s canal tour'))
+    await eventually(
+      async () => plans(),
+      (row) => row.n === 1,
+      'our host stored the plan',
+    )
+    await new Promise((done) => setTimeout(done, 1_500))
+    expect(generation(), 'no one’s access depends on a plan').toBe(before)
+
+    expect((await setRole(dep, conference, ana, 'speaker')).code).toBe(0)
+    expect(generation(), 'a role is re-derived').toBeGreaterThan(before)
+  } finally {
+    db.close()
+  }
+})
+
+for (const role of ['staff', 'none'] as const) {
+  test(`TC-17: a list row a role holds stays with its holder when the role becomes ${role} (review round 8)`, async ({
+    viv,
+  }) => {
+    const olga = await viv.createAccount(viv.handle('olga'))
+    const pim = await viv.createAccount(viv.handle('pim'))
+    const org = await createOrg(dep, olga)
+    await addAdmin(dep, org, pim, 'owner')
+    const conference = await createConference(dep, org, { ...ATMOSPHERECONF, superAdmin: pim, methods: ['list'] })
+    const zoeHandle = viv.handle('zoe')
+    await importList(dep, conference, [{ handle: zoeHandle, role: 'speaker' }])
+    const zoeAccount = await viv.createAccount(zoeHandle)
+    const zoe = await Attendee.signIn(dep, zoeAccount)
+
+    // The row's role is given, but not its binding: the role holds the row.
+    await takeOffline(viv.url, olga)
+    try {
+      expect((await zoe.join({ conference: conference.space })).body.status).toBe('joined')
+    } finally {
+      await bringOnline(viv.url, olga)
+    }
+
+    expect((await setRole(dep, conference, zoeAccount, role)).code).toBe(0)
+
+    // The row is still Zoe's: she stays in, and the handle's next holder
+    // isn't let in by it.
+    await changeHandle(viv.url, zoeAccount, viv.handle('zoe-new'))
+    const next = await viv.createAccount(zoeHandle)
+    const answer = await (await Attendee.signIn(dep, next)).join({ conference: conference.space })
+    expect(answer.body.status, 'the row stayed with Zoe').not.toBe('joined')
+    const read = await zoe.call('app.eventside.conference.listRecords', {
+      params: { conference: conference.space, collection: NSID.event },
+    })
+    expect(read.status, 'Zoe is still a member').toBe(200)
+  })
+}

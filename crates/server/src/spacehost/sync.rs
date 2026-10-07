@@ -9,7 +9,7 @@ use serde_json::Value;
 
 use super::credential::{for_self, signed_headers};
 use super::index::{self, Org, Rec};
-use super::{ADMIN_TYPE, CONFERENCE_TYPE, INTAKE_TYPE, SpaceUri};
+use super::{ADMIN_TYPE, INTAKE_TYPE, SpaceUri};
 use crate::AppState;
 use crate::crypto::tid_micros;
 use crate::db::now_ms;
@@ -80,20 +80,25 @@ fn version(op: &Value) -> Option<(String, String, Version)> {
 }
 
 /// A repo's ops in a space after `since` (all of them without it), from its
-/// PDS. No repo in the space yet is no ops.
+/// PDS, and how far they go. No repo in the space yet is no ops.
+///
+/// With `capped`, a read of an intake repo stops after
+/// [`INTAKE_RECORDS_PER_REPO`] ops or [`INTAKE_READ_CAP`] bytes, so a write
+/// notification costs a bounded read; reindex reads everything.
 async fn fetch_ops(
     state: &AppState,
     space: &str,
     repo: &str,
     since: Option<&str>,
-) -> Result<Vec<Value>, String> {
+    capped: bool,
+) -> Result<Read, String> {
     let parsed = SpaceUri::parse(space).ok_or_else(|| format!("{space} isn't a space"))?;
     let pds = state.host.pds_of(state, repo).await?;
     let credential = for_self(state, &parsed).await?;
     let url = format!("{pds}/xrpc/com.atproto.space.listRepoOps");
     let client = state.http.guarded(&url)?;
     let authorization = format!("Atproto-Space {credential}");
-    let intake = parsed.kind == INTAKE_TYPE;
+    let intake = capped && parsed.kind == INTAKE_TYPE;
     let mut cursor: Option<String> = None;
     let mut all = Vec::new();
     let mut bytes = 0;
@@ -120,7 +125,7 @@ async fn fetch_ops(
         if !status.is_success() {
             // No repo in the space yet: nothing to read.
             if body.get("error").and_then(Value::as_str) == Some("RepoNotFound") {
-                return Ok(all);
+                return Ok(Read::whole(all));
             }
             return Err(format!("listRepoOps of {repo} in {space} answered {status}: {body}"));
         }
@@ -134,10 +139,38 @@ async fn fetch_ops(
         // The rest of an intake repo is read next time, from where this
         // stopped (ops come oldest first).
         if intake && (all.len() as i64 >= INTAKE_RECORDS_PER_REPO || bytes >= INTAKE_READ_CAP) {
-            break;
+            return Ok(Read::cut_short(all));
         }
     }
-    Ok(all)
+    Ok(Read::whole(all))
+}
+
+/// Ops read from a repo, and the revision the next read goes on from.
+struct Read {
+    ops: Vec<Value>,
+    through: Option<String>,
+}
+
+impl Read {
+    /// Everything there was: the next read goes on from the latest.
+    fn whole(ops: Vec<Value>) -> Self {
+        let through = latest_rev(&ops);
+        Self { ops, through }
+    }
+
+    /// A read stopped at a cap, perhaps partway through a commit (every op
+    /// in a commit has its revision, and the next read asks for later
+    /// ones): it goes on from the last commit read whole. A commit too big
+    /// to read whole within the caps is junk, and is skipped rather than
+    /// read again and again.
+    fn cut_short(ops: Vec<Value>) -> Self {
+        let last = latest_rev(&ops);
+        let through = latest_rev(
+            ops.iter().filter(|op| op.get("rev").and_then(Value::as_str) != last.as_deref()),
+        )
+        .or(last);
+        Self { ops, through }
+    }
 }
 
 /// The latest revision among some ops.
@@ -147,8 +180,13 @@ fn latest_rev<'a>(ops: impl IntoIterator<Item = &'a Value>) -> Option<String> {
 
 /// Reads a repo's new ops in a space into the index. Safe to run twice at
 /// once: a record only ever moves to a later revision. Says whether the
-/// index changed: when nothing read was stored, the organization's view
-/// isn't re-derived.
+/// organization's view changed: only a stored record it's derived from
+/// ([`index::derives_from`]) changes it, so a member's plan, or junk in an
+/// intake space (which isn't stored), costs no re-derive or comparison.
+///
+/// The view is bumped before the repo is marked read: a sync running
+/// alongside that finds nothing new to read then never answers from a view
+/// older than what this stored.
 pub async fn sync_repo(state: &AppState, space: &str, repo: &str) -> Result<bool, String> {
     let parsed = SpaceUri::parse(space).ok_or_else(|| format!("{space} isn't a space"))?;
     let since = sqlx::query_scalar::<_, String>(
@@ -159,7 +197,7 @@ pub async fn sync_repo(state: &AppState, space: &str, repo: &str) -> Result<bool
     .fetch_optional(&state.db)
     .await
     .map_err(|e| e.to_string())?;
-    let ops = fetch_ops(state, space, repo, since.as_deref()).await?;
+    let Read { ops, through } = fetch_ops(state, space, repo, since.as_deref(), true).await?;
     if ops.is_empty() {
         return Ok(false);
     }
@@ -177,7 +215,7 @@ pub async fn sync_repo(state: &AppState, space: &str, repo: &str) -> Result<bool
             match apply(&mut db, space, repo, &collection, &rkey, &version, seen_at, room.as_mut())
                 .await
             {
-                Ok(wrote) => changed |= wrote,
+                Ok(wrote) => changed |= wrote && index::derives_from(&parsed, &collection),
                 Err(why) => {
                     outcome = Err(why);
                     break;
@@ -185,8 +223,13 @@ pub async fn sync_repo(state: &AppState, space: &str, repo: &str) -> Result<bool
             }
         }
     }
+    drop(db);
+    if changed && let Err(why) = index::bump(state, &parsed.authority).await {
+        // Not marked read: the next sync reads it again, and bumps.
+        return Err(why);
+    }
     if outcome.is_ok()
-        && let Some(latest) = latest_rev(&ops)
+        && let Some(latest) = through
     {
         outcome = sqlx::query(
             "INSERT INTO space_repos (space, repo, synced_rev) VALUES ($1, $2, $3) \
@@ -196,14 +239,10 @@ pub async fn sync_repo(state: &AppState, space: &str, repo: &str) -> Result<bool
         .bind(space)
         .bind(repo)
         .bind(&latest)
-        .execute(&mut *db)
+        .execute(&state.db)
         .await
         .map(drop)
         .map_err(|e| e.to_string());
-    }
-    drop(db);
-    if changed {
-        index::bump(state, &parsed.authority).await?;
     }
     outcome.map(|()| changed)
 }
@@ -351,17 +390,11 @@ fn absorb(space: &str, repo: &mut Repo, ops: &[Value]) {
 /// The records an organization's permissions are derived from, out of the
 /// repos read so far (as `index::records` reads them from the index).
 fn recs_of(org: &str, read: &BTreeMap<(String, String), Repo>) -> Vec<Rec> {
-    let admin = SpaceUri::admin(org).to_string();
-    let intake = format!("at://{org}/space/{INTAKE_TYPE}/");
-    let conference = format!("at://{org}/space/{CONFERENCE_TYPE}/");
     let mut recs = Vec::new();
     for ((space, repo), records) in read {
+        let Some(parsed) = SpaceUri::parse(space).filter(|s| s.authority == org) else { continue };
         for ((collection, rkey), version) in records {
-            let counted = *space == admin
-                || (space.starts_with(&intake)
-                    && matches!(collection.as_str(), index::JOIN | index::LEAVE))
-                || (space.starts_with(&conference)
-                    && matches!(collection.as_str(), index::ROLE | index::RULES));
+            let counted = index::derives_from(&parsed, collection);
             let (Some(value), true) = (&version.value, counted) else { continue };
             let (Some(us), Ok(value)) = (tid_micros(&version.rev), serde_json::from_str(value))
             else {
@@ -420,9 +453,11 @@ pub async fn reindex(state: &AppState, org: &str) -> Result<Reindexed, String> {
     let mut synced: BTreeMap<(String, String), String> = BTreeMap::new();
     let mut unread: BTreeSet<(String, String)> = BTreeSet::new();
     let mut fetch = async |space: &str, repo: &str, read: &mut BTreeMap<_, Repo>| {
-        let ops = fetch_ops(state, space, repo, None).await?;
+        // Uncapped: what isn't read here is deleted below, and a capped
+        // read's rest would never be read again.
+        let Read { ops, through } = fetch_ops(state, space, repo, None, false).await?;
         let key = (space.to_owned(), repo.to_owned());
-        if let Some(latest) = latest_rev(&ops) {
+        if let Some(latest) = through {
             synced.insert(key.clone(), latest);
         }
         absorb(space, read.entry(key).or_default(), &ops);
@@ -550,6 +585,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::spacehost::CONFERENCE_TYPE;
 
     #[test]
     fn a_repo_keeps_each_records_latest_version() {
@@ -668,6 +704,33 @@ mod tests {
         drop(conn);
         db.close().await;
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_read_cut_short_goes_on_from_the_last_commit_read_whole() {
+        let op = |rkey: &str, rev: &str| json!({ "collection": index::JOIN, "rkey": rkey, "rev": rev, "cid": "c", "value": {} });
+        // Stopped partway through the commit at 3aab: it's read again.
+        let read = Read::cut_short(vec![op("1", "3aaa"), op("2", "3aab"), op("3", "3aab")]);
+        assert_eq!(read.through.as_deref(), Some("3aaa"));
+        // A read that wasn't cut short goes on from the latest.
+        let read = Read::whole(vec![op("1", "3aaa"), op("2", "3aab")]);
+        assert_eq!(read.through.as_deref(), Some("3aab"));
+        // One commit too big for the caps is skipped, not read for ever.
+        let read = Read::cut_short(vec![op("1", "3aab"), op("2", "3aab")]);
+        assert_eq!(read.through.as_deref(), Some("3aab"));
+    }
+
+    #[test]
+    fn reindex_reads_only_what_the_index_derives_from() {
+        let org = "did:plc:atmosphereorgaaaaaaaaaaa";
+        let conference = SpaceUri::new(org, CONFERENCE_TYPE, "3conf").to_string();
+        let v = Version { rev: "3aaaaaaaaaa22".into(), cid: None, value: Some("{}".into()) };
+        let mut repo = Repo::new();
+        repo.insert((index::ROLE.to_owned(), "a".to_owned()), v.clone());
+        repo.insert(("community.lexicon.calendar.event".to_owned(), "b".to_owned()), v);
+        let read = BTreeMap::from([((conference, "did:plc:writer".to_owned()), repo)]);
+        let recs = recs_of(org, &read);
+        assert_eq!(recs.iter().map(|r| r.collection.as_str()).collect::<Vec<_>>(), [index::ROLE]);
     }
 
     #[test]

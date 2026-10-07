@@ -720,7 +720,34 @@ async fn bind_list_entry(
     entry: &index::ListEntry,
 ) -> Result<(), String> {
     give_list_role(state, conference, did, entry).await?;
-    let space = conference.space();
+    write_binding(state, org, conference.space(), did, entry).await
+}
+
+/// Writes the binding of a handle-only row that `did` holds only by their
+/// list role's claim, before that role is changed or taken away: the claim
+/// lives on the role record, and the row must stay theirs without it, or
+/// it would be open again to the handle's next holder.
+pub async fn keep_list_claim(
+    state: &AppState,
+    org: &Org,
+    conference: &Conference,
+    did: &str,
+) -> Result<(), String> {
+    match conference.claimed_row(did) {
+        Some(entry) => write_binding(state, org, conference.space(), did, entry).await,
+        None => Ok(()),
+    }
+}
+
+/// The binding itself: an entry with the row's handle and the DID, written
+/// as the super admin on behalf of the owner who imported the handle.
+async fn write_binding(
+    state: &AppState,
+    org: &Org,
+    space: &str,
+    did: &str,
+    entry: &index::ListEntry,
+) -> Result<(), String> {
     let handle = match state.resolver.resolve_did(&org.super_admin).await {
         Ok(identity) => identity.handle,
         Err(_) => org.super_admin.clone(),

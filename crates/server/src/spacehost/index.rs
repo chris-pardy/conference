@@ -405,6 +405,18 @@ impl Conference {
         })
     }
 
+    /// The handle-only row `did` holds only by their list role's claim (no
+    /// entry binds its handle to a DID yet), if any.
+    pub fn claimed_row(&self, did: &str) -> Option<&ListEntry> {
+        let (handle, _) = self.list_claims.iter().find(|(_, holder)| *holder == did)?;
+        let bound =
+            self.list.iter().any(|b| b.did.is_some() && b.handle.as_deref() == Some(handle));
+        if bound {
+            return None;
+        }
+        self.list.iter().find(|e| e.did.is_none() && e.handle.as_deref() == Some(handle))
+    }
+
     /// Whether a code (by its HMAC) is one of this conference's.
     pub fn has_code(&self, code_hmac: &str) -> bool {
         self.codes.contains_key(code_hmac)
@@ -663,9 +675,28 @@ impl Org {
     }
 }
 
-/// The index's records for an organization: its admin space, the joins and
-/// leaves in its intake spaces, and the role and rules records in its
-/// conference spaces, each with when our host first saw it.
+/// The collections the index derives anything from in an intake space.
+const INTAKE_DERIVED: [&str; 2] = [JOIN, LEAVE];
+/// The collections the index derives anything from in a conference space:
+/// the rest there (plans, chat) are members' own, and no one's access
+/// depends on them.
+const CONFERENCE_DERIVED: [&str; 2] = [ROLE, RULES];
+
+/// Whether the index derives anything from a collection's records in a
+/// space: everything in an organization's admin space, joins and leaves in
+/// an intake space, roles and rules in a conference space. What [`records`]
+/// reads, reindex rebuilds from, and a sync re-derives the view for.
+pub fn derives_from(space: &SpaceUri, collection: &str) -> bool {
+    match space.kind.as_str() {
+        ADMIN_TYPE => space.skey == "self",
+        INTAKE_TYPE => INTAKE_DERIVED.contains(&collection),
+        CONFERENCE_TYPE => CONFERENCE_DERIVED.contains(&collection),
+        _ => false,
+    }
+}
+
+/// The index's records for an organization: those [`derives_from`] names,
+/// each with when our host first saw it.
 pub async fn records(state: &AppState, org: &str) -> Result<Vec<Rec>, String> {
     let rows = sqlx::query_as::<_, (String, String, String, String, String, String, Option<i64>)>(
         "SELECT r.space, r.repo, r.collection, r.rkey, r.rev, r.value, s.seen_at FROM space_records r \
@@ -678,16 +709,20 @@ pub async fn records(state: &AppState, org: &str) -> Result<Vec<Rec>, String> {
     .bind(SpaceUri::admin(org).to_string())
     .bind(format!("at://{org}/space/{INTAKE_TYPE}/%"))
     .bind(format!("at://{org}/space/{CONFERENCE_TYPE}/%"))
-    .bind(ROLE)
-    .bind(RULES)
-    .bind(JOIN)
-    .bind(LEAVE)
+    .bind(CONFERENCE_DERIVED[0])
+    .bind(CONFERENCE_DERIVED[1])
+    .bind(INTAKE_DERIVED[0])
+    .bind(INTAKE_DERIVED[1])
     .fetch_all(&state.db)
     .await
     .map_err(|e| format!("could not read the index: {e}"))?;
     Ok(rows
         .into_iter()
         .filter_map(|(space, repo, collection, rkey, rev, value, seen_at)| {
+            // The query narrows by prefix; this is the rule itself.
+            if !SpaceUri::parse(&space).is_some_and(|s| derives_from(&s, &collection)) {
+                return None;
+            }
             Some(Rec {
                 us: tid_micros(&rev)?,
                 seen_us: seen_at.map(|ms| ms.max(0) as u64 * 1000),
@@ -702,9 +737,10 @@ pub async fn records(state: &AppState, org: &str) -> Result<Vec<Rec>, String> {
         .collect())
 }
 
-/// How many times an organization's index has changed. Every write to the
-/// index bumps it, from the server or the admin CLI (another process), so a
-/// derived view is reused exactly until the records under it change.
+/// How many times an organization's index has changed. Every write of a
+/// record its view is derived from ([`derives_from`]) bumps it, from the
+/// server or the admin CLI (another process), so a derived view is reused
+/// exactly until the records under it change.
 pub async fn generation(state: &AppState, org: &str) -> Result<i64, String> {
     let generation =
         sqlx::query_scalar::<_, i64>("SELECT generation FROM index_generations WHERE org = $1")
@@ -1626,6 +1662,26 @@ mod tests {
         assert_eq!(conference.unbound_handles().count(), 0, "the row is Zoe's");
         assert!(conference.on_list(zoe));
         assert!(!conference.on_list("did:plc:nextholderaaaaaaaaaaaaaa"));
+        // Held only by the claim, so a role change binds it first.
+        assert_eq!(conference.claimed_row(zoe).and_then(|e| e.handle.as_deref()), Some("zoe.test"));
+        assert!(conference.claimed_row("did:plc:nextholderaaaaaaaaaaaaaa").is_none());
+    }
+
+    #[test]
+    fn the_index_derives_from_admin_records_joins_leaves_roles_and_rules_only() {
+        let of = |kind: &str| SpaceUri::new(ORG, kind, "3conf");
+        let admin = SpaceUri::admin(ORG);
+        assert!(derives_from(&admin, MEMBER) && derives_from(&admin, "com.example.anything"));
+        assert!(!derives_from(&SpaceUri::new(ORG, ADMIN_TYPE, "other"), MEMBER));
+        assert!(derives_from(&of(INTAKE_TYPE), JOIN) && derives_from(&of(INTAKE_TYPE), LEAVE));
+        assert!(!derives_from(&of(INTAKE_TYPE), "com.example.junk"));
+        assert!(
+            derives_from(&of(CONFERENCE_TYPE), ROLE) && derives_from(&of(CONFERENCE_TYPE), RULES)
+        );
+        // Members' own records: no one's access depends on them.
+        assert!(!derives_from(&of(CONFERENCE_TYPE), "community.lexicon.calendar.event"));
+        assert!(!derives_from(&of(CONFERENCE_TYPE), "app.eventside.chat.message"));
+        assert!(!derives_from(&of("com.example.space"), ROLE));
     }
 
     #[test]

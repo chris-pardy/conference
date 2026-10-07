@@ -1543,6 +1543,38 @@ at the PR alongside rounds 1 to 6:
   an hour), and a full memo of them forgets the expired (then the soonest to
   expire) rather than everyone.
 
+**Review round 8 design notes (2026-10-07).** The round-8 fixes, to raise
+at the PR alongside rounds 1 to 7:
+
+- **Only what the view is derived from re-derives it.** One predicate,
+  `index::derives_from(space, collection)` (everything in the admin space,
+  joins and leaves in an intake space, roles and rules in a conference
+  space), decides what `index::records` reads, what reindex rebuilds from,
+  and which stored writes bump the generation and run the revocation
+  comparison. Members' own records (plans, later chat) are still stored,
+  but cost no re-derive.
+- **The generation is bumped before a repo is marked read.** A sync running
+  alongside that finds nothing new then never answers from a view older
+  than what was stored. If the bump fails, the repo isn't marked read and
+  the next sync reads it again.
+- **A capped intake read goes on from the last commit read whole.** Every op
+  in a commit has the commit's revision, so a read cut short at the caps
+  marks the repo read only through the commit before the last one it saw.
+  A single commit too big for the caps is skipped rather than read again
+  for ever. Reindex reads intake repos uncapped, since it replaces what was
+  there with what it read (bounded by the page loop, and the stored
+  records by the per-repo limit).
+- **A list row held by a role's claim is bound before the role changes.**
+  `member role` (to another role or `none`), and `member remove` or `ban`
+  when they take the role, first write the row's binding (the same list
+  entry a join writes, as the super admin on behalf of the importing
+  owner) when the person holds a handle-only row only by their role's
+  `listHandle`. The claim then no longer depends on the role record.
+- **Memos make room a tenth at a time.** The revocation memos (gone
+  writers, resting PDSes, last writer per PDS) share one helper: a full memo
+  forgets the expired, then the tenth soonest to expire (least recently
+  remembered, for the last-writer memo), never everyone at once.
+
 **Red-test gate (2026-10-06):** the user approved the red tests and the
 surfaces they pin (see Build notes), with these contract changes:
 
@@ -2459,3 +2491,44 @@ unchanged.
    and `listMembers`. Rust test
    `a_limit_that_isnt_a_number_is_an_xrpc_invalid_request`; integration
    TC-7 (round 7).
+
+### Round 8
+
+Reviewer: a fresh subagent following `adversarial-review`. Verdict: not
+clean (0 blocking, 2 major, 2 minor, 2 nit). After the rework: `pnpm check`
+green (lint, build, Rust 93 + unit 122 + integration 107 + tooling 33 + e2e
+35), and `scripts/check-tests-unchanged.sh` reports the frozen tests
+unchanged.
+
+1. **[major] Every stored write in a conference space re-derived the
+   view.** A member's plan bumped the generation and ran the revocation
+   comparison, though no one's access depends on it. **Fixed:** one
+   predicate, `index::derives_from`, decides what the index reads, what
+   reindex rebuilds from and which writes count as a change; the rest are
+   stored without a bump. See "Review round 8 design notes". Rust tests
+   `the_index_derives_from_admin_records_joins_leaves_roles_and_rules_only`
+   and `reindex_reads_only_what_the_index_derives_from`; integration TC-32
+   (round 8), which fails on the old code.
+2. **[major] A role change dropped a list row's claim.** `member role
+   --role staff` rewrote the role without `listHandle`, and `--role none`
+   deleted it, so the row was open to the handle's next holder again, and
+   in a list-only conference the person was no longer on the list.
+   **Fixed:** before the role is changed or taken (by `member role`, or by
+   `member remove`/`ban`), a row held only by the claim is bound with the
+   list entry a join writes, so it no longer depends on the role. Rust test
+   `a_handle_rows_list_role_claims_the_row_for_its_holder` (extended);
+   integration TC-17 (round 8) for `staff` and `none`, which fail on the
+   old code.
+3. **[minor] Reindex read intake repos capped, then deleted the rest.**
+   **Fixed:** reindex reads uncapped (the cap is for write notifications).
+4. **[minor] A repo was marked read before the view was bumped,** so a sync
+   alongside could answer from a stale view. **Fixed:** the bump comes
+   first; a failed bump leaves the repo unread for the next sync.
+5. **[nit] A capped read could stop mid-commit and skip the rest of it.**
+   **Fixed:** a read cut short is marked read only through the last commit
+   it read whole (one commit bigger than the caps is skipped). Rust test
+   `a_read_cut_short_goes_on_from_the_last_commit_read_whole`.
+6. **[nit] Two memos still cleared wholesale; the gone memo's eviction was
+   a pass per insert.** **Fixed:** one helper for all three: the expired,
+   then the tenth soonest to expire, go. Rust test
+   `a_full_gone_memo_forgets_the_expired_not_everyone` (extended).

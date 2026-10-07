@@ -532,8 +532,8 @@ const REST_MS: i64 = 10 * 60 * 1000;
 /// say) is tried again before the credentials being revoked expire.
 const GONE_MS: i64 = credential::CREDENTIAL_SECS * 1000 / 2;
 const _: () = assert!(GONE_MS <= credential::CREDENTIAL_SECS * 1000);
-/// The most writers remembered as gone at once.
-const GONE_CAP: usize = 10_000;
+/// The most entries any of the memos below holds at once.
+const MEMO_CAP: usize = 10_000;
 
 type Memo<T> = std::sync::Mutex<std::collections::HashMap<String, T>>;
 
@@ -542,9 +542,9 @@ fn pds_in(pds: &str, space: &str) -> String {
     format!("{pds} {space}")
 }
 
-/// The writer each PDS last took a space's revocations for.
-fn last_writers() -> &'static Memo<String> {
-    static MEMO: std::sync::OnceLock<Memo<String>> = std::sync::OnceLock::new();
+/// The writer each PDS last took a space's revocations for, and when.
+fn last_writers() -> &'static Memo<(String, i64)> {
+    static MEMO: std::sync::OnceLock<Memo<(String, i64)>> = std::sync::OnceLock::new();
     MEMO.get_or_init(Default::default)
 }
 
@@ -564,25 +564,40 @@ fn mark_gone(pds: &str, space: &str, writer: &str) {
     }
     let mut last = last_writers().lock().expect("the writer memo isn't poisoned");
     let key = pds_in(pds, space);
-    if last.get(&key).is_some_and(|w| w == writer) {
+    if last.get(&key).is_some_and(|(w, _)| w == writer) {
         last.remove(&key);
     }
 }
 
-/// Notes a writer as gone until [`GONE_MS`] from `now`. A full memo first
-/// forgets those whose time is up, then (if it's still full) whoever's
-/// time is up soonest, rather than everyone at once.
+/// Notes a writer as gone until [`GONE_MS`] from `now`.
 fn remember_gone(memo: &mut std::collections::HashMap<String, i64>, key: String, now: i64) {
-    if memo.len() >= GONE_CAP && !memo.contains_key(&key) {
-        memo.retain(|_, until| *until > now);
-        if memo.len() >= GONE_CAP
-            && let Some(soonest) =
-                memo.iter().min_by_key(|(_, until)| **until).map(|(k, _)| k.clone())
-        {
-            memo.remove(&soonest);
+    remember(memo, key, now + GONE_MS, now, |until| *until);
+}
+
+/// Puts an entry in a memo of at most [`MEMO_CAP`]. A full memo first
+/// forgets what's expired (an `expiry` at or before `now`), then, if it's
+/// still full, the tenth of it that expires soonest, so a full memo costs
+/// one pass per many entries and is never forgotten all at once.
+fn remember<V>(
+    memo: &mut std::collections::HashMap<String, V>,
+    key: String,
+    value: V,
+    now: i64,
+    expiry: impl Fn(&V) -> i64,
+) {
+    if memo.len() >= MEMO_CAP && !memo.contains_key(&key) {
+        memo.retain(|_, v| expiry(v) > now);
+        if memo.len() >= MEMO_CAP {
+            let mut order: Vec<(i64, String)> =
+                memo.iter().map(|(k, v)| (expiry(v), k.clone())).collect();
+            let cut = MEMO_CAP / 10;
+            order.select_nth_unstable(cut);
+            for (_, k) in &order[..cut] {
+                memo.remove(k);
+            }
         }
     }
-    memo.insert(key, now + GONE_MS);
+    memo.insert(key, value);
 }
 
 fn is_gone(pds: &str, writer: &str) -> bool {
@@ -601,18 +616,16 @@ fn resting() -> &'static Memo<i64> {
 
 fn remember_writer(pds: &str, space: &str, writer: &str) {
     let mut memo = last_writers().lock().expect("the writer memo isn't poisoned");
-    if memo.len() >= 10_000 {
-        memo.clear();
-    }
-    memo.insert(pds_in(pds, space), writer.to_owned());
+    let now = now_ms();
+    // Nothing here expires: the least recently remembered go first, as if
+    // they expired when remembered.
+    remember(&mut memo, pds_in(pds, space), (writer.to_owned(), now), i64::MIN, |(_, at)| *at);
 }
 
 fn rest(pds: &str) {
     let mut memo = resting().lock().expect("the rest memo isn't poisoned");
-    if memo.len() >= 10_000 {
-        memo.clear();
-    }
-    memo.insert(pds.to_owned(), now_ms() + REST_MS);
+    let now = now_ms();
+    remember(&mut memo, pds.to_owned(), now + REST_MS, now, |until| *until);
 }
 
 /// When a resting PDS is tried again, if it's resting.
@@ -631,7 +644,7 @@ fn writers_to_try(pds: &str, space: &str, mut writers: Vec<String>) -> Vec<Strin
         .lock()
         .expect("the writer memo isn't poisoned")
         .get(&pds_in(pds, space))
-        .cloned();
+        .map(|(writer, _)| writer.clone());
     let first =
         last.and_then(|last| writers.iter().position(|w| *w == last)).map(|at| writers.remove(at));
     let mut order: Vec<String> = first.into_iter().chain(writers).collect();
@@ -789,22 +802,32 @@ mod tests {
     fn a_full_gone_memo_forgets_the_expired_not_everyone() {
         let mut memo = std::collections::HashMap::new();
         // Half remembered long ago (their time is up), half just now.
-        for i in 0..GONE_CAP {
+        for i in 0..MEMO_CAP {
             let at = if i % 2 == 0 { 0 } else { 10 * GONE_MS };
             remember_gone(&mut memo, format!("old{i}"), at);
         }
         let now = 10 * GONE_MS + 1;
         remember_gone(&mut memo, "new".into(), now);
-        assert_eq!(memo.len(), GONE_CAP / 2 + 1, "only the expired were forgotten");
+        assert_eq!(memo.len(), MEMO_CAP / 2 + 1, "only the expired were forgotten");
         assert!(memo.contains_key("old1") && !memo.contains_key("old0"));
-        // Full of the unexpired: only the soonest to expire makes room.
         let mut memo = std::collections::HashMap::new();
-        for i in 0..GONE_CAP {
+        for i in 0..MEMO_CAP {
             remember_gone(&mut memo, format!("w{i}"), i as i64);
         }
         remember_gone(&mut memo, "late".into(), 0);
-        assert_eq!(memo.len(), GONE_CAP);
-        assert!(!memo.contains_key("w0") && memo.contains_key("w1") && memo.contains_key("late"));
+        // Full of the unexpired: the tenth soonest to expire makes room, so
+        // the next entries don't each cost a pass.
+        let cut = MEMO_CAP / 10;
+        assert_eq!(memo.len(), MEMO_CAP - cut + 1);
+        assert!(!memo.contains_key("w0") && !memo.contains_key(&format!("w{}", cut - 1)));
+        assert!(memo.contains_key(&format!("w{cut}")) && memo.contains_key("late"));
+        // However many expire together, only a tenth goes.
+        let mut memo = std::collections::HashMap::new();
+        for i in 0..MEMO_CAP {
+            remember(&mut memo, format!("t{i}"), ("w".to_owned(), 7), i64::MIN, |(_, at)| *at);
+        }
+        remember(&mut memo, "new".into(), ("w".to_owned(), 8), i64::MIN, |(_, at)| *at);
+        assert_eq!(memo.len(), MEMO_CAP - cut + 1);
     }
 
     #[test]
