@@ -1634,7 +1634,9 @@ then review again (rounds 11 to 15). What changed:
   the remover's own `member` record for each (`via: "kept"`, `keptFrom`
   the departing admin), and then removes the admin. Those people are then
   members by the super admin's decision, which only she can override. The
-  roles the departing admin assigned still go, as before.
+  roles the departing admin assigned still go, as before. (Round 12: also on
+  `org admin add --role staff` of an owner, and the people a plain removal
+  takes out are named.)
 
 **Review round 11 design notes (2026-10-07).** The round-11 fixes, to
 raise at the PR alongside the simplification:
@@ -1660,6 +1662,28 @@ raise at the PR alongside the simplification:
   again, and the same list role isn't rewritten (it keeps its `since`).
   So importing the list again, as the command suggests for skipped rows,
   adds only what's new.
+
+**Review round 12 design notes (2026-10-07).** The round-12 fixes:
+
+- **Codes and list rows are an owner's records,** and count only while
+  they're one (as the design's "a record counts only while its author is
+  an admin" always implied). So removing an owner, or making them staff,
+  can take out everyone who got in only by their code or list. Both `org
+  admin remove` and `org admin add --role staff` (of an owner) now work out
+  who that is before writing anything, and either keep them with
+  `--keep-admissions` (now on both) or name them in the output, with how to
+  let them back in. A plain removal still goes ahead (TC-53).
+- **A command that keeps admissions and then fails takes them back.** The
+  kept `member` records are deleted again if the admin's `orgAdminRemoved`
+  marks, their `admin` record or the demotion can't be written, and the
+  error names any that couldn't be. Deleting the roles a removed admin gave
+  comes after their `admin` record is gone, when those roles count no
+  more, so a failure there is reported rather than undoing anything.
+- **Only the super admin can lift another owner's ban,** by `member add`,
+  as before round 11: the refusal before writing is for everyone else.
+- **A list role is taken over by a later import from another owner,** with
+  `assignedBy` the new importer, so it doesn't go when the first owner
+  does. Only the same role from the same owner is left alone.
 
 **Red-test gate (2026-10-06):** the user approved the red tests and the
 surfaces they pin (see Build notes), with these contract changes:
@@ -2823,3 +2847,37 @@ Rust 94 + unit 122 + integration 108 + tooling 33 + e2e 35), and
    Integration TC-16 (review round 11).
 5. **[nit] The keep summary counted (conference, person) pairs and showed
    DIDs.** **Fixed:** it counts people, and shows handles by conference.
+
+### Round 12
+
+Reviewer: a fresh subagent following `adversarial-review`. Verdict: not
+clean (0 blocking, 3 major, 1 minor, 2 nit). It confirmed the TC-52 change
+is still the only changed frozen file. After the rework: `pnpm check`
+green (lint, build, Rust 94 + unit 122 + integration 111 + tooling 33 + e2e
+35), and `check:frozen` warns only about
+`tests/integration/conference-admins.test.ts`.
+
+1. **[major] Round 11's banned pre-check stopped the super admin lifting
+   another owner's ban.** **Fixed:** the check before writing applies to
+   everyone but her. Integration TC-51 (review round 12).
+2. **[major] Round 11's "same list role isn't rewritten" kept another
+   owner's role,** which then went when that owner did. **Fixed:** only the
+   same role from the same owner is left alone; otherwise the importer
+   takes it over. Integration TC-32 (review round 12).
+3. **[major] Removing or demoting an owner silently took out everyone who
+   got in by their code or list.** **Fixed, as far as the frozen tests
+   allow:** a plain removal still goes ahead (TC-53 expects it), but both
+   removal and demotion now name the people it takes out, and both take
+   `--keep-admissions`. Requiring a choice when the count isn't zero would
+   break TC-53's plain removal. Integration TC-53 (review round 12).
+4. **[minor] A failed `--keep-admissions` run left its kept records.**
+   **Fixed:** they're deleted again when the removal or demotion fails
+   before the admin record goes, and the error names any that couldn't
+   be. Role tidy-up after the admin record is gone only reports failures.
+   Not covered by an integration test: every write involved is the super
+   admin's, so her PDS can't fail the later writes without failing the
+   first.
+5. **[nit] `list import` printed raw DIDs for kept roles.** **Fixed:**
+   handle and DID.
+6. **[nit] A row repeated in one file rewrote its role each time.**
+   **Fixed:** roles given in the run are tracked.

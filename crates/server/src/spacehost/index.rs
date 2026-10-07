@@ -762,18 +762,32 @@ pub async fn load(state: &AppState, org: &str) -> Result<Option<Arc<Org>>, Strin
     Ok(Some(derived))
 }
 
-/// An organization's permissions as they'd be once `admin` isn't an admin:
-/// derived from its records without the super admin's `admin` record naming
-/// them, so their decisions, and the roles they assigned, stop counting.
-pub async fn without_admin(state: &AppState, org: &Org, admin: &str) -> Result<Org, String> {
+/// An organization's permissions as they'd be with `admin` given `role`, or
+/// (`None`) not an admin at all: derived from its records with the super
+/// admin's `admin` record about them changed or left out. The decisions,
+/// codes, list rows and roles that then stop counting don't count here.
+pub async fn with_admin_as(
+    state: &AppState,
+    org: &Org,
+    admin: &str,
+    role: Option<Role>,
+) -> Result<Org, String> {
     let admin_space = SpaceUri::admin(&org.did).to_string();
     let mut recs = records(state, &org.did).await?;
-    recs.retain(|r| {
-        !(r.space == admin_space
+    let theirs = |r: &Rec| {
+        r.space == admin_space
             && r.repo == org.super_admin
             && r.collection == ADMIN
-            && r.str("subject") == Some(admin))
-    });
+            && r.str("subject") == Some(admin)
+    };
+    match role {
+        None => recs.retain(|r| !theirs(r)),
+        Some(role) => {
+            for rec in recs.iter_mut().filter(|r| theirs(r)) {
+                rec.value["role"] = json!(role.as_str());
+            }
+        }
+    }
     Ok(derive(
         &org.did,
         &org.super_admin,
@@ -782,6 +796,23 @@ pub async fn without_admin(state: &AppState, org: &Org, admin: &str) -> Result<O
         &state.secrets,
         &state.oauth.client_id_for("atproto"),
     ))
+}
+
+/// Who's a member of each of `org`'s conferences now but wouldn't be in
+/// `changed`: (conference, person, when their membership began).
+pub fn would_lose(org: &Org, changed: &Org, except: &str) -> Vec<(String, String, u64)> {
+    let mut lost = Vec::new();
+    for conference in org.conferences.values() {
+        let space = conference.space();
+        let stays = changed.conference(space);
+        for (did, periods) in &conference.members {
+            let Some(open) = periods.iter().find(|p| p.until.is_none()) else { continue };
+            if did != except && !stays.is_some_and(|c| c.is_member(did)) {
+                lost.push((space.to_owned(), did.clone(), open.since));
+            }
+        }
+    }
+    lost
 }
 
 /// The organization a space belongs to.

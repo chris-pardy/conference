@@ -28,7 +28,7 @@ const USAGE: &str = "usage: conference-server admin <command> [--json] [--as <ha
 
   org create --super-admin <handle> --recovery-key <did:key> [--name <name>]
   org show --org <did>
-  org admin add <handle> --org <did> [--role owner|staff]
+  org admin add <handle> --org <did> [--role owner|staff] [--keep-admissions]
   org admin remove <handle> --org <did> [--keep-admissions]
   connect <handle>
   reindex --org <did>
@@ -327,7 +327,24 @@ async fn org_admin(state: &AppState, args: &Args, add: bool) -> Result<Done, Str
                 conference.space()
             ));
         }
-        acting
+        // An owner made staff: the codes and list rows they wrote, and the
+        // owner and staff roles they gave, stop counting, and so may the
+        // memberships that rest on them. They're kept with
+        // `--keep-admissions`, and reported otherwise.
+        let demoted = role == Role::Staff && org.admin_role(&subject) == Some(Role::Owner);
+        let lost = if demoted {
+            let changed = index::with_admin_as(state, &org, &subject, Some(role)).await?;
+            index::would_lose(&org, &changed, &subject)
+        } else {
+            Vec::new()
+        };
+        let keep = args.flag("keep-admissions").is_some();
+        let kept = if keep {
+            keep_admissions(state, &acting, &org, &subject, &lost).await?
+        } else {
+            vec![]
+        };
+        if let Err(why) = acting
             .put_in(
                 state,
                 &admin_space,
@@ -335,7 +352,10 @@ async fn org_admin(state: &AppState, args: &Args, add: bool) -> Result<Done, Str
                 &subject,
                 json!({ "subject": subject, "role": role.as_str() }),
             )
-            .await?;
+            .await
+        {
+            return Err(undo_kept(state, &acting, &org, &kept, why).await);
+        }
         // Admins are members of every conference, with their role. A new
         // admin's period (and membership) starts with a `member` record of
         // the super admin's, so it keeps its start through a change of role,
@@ -366,9 +386,11 @@ async fn org_admin(state: &AppState, args: &Args, add: bool) -> Result<Done, Str
                 .await?;
         }
         after_change(state, &org).await?;
+        let text = format!("{who} is now {} of {}.", role.as_str(), org.did)
+            + &lost_report(state, &acting, who, &lost, keep).await;
         return done(
-            format!("{who} is now {} of {}.", role.as_str(), org.did),
-            json!({ "did": subject, "role": role.as_str() }),
+            text,
+            json!({ "did": subject, "role": role.as_str(), "lost": lost_json(&lost, keep), "kept": lost_json(&lost, !keep) }),
         );
     }
     // The super admin is always an owner, with or without an `admin` record.
@@ -425,75 +447,168 @@ async fn org_admin(state: &AppState, args: &Args, add: bool) -> Result<Done, Str
         role_deletes.push((writer, conference.space().to_owned(), gone));
     }
     let now = index::iso(now_ms() as u64 * 1000);
-    // Their decisions stop counting once they're not an admin. With
-    // `--keep-admissions`, everyone who's a member now only on their say-so
-    // is admitted first by the remover's own decision, so they stay.
-    let mut kept = Vec::new();
-    if args.flag("keep-admissions").is_some() {
-        let without = index::without_admin(state, &org, &subject).await?;
+    // Their decisions stop counting once they're not an admin, and so do the
+    // codes and list rows an owner wrote: whoever is a member now only on
+    // their say-so goes. With `--keep-admissions`, those people are admitted
+    // first by the remover's own decision, so they stay; otherwise they're
+    // reported.
+    let changed = index::with_admin_as(state, &org, &subject, None).await?;
+    let lost = index::would_lose(&org, &changed, &subject);
+    let keep = args.flag("keep-admissions").is_some();
+    let kept =
+        if keep { keep_admissions(state, &acting, &org, &subject, &lost).await? } else { vec![] };
+    let removal = async {
+        // Their admin period and membership of each conference end now; what
+        // they wrote while they were one stays theirs.
         for conference in org.conferences.values() {
-            let space = conference.space();
-            let stays = without.conference(space);
-            for (did, periods) in &conference.members {
-                // The membership kept: their open period, from its start, so
-                // what they wrote in it still counts.
-                let Some(open) = periods.iter().find(|p| p.until.is_none()) else { continue };
-                if *did != subject && !stays.is_some_and(|c| c.is_member(did)) {
-                    kept.push((space.to_owned(), did.clone(), open.since));
-                }
-            }
-        }
-        for (space, did, since) in &kept {
             acting
                 .create_in(
                     state,
                     &admin_space,
                     index::MEMBER,
                     None,
-                    json!({ "space": space, "subject": did, "via": index::VIA_KEPT, "keptFrom": subject, "since": index::iso(*since) }),
+                    json!({ "space": conference.space(), "subject": subject, "via": index::VIA_ADMIN_REMOVED, "until": now }),
                 )
                 .await?;
         }
+        acting.delete_in(state, &admin_space, index::ADMIN, &subject).await?;
+        Ok::<(), String>(())
+    };
+    if let Err(why) = removal.await {
+        let why = format!("removing {who} failed partway ({why})");
+        return Err(undo_kept(state, &acting, &org, &kept, why).await);
     }
-    // Their admin period and membership of each conference end now; what
-    // they wrote while they were one stays theirs.
-    for conference in org.conferences.values() {
-        acting
+    // They're not an admin now, so the roles they gave count no more; deleting
+    // them only tidies up, and one that can't be deleted is reported.
+    let mut untidy = Vec::new();
+    for (writer, space, gone) in &role_deletes {
+        for person in gone {
+            if let Err(why) = writer.delete_in(state, space, index::ROLE, person).await {
+                untidy.push(format!("{person} in {space} ({why})"));
+            }
+        }
+    }
+    after_change(state, &org).await?;
+    let mut text = format!("{who} is no longer an admin of {}.", org.did)
+        + &lost_report(state, &acting, who, &lost, keep).await;
+    if !untidy.is_empty() {
+        text.push_str(&format!(
+            "\nThese role records they gave don't count any more, but couldn't be deleted: {}",
+            untidy.join("; ")
+        ));
+    }
+    done(
+        text,
+        json!({ "did": subject, "lost": lost_json(&lost, keep), "kept": lost_json(&lost, !keep) }),
+    )
+}
+
+/// Admits, by `acting`'s own decision, everyone a change to an admin would
+/// otherwise take out (`org admin remove|add --keep-admissions`): a `member`
+/// record each, `via: "kept"`, dated from when the membership it keeps began
+/// so what they wrote in it still counts. The records' keys, for an undo.
+async fn keep_admissions(
+    state: &AppState,
+    acting: &Acting,
+    org: &Org,
+    subject: &str,
+    lost: &[(String, String, u64)],
+) -> Result<Vec<String>, String> {
+    let admin_space = SpaceUri::admin(&org.did).to_string();
+    let mut written = Vec::new();
+    for (space, did, since) in lost {
+        let made = acting
             .create_in(
                 state,
                 &admin_space,
                 index::MEMBER,
                 None,
-                json!({ "space": conference.space(), "subject": subject, "via": index::VIA_ADMIN_REMOVED, "until": now }),
+                json!({ "space": space, "subject": did, "via": index::VIA_KEPT, "keptFrom": subject, "since": index::iso(*since) }),
             )
-            .await?;
-    }
-    acting.delete_in(state, &admin_space, index::ADMIN, &subject).await?;
-    for (writer, space, gone) in role_deletes {
-        for person in gone {
-            writer.delete_in(state, &space, index::ROLE, &person).await?;
+            .await;
+        match made {
+            Ok(rkey) => written.push(rkey),
+            Err(why) => return Err(undo_kept(state, acting, org, &written, why).await),
         }
     }
-    after_change(state, &org).await?;
-    let mut text = format!("{who} is no longer an admin of {}.", org.did);
-    if !kept.is_empty() {
-        let people: BTreeSet<&String> = kept.iter().map(|(_, did, _)| did).collect();
-        text.push_str(&format!(
-            "\nKept {} people they let in, now on {}'s decision:",
+    Ok(written)
+}
+
+/// Deletes the kept admissions a failed command wrote, and says what's left.
+async fn undo_kept(
+    state: &AppState,
+    acting: &Acting,
+    org: &Org,
+    kept: &[String],
+    why: String,
+) -> String {
+    let admin_space = SpaceUri::admin(&org.did).to_string();
+    let mut left = Vec::new();
+    for rkey in kept {
+        if acting.delete_in(state, &admin_space, index::MEMBER, rkey).await.is_err() {
+            left.push(rkey.as_str());
+        }
+    }
+    if let Err(also) = after_change(state, org).await {
+        eprintln!("warning: {also}");
+    }
+    if left.is_empty() {
+        format!("{why}; the admissions it kept were taken back")
+    } else {
+        format!(
+            "{why}; these admissions it kept couldn't be taken back, and are still {}'s \
+             decisions ({}/{}): {}",
+            acting.handle,
+            admin_space,
+            index::MEMBER,
+            left.join(", ")
+        )
+    }
+}
+
+/// The people a change to an admin took out, or kept, by conference.
+async fn lost_report(
+    state: &AppState,
+    acting: &Acting,
+    who: &str,
+    lost: &[(String, String, u64)],
+    kept: bool,
+) -> String {
+    if lost.is_empty() {
+        return String::new();
+    }
+    let people: BTreeSet<&String> = lost.iter().map(|(_, did, _)| did).collect();
+    let mut text = if kept {
+        format!(
+            "\nKept {} people who were in only on {who}'s say-so, now on {}'s decision:",
             people.len(),
             acting.handle
-        ));
-        let mut by_space: BTreeMap<&str, Vec<String>> = BTreeMap::new();
-        for (space, did, _) in &kept {
-            by_space.entry(space).or_default().push(handle_of(state, did).await);
-        }
-        for (space, names) in by_space {
-            text.push_str(&format!("\n  {space}: {}", names.join(", ")));
-        }
+        )
+    } else {
+        format!(
+            "\n{} people were in only on {who}'s say-so (their admissions, codes or list), and \
+             aren't members any more; `member add` can let them back in, and \
+             `--keep-admissions` keeps them next time:",
+            people.len()
+        )
+    };
+    let mut by_space: BTreeMap<&str, Vec<String>> = BTreeMap::new();
+    for (space, did, _) in lost {
+        by_space.entry(space).or_default().push(handle_of(state, did).await);
     }
-    let kept: Vec<Value> =
-        kept.iter().map(|(space, did, _)| json!({ "space": space, "did": did })).collect();
-    done(text, json!({ "did": subject, "kept": kept }))
+    for (space, names) in by_space {
+        text.push_str(&format!("\n  {space}: {}", names.join(", ")));
+    }
+    text
+}
+
+/// The people a change to an admin took out (or kept), for `--json`; empty
+/// when `skip`.
+fn lost_json(lost: &[(String, String, u64)], skip: bool) -> Vec<Value> {
+    if skip {
+        return Vec::new();
+    }
+    lost.iter().map(|(space, did, _)| json!({ "space": space, "did": did })).collect()
 }
 
 /// Connects an admin: prints a URL for them to open, waits while they sign
@@ -1364,6 +1479,7 @@ async fn list_import(state: &AppState, args: &Args) -> Result<Done, String> {
     };
     let mut imported = 0;
     let mut kept = Vec::new();
+    let mut given = BTreeSet::new();
     for (entry, did, role) in rows {
         if let Some(entry) = entry {
             acting.create_in(state, &admin_space, index::LIST_ENTRY, None, entry).await?;
@@ -1377,11 +1493,18 @@ async fn list_import(state: &AppState, args: &Args) -> Result<Done, String> {
         if org.is_admin(&did)
             || (conference.roles.contains_key(&did) && !conference.has_list_role(&did))
         {
-            kept.push(did);
+            if !kept.contains(&did) {
+                kept.push(did);
+            }
             continue;
         }
-        // The same list role again keeps the time it took effect.
-        if conference.has_list_role(&did) && conference.roles.get(&did) == Some(&role) {
+        // The same list role from the same owner (or given already in this
+        // run) keeps the time it took effect. Another owner's is replaced by
+        // this one's, so it doesn't go when that owner does.
+        let same_role = conference.has_list_role(&did)
+            && conference.roles.get(&did) == Some(&role)
+            && conference.role_deciders.get(&did) == Some(&acting.did);
+        if same_role || !given.insert(did.clone()) {
             continue;
         }
         writer
@@ -1400,9 +1523,13 @@ async fn list_import(state: &AppState, args: &Args) -> Result<Done, String> {
         text.push_str(&format!(" {already} were already on the list."));
     }
     if !kept.is_empty() {
+        let mut names = Vec::new();
+        for did in &kept {
+            names.push(format!("{} ({did})", handle_of(state, did).await));
+        }
         text.push_str(&format!(
             "\nKept the role they already had, not the list's: {}",
-            kept.join(", ")
+            names.join(", ")
         ));
     }
     if !unresolved.is_empty() {
@@ -1505,7 +1632,12 @@ async fn decide(state: &AppState, args: &Args, action: &str) -> Result<Done, Str
         } else {
             None
         };
-    if matches!(action, "approve" | "add") && conference.banned.contains(&subject) {
+    // Only the super admin's admission can lift a ban (another owner's), so
+    // anyone else's is refused before anything is written.
+    if matches!(action, "approve" | "add")
+        && acting.did != org.super_admin
+        && conference.banned.contains(&subject)
+    {
         return Err(format!("{who} is banned from this conference; nothing was changed"));
     }
     let rkey = acting.create_in(state, &admin_space, collection, None, record).await?;

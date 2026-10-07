@@ -818,6 +818,99 @@ test('TC-16: a bad role on an unresolved row refuses the import, and re-importin
   expect(answer.body.role).toBe('speaker')
 })
 
+// Regressions from adversarial review round 12.
+
+test('TC-51: the super admin can lift another owner’s ban (review round 12)', async ({ viv }) => {
+  const { org, conference } = await seedConference(dep, accountsIn(viv), { methods: ['code'] })
+  const kees = await viv.createAccount(viv.handle('kees'))
+  await addAdmin(dep, org, kees, 'owner')
+  const code = await sharedCode(dep, conference, uniqueCode('atmosphere27'))
+  const bram = await Attendee.signIn(dep, await viv.createAccount(viv.handle('bram')))
+  expect((await bram.join({ conference: conference.space, code })).body.status).toBe('joined')
+  await cliOk(dep, ['member', 'ban', bram.person.handle, '--conference', conference.space, '--as', kees.handle])
+  expect(await bram.isMember(conference.space)).toBe(false)
+
+  await cliOk(dep, ['member', 'add', bram.person.handle, '--conference', conference.space])
+  expect(await bram.isMember(conference.space), 'Olga’s admission lifts Kees’s ban').toBe(true)
+})
+
+test('TC-32: a list role another owner gave is taken over by a later import, and outlives them (review round 12)', async ({
+  viv,
+}) => {
+  const { org, conference } = await seedConference(dep, accountsIn(viv), { methods: ['list'] })
+  const sem = await viv.createAccount(viv.handle('sem'))
+  const kees = await viv.createAccount(viv.handle('kees'))
+  await addAdmin(dep, org, sem, 'owner')
+  await addAdmin(dep, org, kees, 'owner')
+  const zoe = await viv.createAccount(viv.handle('zoe'))
+  const file = listFile([`${zoe.handle},,speaker`])
+  await cliOk(dep, ['list', 'import', file, '--conference', conference.space, '--as', sem.handle])
+  await cliOk(dep, ['list', 'import', file, '--conference', conference.space, '--as', kees.handle])
+  await cliOk(dep, ['org', 'admin', 'remove', sem.handle, '--org', org.did])
+
+  const answer = await (await Attendee.signIn(dep, zoe)).join({ conference: conference.space })
+  expect(answer.body.status).toBe('joined')
+  expect(answer.body.role, 'Kees’s list gives the role now').toBe('speaker')
+})
+
+test('TC-53: losing an owner’s code is reported, and demoting them can keep its admissions (review round 12)', async ({
+  viv,
+}) => {
+  const { org, conference } = await seedConference(dep, accountsIn(viv), { methods: ['code'] })
+  const kees = await viv.createAccount(viv.handle('kees'))
+  const sem = await viv.createAccount(viv.handle('sem'))
+  await addAdmin(dep, org, kees, 'owner')
+  await addAdmin(dep, org, sem, 'owner')
+  const keesCode = (
+    await cliOkJson(dep, [
+      'codes',
+      'issue',
+      '--conference',
+      conference.space,
+      '--shared',
+      uniqueCode('kees'),
+      '--as',
+      kees.handle,
+    ])
+  ).codes[0]
+  const semCode = (
+    await cliOkJson(dep, [
+      'codes',
+      'issue',
+      '--conference',
+      conference.space,
+      '--shared',
+      uniqueCode('sem'),
+      '--as',
+      sem.handle,
+    ])
+  ).codes[0]
+  const ana = await Attendee.signIn(dep, await viv.createAccount(viv.handle('ana')))
+  const bram = await Attendee.signIn(dep, await viv.createAccount(viv.handle('bram')))
+  expect((await ana.join({ conference: conference.space, code: keesCode })).body.status).toBe('joined')
+  expect((await bram.join({ conference: conference.space, code: semCode })).body.status).toBe('joined')
+
+  // Kees made staff, keeping who his code let in.
+  const demoted = await cliOk(dep, [
+    'org',
+    'admin',
+    'add',
+    kees.handle,
+    '--org',
+    org.did,
+    '--role',
+    'staff',
+    '--keep-admissions',
+  ])
+  expect(demoted.stdout).toContain(ana.person.handle)
+  expect(await ana.isMember(conference.space), 'kept').toBe(true)
+
+  // Sem removed without keeping: the people his code let in are named.
+  const removed = await cliOk(dep, ['org', 'admin', 'remove', sem.handle, '--org', org.did])
+  expect(removed.stdout).toContain(bram.person.handle)
+  expect(await bram.isMember(conference.space)).toBe(false)
+})
+
 /** An attendee list file with the given `handle,email,role` rows. */
 function listFile(rows: string[]): string {
   const file = join(mkdtempSync(join(tmpdir(), 'eventside-list-')), 'attendees.csv')
