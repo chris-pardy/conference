@@ -13,8 +13,11 @@
 //! - A record counts only while its author is an admin, and only within
 //!   their role: staff can admit, remove and deny; owners can also ban and
 //!   issue codes and lists.
-//! - The super admin's ban always stands. Among other admins, a ban beats an
-//!   admission; otherwise the latest decision stands.
+//! - Decisions about someone's membership rank by who made them: the super
+//!   admin, then owners, then staff. A decision stands against later ones
+//!   from lower ranks that contradict it, until someone of its rank or higher
+//!   decides again, or the person acts themselves. Within a rank, the latest
+//!   decision stands. A ban beats any admission but the super admin's.
 //! - Joining and leaving are the person's own records in the intake space.
 //!   A join counts as an admission if a rule in force at its commit admits
 //!   it (a pre-assigned role, the attendee list, a valid code, an open
@@ -285,13 +288,13 @@ struct CodeUse {
     bound: Option<String>,
 }
 
+/// A row of an attendee list: a DID (a handle row is resolved when it's
+/// imported) or an email's HMAC.
 #[derive(Debug, Clone)]
 pub struct ListEntry {
-    /// The owner who imported it (or, for one bound when its handle first
-    /// resolved, the owner who imported the handle).
+    /// The owner who imported it.
     pub by: String,
     pub did: Option<String>,
-    pub handle: Option<String>,
     pub email_hmac: Option<String>,
     pub role: Option<String>,
 }
@@ -321,10 +324,6 @@ pub struct Conference {
     /// Roles assigned by an attendee list import, which admit their subject
     /// only while the list does.
     list_roles: BTreeSet<String>,
-    /// The handle-only list rows a list role was given for, by handle: the
-    /// row is the role's holder's, bound or not, so it can't match anyone
-    /// else (the handle's next holder, say).
-    list_claims: BTreeMap<String, String>,
     /// Who assigned each role, when another admin did.
     pub role_deciders: BTreeMap<String, String>,
     /// When each role took effect: its record's `since`, else when its
@@ -377,49 +376,14 @@ impl Conference {
         self.list.iter().any(|e| e.email_hmac.is_some())
     }
 
-    /// Whether someone is on the list: a row bound to their DID, or a
-    /// handle-only row whose list role they were given.
+    /// Whether someone is on the list by their DID.
     pub fn on_list(&self, did: &str) -> bool {
-        self.list.iter().any(|e| {
-            e.did.as_deref() == Some(did)
-                || (e.did.is_none()
-                    && e.handle.as_deref().is_some_and(|h| {
-                        self.list_claims.get(h).is_some_and(|holder| holder == did)
-                    }))
-        })
-    }
-
-    /// List entries with only a handle that didn't resolve when imported,
-    /// and hasn't been bound to a DID since (no entry with a DID has the
-    /// same handle, and no one was given its role).
-    pub fn unbound_handles(&self) -> impl Iterator<Item = &ListEntry> {
-        self.list.iter().filter(|e| {
-            e.did.is_none()
-                && e.handle.as_deref().is_some_and(|handle| {
-                    !self.list_claims.contains_key(handle)
-                        && !self
-                            .list
-                            .iter()
-                            .any(|b| b.did.is_some() && b.handle.as_deref() == Some(handle))
-                })
-        })
+        self.list.iter().any(|e| e.did.as_deref() == Some(did))
     }
 
     /// Whether `did`'s role came from an attendee list (a `via: list` role).
     pub fn has_list_role(&self, did: &str) -> bool {
         self.list_roles.contains(did)
-    }
-
-    /// The handle-only row `did` holds only by their list role's claim (no
-    /// entry binds its handle to a DID yet), if any.
-    pub fn claimed_row(&self, did: &str) -> Option<&ListEntry> {
-        let (handle, _) = self.list_claims.iter().find(|(_, holder)| *holder == did)?;
-        let bound =
-            self.list.iter().any(|b| b.did.is_some() && b.handle.as_deref() == Some(handle));
-        if bound {
-            return None;
-        }
-        self.list.iter().find(|e| e.did.is_none() && e.handle.as_deref() == Some(handle))
     }
 
     /// Whether a code (by its HMAC) is one of this conference's.
@@ -794,6 +758,28 @@ pub async fn load(state: &AppState, org: &str) -> Result<Option<Arc<Org>>, Strin
     Ok(Some(derived))
 }
 
+/// An organization's permissions as they'd be once `admin` isn't an admin:
+/// derived from its records without the super admin's `admin` record naming
+/// them, so their decisions, and the roles they assigned, stop counting.
+pub async fn without_admin(state: &AppState, org: &Org, admin: &str) -> Result<Org, String> {
+    let admin_space = SpaceUri::admin(&org.did).to_string();
+    let mut recs = records(state, &org.did).await?;
+    recs.retain(|r| {
+        !(r.space == admin_space
+            && r.repo == org.super_admin
+            && r.collection == ADMIN
+            && r.str("subject") == Some(admin))
+    });
+    Ok(derive(
+        &org.did,
+        &org.super_admin,
+        org.created_us,
+        &recs,
+        &state.secrets,
+        &state.oauth.client_id_for("atproto"),
+    ))
+}
+
 /// The organization a space belongs to.
 pub async fn load_for_space(
     state: &AppState,
@@ -854,14 +840,11 @@ pub fn derive(
     let decisions: Vec<&Rec> = recs
         .iter()
         .filter(in_admin)
-        .filter(|r| match (r.collection.as_str(), role_of(&r.repo)) {
-            (MEMBER | DENY, Some(_)) | (BAN | CODE, Some(Role::Owner)) => true,
-            // A list entry bound for an owner who imported its handle counts
-            // only while they're still one.
-            (LIST_ENTRY, Some(Role::Owner)) => {
-                r.str("onBehalfOf").is_none_or(|owner| role_of(owner) == Some(Role::Owner))
-            }
-            _ => false,
+        .filter(|r| {
+            matches!(
+                (r.collection.as_str(), role_of(&r.repo)),
+                (MEMBER | DENY, Some(_)) | (BAN | CODE | LIST_ENTRY, Some(Role::Owner))
+            )
         })
         .collect();
 
@@ -916,13 +899,20 @@ enum Event {
 /// Whose an event in a person's timeline is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum By {
-    /// A decision of the super admin's.
-    SuperAdmin,
-    /// Another admin's decision.
-    OtherAdmin,
+    /// An admin's decision, with their rank (see [`Rank`]).
+    Admin(Rank),
     /// The person's own (a join or leave), or what no admin decided on the
     /// day (a rule's admission, an email match, an admin period, a ban).
     Neutral,
+}
+
+/// How much an admin's membership decisions weigh: a decision stands against
+/// later ones of a lower rank that contradict it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Rank {
+    Staff,
+    Owner,
+    SuperAdmin,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -939,6 +929,16 @@ fn derive_conference(
     let space = settings.space.clone();
     let about = |r: &&&Rec| r.str("space") == Some(space.as_str());
     let conference_super = settings.super_admin.clone().unwrap_or_else(|| super_admin.to_owned());
+    // Decisions come only from current admins, so every author has a rank.
+    let rank_of = |did: &str| {
+        if did == super_admin {
+            Rank::SuperAdmin
+        } else if admins.get(did).is_some_and(|a| a.role == Role::Owner) {
+            Rank::Owner
+        } else {
+            Rank::Staff
+        }
+    };
 
     let mut codes = BTreeMap::new();
     let mut list = Vec::new();
@@ -962,9 +962,8 @@ fn derive_conference(
                 }
             }
             LIST_ENTRY => list.push(ListEntry {
-                by: rec.str("onBehalfOf").unwrap_or(&rec.repo).to_owned(),
+                by: rec.repo.clone(),
                 did: rec.str("did").map(str::to_owned),
-                handle: rec.str("handle").map(str::to_owned),
                 email_hmac: rec.str("emailHmac").map(str::to_owned),
                 role: rec.str("role").map(str::to_owned),
             }),
@@ -993,7 +992,6 @@ fn derive_conference(
     };
     let mut roles = BTreeMap::new();
     let mut list_roles = BTreeSet::new();
-    let mut list_claims = BTreeMap::new();
     let mut role_deciders = BTreeMap::new();
     let mut role_since = BTreeMap::new();
     let mut rules = None;
@@ -1019,9 +1017,6 @@ fn derive_conference(
                     }
                     if rec.str("via") == Some("list") {
                         list_roles.insert(subject.to_owned());
-                        if let Some(handle) = rec.str("listHandle") {
-                            list_claims.insert(handle.to_owned(), subject.to_owned());
-                        }
                     }
                 }
             }
@@ -1039,7 +1034,6 @@ fn derive_conference(
         super_admin_did: conference_super.clone(),
         roles,
         list_roles,
-        list_claims,
         role_deciders,
         role_since,
         admin_periods: BTreeMap::new(),
@@ -1128,14 +1122,12 @@ fn derive_conference(
                 };
                 // Admin periods and email matches are no one's verdict on
                 // the person's attendance: like their own joins, they end
-                // whatever the super admin last decided. Only she writes
+                // whatever an admin last decided. Only the super admin writes
                 // them; another admin's record saying so is their decision.
                 let by = if (marks_admin || via == Some("email")) && rec.repo == super_admin {
                     By::Neutral
-                } else if rec.repo == super_admin {
-                    By::SuperAdmin
                 } else {
-                    By::OtherAdmin
+                    By::Admin(rank_of(&rec.repo))
                 };
                 events.entry(subject.to_owned()).or_default().push((rec.us, event, by));
                 let at = decided_at.entry(subject.to_owned()).or_default();
@@ -1144,13 +1136,11 @@ fn derive_conference(
             DENY => {
                 let at = denied_at.entry(subject.to_owned()).or_default();
                 *at = (*at).max(rec.us);
-                if rec.repo == super_admin {
-                    events.entry(subject.to_owned()).or_default().push((
-                        rec.us,
-                        Event::Deny,
-                        By::SuperAdmin,
-                    ));
-                }
+                events.entry(subject.to_owned()).or_default().push((
+                    rec.us,
+                    Event::Deny,
+                    By::Admin(rank_of(&rec.repo)),
+                ));
             }
             _ => {}
         }
@@ -1241,10 +1231,11 @@ fn derive_conference(
     }
     conference.uses = uses;
 
-    // Each person's periods. The super admin's latest decision about them
-    // (admitting, removing or denying) stands against other admins' later
-    // decisions that contradict it, until she decides again or the person
-    // joins, leaves or is admitted by a rule.
+    // Each person's periods. The latest decision about them (admitting,
+    // removing or denying) by the highest rank to decide stands against later
+    // decisions of lower ranks that contradict it, until someone of its rank
+    // or higher decides again, or the person joins, leaves or is admitted by
+    // a rule. Within a rank, the latest decision stands.
     for (subject, mut timeline) in events {
         // A ban ends before the super admin's admission that lifts it.
         timeline.sort_by_key(|(us, event, _)| (*us, *event != Event::Unban));
@@ -1252,16 +1243,21 @@ fn derive_conference(
         let mut since: Option<u64> = None;
         // The bans in force: an overridden one ends with an `Unban`.
         let mut bans = 0usize;
-        let mut super_says: Option<bool> = None;
+        // The decision that stands: its rank, and whether it admits.
+        let mut standing: Option<(Rank, bool)> = None;
         // Within an admin period: a member whatever the bans.
         let mut admin = false;
         for (us, event, by) in timeline {
             let admits = matches!(event, Event::Admit | Event::AdminStart);
-            match by {
-                By::SuperAdmin => super_says = Some(admits),
-                By::OtherAdmin if super_says.is_some_and(|says| says != admits) => continue,
-                By::OtherAdmin => {}
-                By::Neutral => super_says = None,
+            match (by, standing) {
+                // Overridden by a higher rank's decision.
+                (By::Admin(rank), Some((above, says))) if above > rank && says != admits => {
+                    continue;
+                }
+                // Agreeing with it: the higher one still stands.
+                (By::Admin(rank), Some((above, _))) if above > rank => {}
+                (By::Admin(rank), _) => standing = Some((rank, admits)),
+                (By::Neutral, _) => standing = None,
             }
             match event {
                 Event::Admit if bans == 0 && since.is_none() => since = Some(us),
@@ -1614,62 +1610,109 @@ mod tests {
     }
 
     #[test]
-    fn a_handle_on_the_list_is_bound_once_and_only_for_its_importer() {
+    fn a_list_row_counts_by_its_did_and_only_while_its_importer_is_an_owner() {
         let kees = "did:plc:keesaaaaaaaaaaaaaaaaaaaa";
         let ana = "did:plc:anaaaaaaaaaaaaaaaaaaaaaa";
-        let entry = |by: &str, rkey: &str, value: Value| {
-            let mut value = value;
-            value["space"] = json!(space(CONFERENCE_TYPE));
-            rec(&SpaceUri::admin(ORG).to_string(), by, LIST_ENTRY, rkey, 5, value)
-        };
-        let imported = entry(kees, "l1", json!({ "handle": "ana.test" }));
-        let bound =
-            entry(OLGA, "l2", json!({ "handle": "ana.test", "did": ana, "onBehalfOf": kees }));
-        let org = org_with(&["list"], true, vec![admin_rec(kees, "owner", 1), imported.clone()]);
-        let conference = org.conference(&space(CONFERENCE_TYPE)).unwrap();
-        assert_eq!(conference.unbound_handles().count(), 1);
-        assert_eq!(conference.unbound_handles().next().unwrap().by, kees);
-
-        let org = org_with(
-            &["list"],
-            true,
-            vec![admin_rec(kees, "owner", 1), imported.clone(), bound.clone()],
-        );
-        let conference = org.conference(&space(CONFERENCE_TYPE)).unwrap();
-        assert_eq!(conference.unbound_handles().count(), 0, "bound to Ana for good");
-        assert!(conference.on_list(ana));
-
-        // Once Kees isn't an owner, the entry bound for Kees stops counting.
-        let org = org_with(&["list"], true, vec![imported, bound]);
-        assert!(!org.conference(&space(CONFERENCE_TYPE)).unwrap().on_list(ana));
-    }
-
-    #[test]
-    fn a_handle_rows_list_role_claims_the_row_for_its_holder() {
-        let kees = "did:plc:keesaaaaaaaaaaaaaaaaaaaa";
-        let zoe = "did:plc:zoeaaaaaaaaaaaaaaaaaaaaa";
-        let imported = rec(
+        let entry = rec(
             &SpaceUri::admin(ORG).to_string(),
             kees,
             LIST_ENTRY,
             "l1",
             5,
-            json!({ "space": space(CONFERENCE_TYPE), "handle": "zoe.test", "role": "speaker" }),
+            json!({ "space": space(CONFERENCE_TYPE), "did": ana, "handle": "ana.test" }),
         );
-        // Zoe was given the row's role, but its binding was never written.
-        let given = role(
-            zoe,
-            "speaker",
-            json!({ "assignedBy": kees, "via": "list", "listHandle": "zoe.test" }),
+        // A row with only a handle (from another app, say) matches no one.
+        let handle_only = rec(
+            &SpaceUri::admin(ORG).to_string(),
+            kees,
+            LIST_ENTRY,
+            "l2",
+            5,
+            json!({ "space": space(CONFERENCE_TYPE), "handle": "mallory.test" }),
         );
-        let org = org_with(&["list"], true, vec![admin_rec(kees, "owner", 1), imported, given]);
+        let org = org_with(
+            &["list"],
+            true,
+            vec![admin_rec(kees, "owner", 1), entry.clone(), handle_only.clone()],
+        );
         let conference = org.conference(&space(CONFERENCE_TYPE)).unwrap();
-        assert_eq!(conference.unbound_handles().count(), 0, "the row is Zoe's");
-        assert!(conference.on_list(zoe));
-        assert!(!conference.on_list("did:plc:nextholderaaaaaaaaaaaaaa"));
-        // Held only by the claim, so a role change binds it first.
-        assert_eq!(conference.claimed_row(zoe).and_then(|e| e.handle.as_deref()), Some("zoe.test"));
-        assert!(conference.claimed_row("did:plc:nextholderaaaaaaaaaaaaaa").is_none());
+        assert!(conference.on_list(ana));
+        assert_eq!(conference.list.len(), 2);
+        assert!(conference.list.iter().all(|e| e.by == kees));
+        assert!(!conference.on_list("did:plc:malloryaaaaaaaaaaaaaaaaa"));
+
+        // Once Kees isn't an owner, the rows Kees imported stop counting.
+        let org = org_with(&["list"], true, vec![admin_rec(kees, "staff", 1), entry, handle_only]);
+        assert!(!org.conference(&space(CONFERENCE_TYPE)).unwrap().on_list(ana));
+    }
+
+    #[test]
+    fn an_owners_decision_stands_against_staff_and_staff_decide_among_themselves() {
+        let kees = "did:plc:keesaaaaaaaaaaaaaaaaaaaa";
+        let lotte = "did:plc:lotteaaaaaaaaaaaaaaaaaaa";
+        let ana = "did:plc:anaaaaaaaaaaaaaaaaaaaaaa";
+        let admins = || vec![admin_rec(kees, "owner", 1), admin_rec(lotte, "staff", 1)];
+        let member_of = |more: Vec<Rec>| {
+            let mut recs = admins();
+            recs.extend(more);
+            let org = org_with(&["code", "request"], true, recs);
+            org.conference(&space(CONFERENCE_TYPE)).unwrap().is_member(ana)
+        };
+        let joined = || join(ana, 5, None, json!({}));
+        let deny = |by: &str, us: u64| {
+            rec(
+                &SpaceUri::admin(ORG).to_string(),
+                by,
+                DENY,
+                &format!("d{us}"),
+                us,
+                json!({ "space": space(CONFERENCE_TYPE), "subject": ana }),
+            )
+        };
+        // Kees removes Ana; Pim, staff, can't undo it, but Kees can.
+        let removed = vec![member(kees, ana, "m1", 10, false), member(kees, ana, "m2", 20, true)];
+        let mut by_staff = removed.clone();
+        by_staff.push(member(PIM, ana, "m3", 30, false));
+        assert!(!member_of(by_staff.clone()), "the owner's removal stands");
+        by_staff.push(member(kees, ana, "m4", 40, false));
+        assert!(member_of(by_staff), "the owner admits her again");
+        // Kees admits Ana; staff can't remove her.
+        assert!(member_of(vec![
+            member(kees, ana, "m1", 10, false),
+            member(PIM, ana, "m2", 20, true)
+        ]));
+        // Kees denies her request; staff can't admit her.
+        let mut asked = vec![join(ana, 5, None, json!({})), deny(kees, 10)];
+        asked.push(member(PIM, ana, "m1", 20, false));
+        assert!(!member_of(asked), "the owner's denial stands");
+        // Between staff, the latest decision stands.
+        assert!(member_of(vec![
+            joined(),
+            member(lotte, ana, "m1", 10, true),
+            member(PIM, ana, "m2", 20, false),
+        ]));
+        assert!(!member_of(vec![
+            joined(),
+            member(PIM, ana, "m1", 10, false),
+            member(lotte, ana, "m2", 20, true),
+        ]));
+        // A staff denial is overridden by staff too.
+        assert!(member_of(vec![joined(), deny(lotte, 10), member(PIM, ana, "m1", 20, false)]));
+        // Between owners too; and the super admin's stands against owners.
+        let sem = "did:plc:semaaaaaaaaaaaaaaaaaaaaa";
+        let mut recs = vec![admin_rec(sem, "owner", 1)];
+        recs.extend([member(kees, ana, "m1", 10, true), member(sem, ana, "m2", 20, false)]);
+        assert!(member_of(recs));
+        assert!(!member_of(vec![
+            member(OLGA, ana, "m1", 10, true),
+            member(kees, ana, "m2", 20, false)
+        ]));
+        // The person acting themselves ends any decision's say.
+        assert!(member_of(vec![
+            member(kees, ana, "m1", 10, true),
+            join(ana, 15, None, json!({})),
+            member(PIM, ana, "m2", 20, false),
+        ]));
     }
 
     #[test]

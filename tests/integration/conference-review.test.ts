@@ -1,12 +1,7 @@
-import { mkdtempSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import type { VivariumScope } from '@vivarium-dev/client'
 import { afterAll, beforeAll, expect, test, vi } from '@vivarium-dev/client/vitest'
 import {
   bringOnline,
-  changeHandle,
   eventually,
   type Json,
   ownSpaceRecords,
@@ -281,7 +276,7 @@ test('TC-51: staff can’t undo the super admin’s removal (review round 3)', a
     admins.pim.handle,
   ])
   expect(undo.code).not.toBe(0)
-  expect(undo.stderr).toMatch(/super admin.s latest decision/)
+  expect(undo.stderr).toMatch(/stands, and .* can.t override it/)
   expect(await bram.isMember(conference.space)).toBe(false)
 })
 
@@ -341,17 +336,6 @@ test('TC-4: a conference can be handed to another super admin (review round 3)',
   expect(event.status).toBe(200)
 })
 
-test('TC-31: a role on the list comes with a handle that resolves only later (review round 3)', async ({ viv }) => {
-  const { conference } = await seedConference(dep, accountsIn(viv), { methods: ['list'] })
-  const zoeHandle = viv.handle('zoe')
-  await importList(dep, conference, [{ handle: zoeHandle, role: 'speaker' }])
-  const zoe = await viv.createAccount(zoeHandle)
-
-  const answer = await (await Attendee.signIn(dep, zoe)).join({ conference: conference.space })
-  expect(answer.body.status).toBe('joined')
-  expect(answer.body.role).toBe('speaker')
-})
-
 // Regressions from adversarial review round 4.
 
 test('TC-51: staff can’t strip a role by a removal the super admin’s decision overrides (review round 4)', async ({
@@ -374,7 +358,7 @@ test('TC-51: staff can’t strip a role by a removal the super admin’s decisio
     admins.pim.handle,
   ])
   expect(refused.code).not.toBe(0)
-  expect(refused.stderr).toMatch(/super admin.s latest decision/)
+  expect(refused.stderr).toMatch(/stands, and .* can.t override it/)
   const page = await bram.getConference(conference.space)
   expect(page.body.viewer, 'Bram keeps his role').toEqual(expect.objectContaining({ member: true, role: 'speaker' }))
 })
@@ -397,20 +381,6 @@ test('TC-4: a public conference can be handed over twice (review round 4)', asyn
   const sidecars = await publicRecords(viv.url, pim.did, 'app.eventside.conference')
   expect(sidecars.map((r) => r.value.superAdmin)).toEqual([olga.did])
   expect((await publicConference(dep, conference.event as string)).status).toBe(200)
-})
-
-test('TC-31: a role on the list comes with a handle bound after a code let them in (review round 4)', async ({
-  viv,
-}) => {
-  const { conference } = await seedConference(dep, accountsIn(viv), { methods: ['list', 'code'] })
-  const code = await sharedCode(dep, conference, uniqueCode('atmosphere27'))
-  const zoeHandle = viv.handle('zoe')
-  await importList(dep, conference, [{ handle: zoeHandle, role: 'speaker' }])
-  const zoe = await viv.createAccount(zoeHandle)
-
-  const answer = await (await Attendee.signIn(dep, zoe)).join({ conference: conference.space, code })
-  expect(answer.body.status).toBe('joined')
-  expect(answer.body.role).toBe('speaker')
 })
 
 test('TC-4: a conference’s super admin must be an owner (review round 4)', async ({ viv }) => {
@@ -491,44 +461,6 @@ test('TC-4: an invite-only handover moves the event, not the super admin’s pla
   expect(JSON.stringify(page.body)).toContain(WEDDING.name)
 })
 
-test('TC-54: a late list handle doesn’t make a code join depend on the super admin’s PDS (review round 5)', async ({
-  viv,
-}) => {
-  const { conference, superAdmin } = await seedConference(dep, accountsIn(viv), { methods: ['list', 'code'] })
-  const code = await sharedCode(dep, conference, uniqueCode('atmosphere27'))
-  const zoeHandle = viv.handle('zoe')
-  await importList(dep, conference, [{ handle: zoeHandle, role: 'speaker' }])
-  const zoe = await Attendee.signIn(dep, await viv.createAccount(zoeHandle))
-
-  await takeOffline(viv.url, superAdmin)
-  try {
-    const answer = await zoe.join({ conference: conference.space, code })
-    expect(answer.status).toBe(200)
-    expect(answer.body.status, 'the code lets her in').toBe('joined')
-  } finally {
-    await bringOnline(viv.url, superAdmin)
-  }
-  // Once the super admin's PDS is back, a later join binds the handle.
-  const again = await zoe.join({ conference: conference.space })
-  expect(again.body.status).toBe('joined')
-  expect(again.body.role).toBe('speaker')
-})
-
-test('TC-17: a list handle is bound to whoever a role let in (review round 5)', async ({ viv }) => {
-  const { conference } = await seedConference(dep, accountsIn(viv), { methods: ['list'] })
-  const zoeHandle = viv.handle('zoe')
-  await importList(dep, conference, [{ handle: zoeHandle }])
-  const zoe = await viv.createAccount(zoeHandle)
-  await setRole(dep, conference, zoe, 'speaker')
-  expect((await (await Attendee.signIn(dep, zoe)).join({ conference: conference.space })).body.status).toBe('joined')
-
-  // Zoe moves on to another handle, and someone else takes hers.
-  await changeHandle(viv.url, zoe, viv.handle('zoe-new'))
-  const next = await viv.createAccount(zoeHandle)
-  const answer = await (await Attendee.signIn(dep, next)).join({ conference: conference.space })
-  expect(answer.body.status, 'the row stayed with Zoe').not.toBe('joined')
-})
-
 test('TC-11: a code alone finds its conference among several organizations (review round 5)', async ({ viv }) => {
   const first = await seedConference(dep, accountsIn(viv), { methods: ['code'] })
   const second = await seedConference(dep, accountsIn(viv), { superAdmin: 'kees', methods: ['code'] })
@@ -554,67 +486,7 @@ test('TC-11: a code alone finds its conference among several organizations (revi
   expect(answer.body.conference).toBe(second.conference.space)
 })
 
-// Regressions from adversarial review round 6.
-
-test('TC-31: a list role that couldn’t be given is given on a later join (review round 6)', async ({ viv }) => {
-  const olga = await viv.createAccount(viv.handle('olga'))
-  const pim = await viv.createAccount(viv.handle('pim'))
-  const org = await createOrg(dep, olga)
-  await addAdmin(dep, org, pim, 'owner')
-  const conference = await createConference(dep, org, {
-    ...ATMOSPHERECONF,
-    superAdmin: pim,
-    methods: ['list', 'code'],
-  })
-  const code = await sharedCode(dep, conference, uniqueCode('atmosphere27'))
-  const zoeHandle = viv.handle('zoe')
-  await importList(dep, conference, [{ handle: zoeHandle, role: 'speaker' }])
-  const zoe = await Attendee.signIn(dep, await viv.createAccount(zoeHandle))
-
-  // Pim, who writes the conference's roles, is down: the code lets Zoe in.
-  await takeOffline(viv.url, pim)
-  try {
-    expect((await zoe.join({ conference: conference.space, code })).body.status).toBe('joined')
-  } finally {
-    await bringOnline(viv.url, pim)
-  }
-  const again = await zoe.join({ conference: conference.space })
-  expect(again.body.status).toBe('joined')
-  expect(again.body.role, 'the row’s role, once Pim is back').toBe('speaker')
-})
-
 // Regressions from adversarial review round 7.
-
-test('TC-31: a list role given without its binding still lets the person in, and only them (review round 7)', async ({
-  viv,
-}) => {
-  const olga = await viv.createAccount(viv.handle('olga'))
-  const pim = await viv.createAccount(viv.handle('pim'))
-  const org = await createOrg(dep, olga)
-  await addAdmin(dep, org, pim, 'owner')
-  const conference = await createConference(dep, org, { ...ATMOSPHERECONF, superAdmin: pim, methods: ['list'] })
-  const zoeHandle = viv.handle('zoe')
-  await importList(dep, conference, [{ handle: zoeHandle, role: 'speaker' }])
-  const zoeAccount = await viv.createAccount(zoeHandle)
-  const zoe = await Attendee.signIn(dep, zoeAccount)
-
-  // Pim gives the row's role, but Olga, who writes the binding, is down.
-  await takeOffline(viv.url, olga)
-  try {
-    const answer = await zoe.join({ conference: conference.space })
-    expect(answer.status).toBe(200)
-    expect(answer.body.status, 'the role lets her in').toBe('joined')
-    expect(answer.body.role).toBe('speaker')
-  } finally {
-    await bringOnline(viv.url, olga)
-  }
-
-  // The row is Zoe's: the handle's next holder isn't let in by it.
-  await changeHandle(viv.url, zoeAccount, viv.handle('zoe-new'))
-  const next = await viv.createAccount(zoeHandle)
-  const answer = await (await Attendee.signIn(dep, next)).join({ conference: conference.space })
-  expect(answer.body.status, 'the row stayed with Zoe').not.toBe('joined')
-})
 
 test('TC-7: a bad cursor or limit doesn’t reveal an invite-only conference (review round 7)', async ({ viv }) => {
   const sanne = await viv.createAccount(viv.handle('sanne'))
@@ -708,116 +580,7 @@ test('TC-32: a member’s plan leaves the index’s view alone; a role change re
   }
 })
 
-for (const role of ['staff', 'none'] as const) {
-  test(`TC-17: a list row a role holds stays with its holder when the role becomes ${role} (review round 8)`, async ({
-    viv,
-  }) => {
-    const olga = await viv.createAccount(viv.handle('olga'))
-    const pim = await viv.createAccount(viv.handle('pim'))
-    const org = await createOrg(dep, olga)
-    await addAdmin(dep, org, pim, 'owner')
-    const conference = await createConference(dep, org, { ...ATMOSPHERECONF, superAdmin: pim, methods: ['list'] })
-    const zoeHandle = viv.handle('zoe')
-    await importList(dep, conference, [{ handle: zoeHandle, role: 'speaker' }])
-    const zoeAccount = await viv.createAccount(zoeHandle)
-    const zoe = await Attendee.signIn(dep, zoeAccount)
-
-    // The row's role is given, but not its binding: the role holds the row.
-    await takeOffline(viv.url, olga)
-    try {
-      expect((await zoe.join({ conference: conference.space })).body.status).toBe('joined')
-    } finally {
-      await bringOnline(viv.url, olga)
-    }
-
-    expect((await setRole(dep, conference, zoeAccount, role)).code).toBe(0)
-
-    // The row is still Zoe's: she stays in, and the handle's next holder
-    // isn't let in by it.
-    await changeHandle(viv.url, zoeAccount, viv.handle('zoe-new'))
-    const next = await viv.createAccount(zoeHandle)
-    const answer = await (await Attendee.signIn(dep, next)).join({ conference: conference.space })
-    expect(answer.body.status, 'the row stayed with Zoe').not.toBe('joined')
-    const read = await zoe.call('app.eventside.conference.listRecords', {
-      params: { conference: conference.space, collection: NSID.event },
-    })
-    expect(read.status, 'Zoe is still a member').toBe(200)
-  })
-}
-
 // Regressions from adversarial review round 9.
-
-/** A conference whose list row for Zoe's handle is held only by her list role's claim. */
-async function claimedListRow(viv: VivariumScope) {
-  const olga = await viv.createAccount(viv.handle('olga'))
-  const pim = await viv.createAccount(viv.handle('pim'))
-  const org = await createOrg(dep, olga)
-  await addAdmin(dep, org, pim, 'owner')
-  const conference = await createConference(dep, org, { ...ATMOSPHERECONF, superAdmin: pim, methods: ['list'] })
-  const zoeHandle = viv.handle('zoe')
-  await importList(dep, conference, [{ handle: zoeHandle, role: 'speaker' }])
-  const zoeAccount = await viv.createAccount(zoeHandle)
-  const zoe = await Attendee.signIn(dep, zoeAccount)
-  await takeOffline(viv.url, olga)
-  try {
-    expect((await zoe.join({ conference: conference.space })).body.status).toBe('joined')
-  } finally {
-    await bringOnline(viv.url, olga)
-  }
-  // Someone else taking Zoe's old handle isn't let in by her row.
-  const rowStaysWithZoe = async () => {
-    await changeHandle(viv.url, zoeAccount, viv.handle('zoe-new'))
-    const next = await viv.createAccount(zoeHandle)
-    const answer = await (await Attendee.signIn(dep, next)).join({ conference: conference.space })
-    expect(answer.body.status, 'the row stayed with Zoe').not.toBe('joined')
-  }
-  return { olga, pim, org, conference, zoeAccount, zoe, rowStaysWithZoe }
-}
-
-test('TC-17: a list row a role holds stays with its holder when they’re made an admin (review round 9)', async ({
-  viv,
-}) => {
-  const { org, zoeAccount, rowStaysWithZoe } = await claimedListRow(viv)
-  await addAdmin(dep, org, zoeAccount, 'staff')
-  await rowStaysWithZoe()
-})
-
-test('TC-17: a list row a role holds stays with its holder through a re-import under a new handle (review round 9)', async ({
-  viv,
-}) => {
-  const { conference, zoeAccount, rowStaysWithZoe } = await claimedListRow(viv)
-  // The organizers re-import Zoe under the handle she's moving to.
-  const zoeNew = viv.handle('zoe-new')
-  await changeHandle(viv.url, zoeAccount, zoeNew)
-  await importList(dep, conference, [{ handle: zoeNew, role: 'speaker' }])
-  await rowStaysWithZoe()
-})
-
-test('TC-17: a removal that can’t keep a list row with its holder changes nothing (review round 9)', async ({
-  viv,
-}) => {
-  const { olga, pim, conference, zoeAccount, zoe } = await claimedListRow(viv)
-  // Olga, who binds the row before the role goes, is down.
-  await takeOffline(viv.url, olga)
-  try {
-    const removal = await cli(dep, [
-      'member',
-      'remove',
-      zoeAccount.did,
-      '--conference',
-      conference.space,
-      '--as',
-      pim.handle,
-    ])
-    expect(removal.code, 'the removal fails').not.toBe(0)
-  } finally {
-    await bringOnline(viv.url, olga)
-  }
-  const read = await zoe.call('app.eventside.conference.listRecords', {
-    params: { conference: conference.space, collection: NSID.event },
-  })
-  expect(read.status, 'nothing was half done: Zoe is still a member').toBe(200)
-})
 
 test('TC-48: reindex reads an intake repo only up to its cap, and keeps the rest for later syncs (review round 9)', async ({
   viv,
@@ -888,18 +651,6 @@ test('TC-48: reindex reads an intake repo only up to its cap, and keeps the rest
 
 // Regressions from adversarial review round 10.
 
-/** `list import` as a given owner. */
-async function importListAs(
-  dep: Deployment,
-  conference: { space: string },
-  as: string,
-  rows: { handle: string; role: string }[],
-) {
-  const file = join(mkdtempSync(join(tmpdir(), 'eventside-list-')), 'attendees.csv')
-  writeFileSync(file, `${['handle,email,role', ...rows.map((r) => `${r.handle},,${r.role}`)].join('\n')}\n`)
-  return cliOk(dep, ['list', 'import', file, '--conference', conference.space, '--as', as])
-}
-
 test('TC-32: importing a list leaves a role an admin gave alone (review round 10)', async ({ viv }) => {
   const { conference } = await seedConference(dep, accountsIn(viv), { methods: ['code'] })
   const bram = await viv.createAccount(viv.handle('bram'))
@@ -914,25 +665,6 @@ test('TC-32: importing a list leaves a role an admin gave alone (review round 10
     params: { conference: conference.space, collection: NSID.event },
   })
   expect(read.status, 'Bram is still a member').toBe(200)
-})
-
-test('TC-17: a list row stays with its holder after the owner who re-imported them is removed (review round 10)', async ({
-  viv,
-}) => {
-  const { org, conference, zoeAccount, zoe, rowStaysWithZoe } = await claimedListRow(viv)
-  const sem = await viv.createAccount(viv.handle('sem'))
-  await addAdmin(dep, org, sem, 'owner')
-  // Sem re-imports Zoe under her new handle: his list role, not the row's importer's.
-  const zoeNew = viv.handle('zoe-new')
-  await changeHandle(viv.url, zoeAccount, zoeNew)
-  await importListAs(dep, conference, sem.handle, [{ handle: zoeNew, role: 'speaker' }])
-  // Sem's roles go with him.
-  await cliOk(dep, ['org', 'admin', 'remove', sem.handle, '--org', org.did])
-  await rowStaysWithZoe()
-  const read = await zoe.call('app.eventside.conference.listRecords', {
-    params: { conference: conference.space, collection: NSID.event },
-  })
-  expect(read.status, 'Zoe is still a member').toBe(200)
 })
 
 test('TC-55: a removal whose role can’t be taken is undone (review round 10)', async ({ viv }) => {
@@ -959,4 +691,49 @@ test('TC-55: a removal whose role can’t be taken is undone (review round 10)',
     params: { conference: conference.space, collection: NSID.event },
   })
   expect(read.status, 'nothing was half done: Bram is still a member').toBe(200)
+})
+
+// Regressions from the simplification (2026-10-07): list handles resolve at
+// import, and admins' decisions rank by who made them.
+
+test('TC-17: a list handle that doesn’t resolve at import is reported, and stores nothing (simplification)', async ({
+  viv,
+}) => {
+  const { conference } = await seedConference(dep, accountsIn(viv), { methods: ['list'] })
+  const zoeHandle = viv.handle('zoe')
+  const ana = await viv.createAccount(viv.handle('ana'))
+  const imported = await importList(dep, conference, [{ handle: zoeHandle, role: 'speaker' }, { handle: ana.handle }])
+  expect(imported.stdout, 'the import names the handle it skipped').toContain(zoeHandle)
+  expect(imported.stdout).not.toContain(ana.handle)
+
+  // Whoever takes the handle later isn't on the list by it.
+  const zoe = await Attendee.signIn(dep, await viv.createAccount(zoeHandle))
+  const answer = await zoe.join({ conference: conference.space })
+  expect(answer.body.status).toBe('refused')
+  expect((await (await Attendee.signIn(dep, ana)).join({ conference: conference.space })).body.status).toBe('joined')
+})
+
+test('TC-52: staff can’t admit someone an owner denied (simplification)', async ({ viv }) => {
+  const { org, conference, admins } = await seedConference(dep, accountsIn(viv), {
+    staff: ['pim'],
+    methods: ['request'],
+  })
+  const kees = await viv.createAccount(viv.handle('kees'))
+  await addAdmin(dep, org, kees, 'owner')
+  const bram = await Attendee.signIn(dep, await viv.createAccount(viv.handle('bram')))
+  expect((await bram.join({ conference: conference.space, request: true })).body.status).toBe('pending')
+  await cliOk(dep, ['requests', 'deny', bram.person.handle, '--conference', conference.space, '--as', kees.handle])
+
+  const added = await cli(dep, [
+    'member',
+    'add',
+    bram.person.handle,
+    '--conference',
+    conference.space,
+    '--as',
+    admins.pim.handle,
+  ])
+  expect(added.code).not.toBe(0)
+  expect(added.stderr).toMatch(/by an owner or the super admin stands/)
+  expect(await bram.isMember(conference.space)).toBe(false)
 })

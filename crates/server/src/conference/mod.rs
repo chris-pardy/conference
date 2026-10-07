@@ -462,7 +462,7 @@ pub async fn join(
         Ok(None) => return not_found(),
         Err(why) => return failed(why),
     };
-    let mut org = match load(&state, &row).await {
+    let org = match load(&state, &row).await {
         Ok(Some(org)) => org,
         Ok(None) => return not_found(),
         Err(why) => return failed(why),
@@ -482,50 +482,6 @@ pub async fn join(
         return Json(answer("refused")).into_response();
     }
     let now = tid_micros(&tid_now()).unwrap_or_default();
-    let settings = &conference.settings;
-    // A handle on the list that didn't resolve when it was imported, which
-    // names this person now: bound to them from now on, with its role,
-    // however else they were or would be let in (a role included, so the
-    // row can't later admit the handle's next holder). Then a join like any
-    // other on the list. Binding is written as the super admin: if their PDS
-    // fails and something else lets the person in, they're let in anyway and
-    // the binding is tried again on a later join.
-    if settings.has("list")
-        && !conference.on_list(did)
-        && let Some(entry) = unbound_listed(&state, conference, did).await
-    {
-        match bind_list_entry(&state, &org, conference, did, entry).await {
-            Ok(()) => {
-                if !conference.is_member(did)
-                    && let Err(res) =
-                        write_intake(&state, &user, &row.intake, JOIN, json!({})).await
-                {
-                    return res;
-                }
-                return reload_answer(&state, &row, did).await;
-            }
-            Err(why) => {
-                // The row's role may have been given though its binding
-                // wasn't: judged by the index as it is now.
-                org = match load(&state, &row).await {
-                    Ok(Some(org)) => org,
-                    Ok(None) => return not_found(),
-                    Err(err) => return failed(err),
-                };
-                let conference = org.conference(&row.space).expect("loaded with its conference");
-                let otherwise = conference.is_member(did)
-                    || conference.would_admit(did, code_hash.as_deref(), now).is_some();
-                if !otherwise {
-                    return failed(why);
-                }
-                eprintln!(
-                    "conference: {did}'s list handle isn't bound yet (tried again on a later \
-                     join unless its role was given): {why}"
-                );
-            }
-        }
-    }
-    let conference = org.conference(&row.space).expect("loaded with its conference");
     let settings = &conference.settings;
     if conference.is_member(did) {
         return joined(&org, conference);
@@ -686,122 +642,12 @@ pub async fn code_conference(state: &AppState, code_hash: &str) -> Result<Option
     Ok(None)
 }
 
-/// The list entry with only a handle (it didn't resolve on import, and
-/// hasn't been bound since) that names this person now: their own handle,
-/// resolved both ways. Two lookups, however long the list.
-async fn unbound_listed<'a>(
-    state: &AppState,
-    conference: &'a Conference,
-    did: &str,
-) -> Option<&'a index::ListEntry> {
-    let mut unbound = conference.unbound_handles().peekable();
-    unbound.peek()?;
-    let handle = state.resolver.resolve_did(did).await.ok()?.handle;
-    let handle = crate::identity::normalize_handle(&handle)?;
-    let entry = unbound.find(|e| e.handle.as_deref() == Some(handle.as_str()))?;
-    let resolved = state.resolver.resolve_handle(&handle).await.ok()?;
-    (resolved == did).then_some(entry)
-}
-
-/// Binds a list entry that had only a handle to the DID it first resolved
-/// to: an entry with both, written as the super admin on behalf of the owner
-/// who imported the handle, so it counts only while they're an owner, and a
-/// handle that later changes hands doesn't take the place with it.
-///
-/// The role the row gives is written first (as the conference's super admin,
-/// who may be someone else), and the binding last: once someone is on the
-/// list by DID the binding isn't tried again, so a role that failed after it
-/// would never be given.
-async fn bind_list_entry(
-    state: &AppState,
-    org: &Org,
-    conference: &Conference,
-    did: &str,
-    entry: &index::ListEntry,
-) -> Result<(), String> {
-    give_list_role(state, org, conference, did, entry).await?;
-    write_binding(state, org, conference.space(), did, entry).await
-}
-
-/// Writes the binding of a handle-only row that `did` holds only by their
-/// list role's claim, before that role is changed or taken away: the claim
-/// lives on the role record, and the row must stay theirs without it, or
-/// it would be open again to the handle's next holder.
-pub async fn keep_list_claim(
-    state: &AppState,
-    org: &Org,
-    conference: &Conference,
-    did: &str,
-) -> Result<(), String> {
-    match conference.claimed_row(did) {
-        Some(entry) => write_binding(state, org, conference.space(), did, entry).await,
-        None => Ok(()),
-    }
-}
-
-/// Writes `did`'s role record in a conference, as `writer` (its super
-/// admin). Every role a command or a join writes goes through here, so a
-/// list row `did` holds only by their current role's claim stays theirs:
-/// a list role assigned by the row's own importer carries the claim
-/// (`listHandle`) on, and any other role (another owner's list role
-/// included, which goes when they stop being an admin) is written only
-/// after the row is bound, so it no longer depends on a role.
-pub async fn put_role(
-    state: &AppState,
-    org: &Org,
-    conference: &Conference,
-    writer: &admin::Acting,
-    did: &str,
-    mut value: Value,
-) -> Result<(), String> {
-    if let Some(entry) = conference.claimed_row(did) {
-        let str_of = |key: &str| value.get(key).and_then(Value::as_str);
-        if str_of("via") == Some("list") && str_of("assignedBy") == Some(entry.by.as_str()) {
-            value["listHandle"] = json!(entry.handle);
-        } else {
-            write_binding(state, org, conference.space(), did, entry).await?;
-        }
-    }
-    writer.put_in(state, conference.space(), index::ROLE, did, value).await
-}
-
-/// The binding itself: an entry with the row's handle and the DID, written
-/// as the super admin on behalf of the owner who imported the handle.
-async fn write_binding(
-    state: &AppState,
-    org: &Org,
-    space: &str,
-    did: &str,
-    entry: &index::ListEntry,
-) -> Result<(), String> {
-    let handle = match state.resolver.resolve_did(&org.super_admin).await {
-        Ok(identity) => identity.handle,
-        Err(_) => org.super_admin.clone(),
-    };
-    let acting = admin::Acting::new(state, &org.super_admin, &handle).await?;
-    let mut bound = json!({
-        "space": space,
-        "did": did,
-        "handle": entry.handle,
-        "onBehalfOf": entry.by,
-    });
-    if let Some(role) = &entry.role {
-        bound["role"] = json!(role);
-    }
-    acting
-        .create_in(state, &SpaceUri::admin(&org.did).to_string(), index::LIST_ENTRY, None, bound)
-        .await?;
-    Ok(())
-}
-
 /// The role a list row gives, for someone it matched only at join time (a
-/// handle that resolved then, or a verified email): a role record like an
-/// import's, written as the conference's super admin and assigned by the
-/// owner who imported the row, so it counts only while they're an owner and
-/// the list is on.
+/// verified email): a role record like an import's, written as the
+/// conference's super admin and assigned by the owner who imported the row,
+/// so it counts only while they're an owner and the list is on.
 async fn give_list_role(
     state: &AppState,
-    org: &Org,
     conference: &Conference,
     did: &str,
     entry: &index::ListEntry,
@@ -810,27 +656,19 @@ async fn give_list_role(
     if conference.roles.contains_key(did) {
         return Ok(());
     }
-    let mut value = json!({ "subject": did, "role": role, "assignedBy": entry.by, "via": "list",
-                            "since": index::iso(now_ms() as u64 * 1000) });
-    // A handle-only row's role names the row, so it's this person's from
-    // now on even if its binding isn't written.
-    if entry.did.is_none()
-        && let Some(handle) = &entry.handle
-    {
-        value["listHandle"] = json!(handle);
-    }
+    let value = json!({ "subject": did, "role": role, "assignedBy": entry.by, "via": "list",
+                        "since": index::iso(now_ms() as u64 * 1000) });
     let writer = conference.super_admin();
     let handle = match state.resolver.resolve_did(writer).await {
         Ok(identity) => identity.handle,
         Err(_) => writer.to_owned(),
     };
     let acting = admin::Acting::new(state, writer, &handle).await?;
-    put_role(state, org, conference, &acting, did, value).await
+    acting.put_in(state, conference.space(), index::ROLE, did, value).await
 }
 
 /// Admits someone with a `member` record written as the super admin: for the
-/// admissions that can't be derived from records (a verified email, a list
-/// handle that resolved only at join time).
+/// one admission that can't be derived from records, a verified email.
 async fn admit_by_super_admin(
     state: &AppState,
     org: &Org,
@@ -948,7 +786,7 @@ async fn try_email_step(state: &AppState, id_hash: &str, space: &str) -> Result<
     }
     // The role its row gives, before the admission, so they join with it.
     if let Some(entry) = matched.iter().find(|e| e.role.is_some()) {
-        give_list_role(state, &org, conference, &session.did, entry).await?;
+        give_list_role(state, conference, &session.did, entry).await?;
     }
     admit_by_super_admin(state, &org, space, &session.did, "email").await
 }

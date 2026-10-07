@@ -417,8 +417,9 @@ host) could rebuild them. Our database is only an index of those records.
     role. Automatic admissions aren't written here (see "The intake space")
   - `app.eventside.admin.ban {space, subject}`: owners and the super admin
   - `app.eventside.admin.code {space, codeHash, subject?, expires?,
-    maxUses?}` and `app.eventside.admin.listEntry {space, did? | handle?,
-    emailHmac?, role?}`: owners and the super admin. Codes are hashed, and
+    maxUses?}` and `app.eventside.admin.listEntry {space, did? (with the
+    handle it was resolved from) | emailHmac?, role?}`: owners and the super
+    admin. Codes are hashed, and
     emails are HMAC'd with a server key, so neither is readable even inside
     the admin space.
 - **Precedence, so no tiebreak is needed:**
@@ -427,11 +428,18 @@ host) could rebuild them. Our database is only an index of those records.
   - **The super admin's records always win.** No other admin's record can
     contradict them. For example, a staff member can't admit someone the
     super admin banned, or change a space's policy.
-  - Among other admins, a ban beats an admission, and otherwise the most
-    recent record (by commit `repoRev`) for the same space and person
-    stands.
+  - **Membership decisions rank by who made them** (revised in the
+    simplification of 2026-10-07): the super admin, then owners, then
+    staff. A decision (admitting, removing, denying) stands against later
+    ones of a lower rank that contradict it, so staff can't override an
+    owner's or the super admin's decision, nor owners the super admin's.
+    Within a rank, the most recent record (by commit `repoRev`) stands. A
+    ban beats any admission but the super admin's. Staff can still invite:
+    the people they admit get full membership.
   - A record counts only while its author is an admin, and only within
-    their role.
+    their role. When the super admin removes an admin, `--keep-admissions`
+    first writes her own admissions for everyone who's a member only on
+    their say-so (TC-58).
 - **Who writes what, in practice:**
   - The **super admin** connects once (`eventside admin connect`). Our
     server writes the organization-wide records (admins, spaces, policies)
@@ -468,7 +476,7 @@ us:
 - **Automatic admissions are derived, not written.** The indexer admits
   someone whose join record (judged by its commit `repoRev`) matches a rule
   in the admin space: a valid `code` record (with expiry and uses counted
-  in commit order), a `listEntry` by DID or handle, or the space being open.
+  in commit order), a `listEntry` by DID, or the space being open.
   So a registration rush is the attendees' own writes, not writes to the
   super admin's PDS.
 - **Requests** are join records that no rule admits. They're pending until
@@ -629,10 +637,11 @@ conference. That's how an invite-only conference's link works. The link is
 
 **Matching the attendee list:**
 
-- Handle rows are resolved to DIDs when they're imported. A handle that
-  doesn't resolve yet is kept and retried at join time, and bound to the
-  DID it first resolves to. A handle transferred later doesn't carry the
-  place on the list with it.
+- Handle rows are resolved to DIDs when they're imported, and stored by
+  DID. A handle transferred later doesn't carry the place on the list with
+  it. A handle that doesn't resolve is reported in the import's output and
+  skipped, with nothing stored about its row; the operator imports it again
+  once it resolves (simplification of 2026-10-07).
 - Email rows are stored as `HMAC-SHA256(server key, lowercased email)`, never
   in plain text.
 - **The email step.** `emailNeeded` → the PWA starts an `email` sign-in, with
@@ -1141,7 +1150,8 @@ the red tests chose them, and the implementation follows them:
   line of stdout. The commands:
   - `org create --super-admin <handle> --recovery-key <did:key>` → `{did}`
   - `org show --org <did>` → `{admins: [{did, role, connected}]}`
-  - `org admin add|remove <handle> --org <did> [--role owner|staff]`
+  - `org admin add <handle> --org <did> [--role owner|staff]`, and
+    `org admin remove <handle> --org <did> [--keep-admissions]` (TC-58)
   - `connect <handle>`: it prints a URL to open, and when the browser
     finishes, the page says "Connected, you can close this tab" and the CLI
     exits 0. `ADMIN_OAUTH_SCOPES` overrides `ADMIN_SCOPES`. An outdated grant
@@ -1155,7 +1165,9 @@ the red tests chose them, and the implementation follows them:
   - `codes issue --conference <space> (--shared <code> | --personal)
     [--expires <iso>] [--max-uses <n>]` → `{codes: […]}`. Codes are unique
     across conferences, since a code identifies its conference.
-  - `list import <csv> --conference <space>`, with columns `handle,email,role`
+  - `list import <csv> --conference <space>`, with columns `handle,email,role`.
+    Handles that don't resolve are listed in its output (`unresolved` with
+    `--json`) and skipped.
   - `requests list --conference <space>` → `{requests: [{did}]}`, and
     `requests approve|deny <handle> --conference <space>`
   - `member add|remove|ban <handle> --conference <space>`, and
@@ -1226,7 +1238,7 @@ the build chose:
   revs, not from `createdAt` or our clock.
 - **Admin member records are decisions.** `app.eventside.admin.member`
   records are append-only decisions with TID rkeys. A removal is a decision
-  with `until`; the latest decision about a person stands (bans aside, see
+  with `until`; decisions rank by who made them (see "Precedence" and
   TC-52).
 - **Codes are HMAC'd with the server key.** Join codes are stored only as
   HMACs under the server's secret (`AUTHORITY_KEY_SECRET`, or the generated
@@ -1333,12 +1345,7 @@ at the PR alongside round 1's:
   its commit, but never more than 60 seconds before our host first saw it
   (an intake record, as before, never before). The slack keeps an ordinary
   write notification's delay from moving a record into a later period.
-- **List handles are bound when they first resolve.** A list entry with only
-  a handle that names someone joining (their own handle, checked both ways)
-  gets a bound entry with their DID, written by the super admin with
-  `onBehalfOf` the owner who imported it, which counts only while that
-  owner is one. The join is then an ordinary list join, and the handle
-  can't later admit whoever holds it next.
+- **List handles are bound when they first resolve.** *(Removed in the simplification of 2026-10-07: list handles resolve at import, so there are no handle-only rows to bind.)*
 - **Revocations are retried.** A revocation not yet delivered to every
   writer's PDS stays in an outbox (`space_credentials.revocation_sent_at`,
   migration 0004) that the server sends again every 30 seconds until it's
@@ -1355,7 +1362,9 @@ at the PR alongside rounds 1 and 2:
   ignored, until she decides again or the person acts themselves (joins,
   asks again, leaves). Email matches and admin periods are nobody's verdict,
   and end her say like the person's own join. The CLI reports such an
-  ignored decision as a failure.
+  ignored decision as a failure. (Generalized to ranks in the
+  simplification of 2026-10-07: owners' decisions stand against staff the
+  same way.)
 - **The super admin is always an owner.** `org admin add` refuses to make
   her staff, and the index treats her as an owner whatever an `admin`
   record says. `org admin remove` of her (allowed once there's another
@@ -1383,9 +1392,9 @@ at the PR alongside rounds 1 and 2:
   the earlier role (and wasn't an admin for) is no longer shown; and a
   current admin with no `orgAdmin` mark counts from their `admin` record.
 - **List roles come with late matches.** A list row's role is given when
-  the row matches only at join time (a handle bound then, or a verified
-  email): a role record from the conference's super admin, `assignedBy`
-  the importing owner, `via: "list"`, as an import's.
+  the row matches only at join time (a verified email; handles now match
+  at import): a role record from the conference's super admin,
+  `assignedBy` the importing owner, `via: "list"`, as an import's.
 - **One record-judging rule.** `conference::rules::{may_write,
   record_counts}` is what `listRecords` serves by, for later features to
   judge ingest by. It dates a record by its commit, clamped to 60 seconds
@@ -1424,10 +1433,7 @@ at the PR alongside rounds 1 to 3:
   event and sidecar records.
 - **`member remove` and `ban` take a role away only once the person is
   out**, so a removal the super admin's decision overrides leaves it be.
-- **A late-resolving list handle is bound however the person gets in**:
-  whenever the list is on and they aren't already in by their role or the
-  list, their own handle is checked against the unbound rows, also when a
-  code or an open conference admits them or they're already a member.
+- **A late-resolving list handle is bound however the person gets in.** *(Removed in the simplification of 2026-10-07: list handles resolve at import, so there are no handle-only rows to bind.)*
 - **Revocation delivery per PDS** moves to another writer only when the
   refusal is about the writer (`RepoNotFound`, `AccountDeactivated` and
   the like, or a 403 "not hosted here"), tries at most 3 writers, starts
@@ -1448,13 +1454,7 @@ at the PR alongside rounds 1 to 4:
   around, so a run of gone accounts can't keep a PDS from hearing of
   revocations. The cursor isn't persisted: after a restart it starts over,
   and the walk takes at most a few passes again.
-- **Binding a late list handle is best-effort when something else lets
-  the person in.** It's written as the super admin, so a failure (her PDS
-  down) only fails the join when the list is the only way in; otherwise
-  they're let in and the binding is tried again on a later join. It's
-  skipped only when the person is already on the list by their DID, not
-  when a role admits them, so the row can't later admit the handle's next
-  holder.
+- **Binding a late list handle is best-effort.** *(Removed in the simplification of 2026-10-07: list handles resolve at import, so there are no handle-only rows to bind.)*
 - **Only the super admin's own admission lifts another owner's ban.** Her
   admin marks (`orgAdmin`, written by `org admin add` for every conference)
   and email matches don't, as they're neutral in the timeline too. `org
@@ -1471,10 +1471,7 @@ at the PR alongside rounds 1 to 4:
 **Review round 6 design notes (2026-10-06).** The round-6 fixes, to raise
 at the PR alongside rounds 1 to 5:
 
-- **Binding a late list handle writes the role first.** The row's role (as
-  the conference's super admin) is written before the bound `listEntry`
-  (as the organization's), as the email step already did, since once
-  someone is on the list by DID the binding isn't tried again.
+- **Binding a late list handle writes the role first.** *(Removed in the simplification of 2026-10-07: list handles resolve at import, so there are no handle-only rows to bind.)*
 - **Intake spaces keep only joins and leaves.** Anyone can write to an
   intake space, so the index keeps only `app.eventside.intake.join` and
   `.leave` records there, of at most 4 KiB each and at most 1,000 per
@@ -1529,12 +1526,7 @@ at the PR alongside rounds 1 to 6:
   admins made before marks); for everyone else the timeline suspends a ban
   during an admin period and holds it outside one, whether or not they're
   still an admin. A current admin is never in `banned`.
-- **A handle row's list role claims the row.** The role a handle-only list
-  row gives is written with `listHandle`, the row's handle. The holder of
-  such a role is on the list by that row, and the row no longer matches
-  anyone else, so if the binding after the role fails, the person is let in
-  by the role (the join re-judges against the reloaded index rather than
-  answering failed) and the handle's next holder isn't.
+- **A handle row's list role claims the row.** *(Removed in the simplification of 2026-10-07: list handles resolve at import, so there are no handle-only rows to bind.)*
 - **Paging is checked after membership.** `listRecords` parses its cursor
   and limit only for members, so an invite-only conference stays a 404 to
   others. `limit` on `listRecords` and `listMembers` is parsed by us, so a
@@ -1564,12 +1556,7 @@ at the PR alongside rounds 1 to 7:
   for ever. Reindex reads intake repos uncapped, since it replaces what was
   there with what it read (bounded by the page loop, and the stored
   records by the per-repo limit).
-- **A list row held by a role's claim is bound before the role changes.**
-  `member role` (to another role or `none`), and `member remove` or `ban`
-  when they take the role, first write the row's binding (the same list
-  entry a join writes, as the super admin on behalf of the importing
-  owner) when the person holds a handle-only row only by their role's
-  `listHandle`. The claim then no longer depends on the role record.
+- **A list row held by a role's claim is bound before the role changes.** *(Removed in the simplification of 2026-10-07: list handles resolve at import, so there are no handle-only rows to bind.)*
 - **Memos make room a tenth at a time.** The revocation memos (gone
   writers, resting PDSes, last writer per PDS) share one helper: a full memo
   forgets the expired, then the tenth soonest to expire (least recently
@@ -1578,24 +1565,13 @@ at the PR alongside rounds 1 to 7:
 **Review round 9 design notes (2026-10-07).** The round-9 fixes, to raise
 at the PR alongside rounds 1 to 8:
 
-- **Every role write goes through one helper, `conference::put_role`.**
-  When the person holds a handle-only list row only by their current
-  role's claim, a new list role (`via: list`, from `list import` or a join)
-  carries the claim on (`listHandle`), and any other role (`member role`,
-  `org admin add`) is written only after the row is bound. A handover
-  copies role records verbatim (claim included), and `conference create`
-  writes roles before the conference has a list. Taking a role away
-  (`member role --role none`, `member remove`/`ban`) still binds first with
-  `keep_list_claim`.
+- **Every role write goes through one helper, `conference::put_role`.** *(Removed in the simplification of 2026-10-07: list handles resolve at import, so there are no handle-only rows to bind.)* Role records are written directly again.
 - **A removal or ban that takes a role checks first.** It resolves the
-  conference super admin's session and binds the claimed row before the
-  decision is written, so a super admin who isn't connected fails the
-  command with nothing written. (Corrected in round 10: that check proves
-  only that the conference super admin has a session, not that their PDS
-  is up. With it down, the decision was written and the role kept; round 10
-  undoes the decision instead.) If the super admin's
-  own decision then keeps the person in, the binding is harmless: it only
-  makes durable the row they already held.
+  conference super admin's session before the decision is written, so a
+  super admin who isn't connected fails the command with nothing written.
+  (Corrected in round 10: that check proves only that the conference super
+  admin has a session, not that their PDS is up. With it down, the decision
+  was written and the role kept; round 10 undoes the decision instead.)
 - **Reindex reads intake repos capped, like a sync.** A read cut short at
   the caps deletes only the records up to where it stopped (`rev <=` its
   last whole commit) and keeps the rest as they were, and sets the repo's
@@ -1615,19 +1591,50 @@ raise at the PR alongside rounds 1 to 9:
   owner-given role could push someone out of a conference without a list,
   or demote them. The import ends with the same revocation pass as other
   commands.
-- **A list row's claim moves only onto a role from the row's importer.**
-  `put_role` carries `listHandle` onto a list role only when its
-  `assignedBy` is the owner who imported the row. Another owner's list role
-  is written after the row is bound, because that role goes when its owner
-  stops being an admin. `org admin remove` also binds any row held by a
-  role it's about to delete, before writing anything. That covers claims
-  round 9's code already moved.
+- **A list row's claim moves only onto a role from the row's importer.** *(Removed in the simplification of 2026-10-07: list handles resolve at import, so there are no handle-only rows to bind.)*
 - **A removal or ban whose role can't be taken is undone.** If deleting
   the role fails after the decision is written (say the conference super
   admin's PDS is down), the decision record is deleted again and the
   command fails with "nothing was changed". If the undo fails too, the
   error says the person is out but still holds their role, and to run the
   command again.
+
+**Simplification (2026-10-07).** After round 10, the user chose to
+simplify the two pieces of machinery later rounds kept finding holes in,
+then review again (rounds 11 to 15). What changed:
+
+- **List handles resolve at import.** `list import` resolves every handle
+  row before writing anything, and stores it by DID (with the handle, for
+  people reading the record). A row whose handle doesn't resolve is listed
+  in the command's output ("Skipped these handles…", `unresolved` with
+  `--json`) and skipped: nothing about it is stored, and the operator
+  imports it again once it resolves. A bad handle or role in any row
+  refuses the whole import with nothing written. Gone with it: handle-only
+  rows, binding at join time (`onBehalfOf` entries), list claims on role
+  records (`listHandle`), `put_role`, `keep_list_claim`, and the round 4 to
+  10 notes about them. A `listEntry` counts only by its `did` (or its
+  `emailHmac`), and only while the owner who wrote it is one. The email
+  step still gives a matched row's role, as before.
+- **Membership decisions rank by who made them.** The super admin, then
+  owners, then staff. In a person's timeline, a decision stands against
+  later ones of a lower rank that contradict it, until someone of its rank
+  or higher decides again, or the person acts themselves (joins, asks
+  again, leaves). Within a rank, the latest decision stands. That's round
+  3's rule for the super admin, applied to owners too, and denials count
+  from every admin, not only the super admin. Bans are unchanged (owners
+  and the super admin ban; only the super admin's admission lifts another
+  owner's ban). Staff can still invite: the people they admit (by
+  `member add` or by approving a request) are full members. The CLI reports an overridden decision as a failure:
+  "a decision about them by an owner or the super admin stands, and
+  {admin} can't override it".
+- **A former admin's decisions stop counting (TC-53), unless kept
+  (TC-58).** `org admin remove <handle> --keep-admissions` works out who's
+  a member now only on the departing admin's say-so (the organization as
+  it would be without their `admin` record, compared with now), writes
+  the remover's own `member` record for each (`via: "kept"`, `keptFrom`
+  the departing admin), and then removes the admin. Those people are then
+  members by the super admin's decision, which only she can override. The
+  roles the departing admin assigned still go, as before.
 
 **Red-test gate (2026-10-06):** the user approved the red tests and the
 surfaces they pin (see Build notes), with these contract changes:
