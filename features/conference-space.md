@@ -1,5 +1,5 @@
 ---
-status: blocked
+status: implementing
 impact: cross-cutting
 depends-on: [attendee-sign-in]
 branch: feature/conference-space
@@ -2039,13 +2039,20 @@ Dropped in design review round 3: joining no longer writes to the organization's
   conference to open
 - **Then** Bram is still banned, and the conference isn't open
 
-### TC-52: Between other admins, a ban wins and otherwise the latest decision stands
+### TC-52: Staff can't override an owner's decision
 
-- **Given** Pim, a staff admin, and Kees, an owner
+(Reworded 2026-10-07 with the user's approval; see the review log.)
+
+- **Given** Pim and Lotte, staff admins, and Kees, an owner
 - **When** Pim admits Bram and Kees then bans him
 - **Then** Bram is banned
-- **When** Kees removes Ana and Pim later admits her again
-- **Then** Ana is a member
+- **When** Kees removes Ana and Pim then admits her
+- **Then** Ana still isn't a member
+- **When** Kees admits her again
+- **Then** she's a member
+- **Given** Joost joined with a code, so no admin decided about him
+- **When** Lotte removes Joost and Pim then admits him again
+- **Then** he's a member: between staff, the latest decision stands
 
 ### TC-53: A former admin's decisions stop counting
 
@@ -2082,6 +2089,15 @@ Dropped in design review round 3: joining no longer writes to the organization's
 - **When** he asks to join again
 - **Then** his new request is pending
 - **And** if he had been banned instead, it would be refused
+
+### TC-58: An owner can keep the people a departing admin let in
+
+(Added 2026-10-07 with the user's approval.)
+
+- **Given** Pim, a staff admin, admitted Bram
+- **When** Olga removes Pim as an admin and keeps Pim's admissions
+- **Then** Bram is still a member, now on Olga's say-so
+- **And** without that choice, TC-53 applies
 
 ### Regressions
 
@@ -2730,3 +2746,14 @@ review rounds (through round 15), after simplifying:
 Frozen TC-52's last step (Pim, staff, re-admits Ana after Kees, an owner,
 removed her, and she's a member) contradicts the second point. The
 replacement wording needs the user's approval before the build resumes.
+
+**Approved (the user, 2026-10-07):** TC-52 is reworded as above, and TC-58 is
+new. The `frozen-tests` check now warns rather than fails on changed frozen
+files (main, 30c53bf), so the TC-52 change lands as its own commit,
+`test(conference-space): TC-52 staff can't override an owner (approved)`,
+changing only TC-52's test in `tests/integration/conference-admins.test.ts`.
+TC-58 is a new test, shown red before it's implemented. TC-53 is unchanged.
+`org admin remove <handle> --keep-admissions` writes the remover's own
+`member` records for everyone admitted only on the departing admin's say-so,
+then removes them. The build then resumes with the simplification above and
+review rounds 11 to 15.
