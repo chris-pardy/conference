@@ -264,13 +264,53 @@ pub async fn list_my_conferences(State(state): State<AppState>, user: CurrentUse
 pub struct RecordsParams {
     conference: String,
     collection: String,
+    limit: Option<i64>,
+    cursor: Option<String>,
+}
+
+/// How many records a page of `listRecords` has, unless asked for fewer.
+const RECORDS_PAGE: i64 = 100;
+/// The most records a page of `listRecords` has.
+const RECORDS_PAGE_MAX: i64 = 500;
+
+/// A record's place in `listRecords`'s order, newest first: when it counts
+/// from, then its revision, author and key, so no two share one.
+type Place = (u64, String, String, String);
+
+fn place_cursor((us, rev, repo, rkey): &Place) -> String {
+    format!("{us} {rev} {repo} {rkey}")
+}
+
+fn parse_place(cursor: &str) -> Option<Place> {
+    let mut parts = cursor.split(' ');
+    let (Some(us), Some(rev), Some(repo), Some(rkey), None) =
+        (parts.next(), parts.next(), parts.next(), parts.next(), parts.next())
+    else {
+        return None;
+    };
+    Some((us.parse().ok()?, rev.to_owned(), repo.to_owned(), rkey.to_owned()))
+}
+
+/// One page of items in their places: those after the cursor, newest first,
+/// at most `limit`, and the cursor for the next page if there's more.
+fn page_of<T>(
+    mut items: Vec<(Place, T)>,
+    after: Option<&Place>,
+    limit: usize,
+) -> (Vec<T>, Option<String>) {
+    items.retain(|(place, _)| after.is_none_or(|after| place < after));
+    items.sort_by(|a, b| b.0.cmp(&a.0));
+    let more = items.len() > limit;
+    items.truncate(limit);
+    let cursor = more.then(|| items.last().map(|(place, _)| place_cursor(place))).flatten();
+    (items.into_iter().map(|(_, item)| item).collect(), cursor)
 }
 
 /// `app.eventside.conference.listRecords`: a collection's records in the
 /// conference space, as members are served them. A record counts only if its
 /// commit fell inside one of its author's membership periods, and only if the
 /// rules let its author write that collection. Role and rules records count
-/// only from the conference's super admin.
+/// only from the conference's super admin. Paged by `limit` and `cursor`.
 pub async fn list_records(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -286,6 +326,12 @@ pub async fn list_records(
         Ok(None) => return not_found(),
         Err(why) => return failed(why),
     };
+    let after = match params.cursor.as_deref().map(parse_place) {
+        Some(None) => return xrpc_error(StatusCode::BAD_REQUEST, "InvalidRequest", "Bad cursor."),
+        Some(Some(place)) => Some(place),
+        None => None,
+    };
+    let limit = params.limit.unwrap_or(RECORDS_PAGE).clamp(1, RECORDS_PAGE_MAX) as usize;
     let conference = org.conference(&row.space).expect("loaded with its conference");
     if !conference.is_member(&user.did) {
         // An invite-only conference doesn't exist for anyone outside it.
@@ -312,7 +358,7 @@ pub async fn list_records(
         Ok(rows) => rows,
         Err(err) => return failed(err),
     };
-    let mut records: Vec<(u64, String, Value)> = rows
+    let counted: Vec<(Place, (Option<String>, String))> = rows
         .into_iter()
         .filter_map(|(repo, rkey, rev, cid, value, seen_at)| {
             let seen_us = seen_at.map(|ms| ms.max(0) as u64 * 1000);
@@ -324,20 +370,33 @@ pub async fn list_records(
                 tid_micros(&rev)?,
                 seen_us,
             )?;
+            Some(((us, rev, repo, rkey), (cid, value)))
+        })
+        .collect();
+    // Newest first, by when each counts from (not the time its PDS claims).
+    // Only the page's values are parsed.
+    let (page, cursor) = page_of(
+        counted.into_iter().map(|(place, item)| (place.clone(), (place, item))).collect(),
+        after.as_ref(),
+        limit,
+    );
+    let records: Vec<Value> = page
+        .into_iter()
+        .filter_map(|((_, _, repo, rkey), (cid, value))| {
             let value: Value = serde_json::from_str(&value).ok()?;
-            let record = json!({
+            Some(json!({
                 "uri": format!("{}/{repo}/{}/{rkey}", row.space, params.collection),
                 "author": repo,
                 "cid": cid,
                 "value": value,
-            });
-            Some((us, rev, record))
+            }))
         })
         .collect();
-    // Newest first, by when each counts from (not the time its PDS claims).
-    records.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
-    Json(json!({ "records": records.into_iter().map(|(_, _, r)| r).collect::<Vec<_>>() }))
-        .into_response()
+    let mut out = json!({ "records": records });
+    if let Some(cursor) = cursor {
+        out["cursor"] = json!(cursor);
+    }
+    Json(out).into_response()
 }
 
 #[derive(serde::Deserialize)]
@@ -575,23 +634,37 @@ async fn write_intake(
 }
 
 /// The conference a code belongs to: only the organizations with a code
-/// record by that HMAC are loaded, so a wrong code loads none.
+/// record by that HMAC in their admin space are loaded, so a wrong code loads
+/// none.
 async fn by_code(state: &AppState, code_hash: &str) -> Result<Option<Row>, String> {
+    match code_conference(state, code_hash).await? {
+        Some(space) => row(state, &space).await,
+        None => Ok(None),
+    }
+}
+
+/// The space of the conference whose code (by HMAC) this is, if any.
+pub async fn code_conference(state: &AppState, code_hash: &str) -> Result<Option<String>, String> {
     let spaces = sqlx::query_scalar::<_, String>(
         "SELECT DISTINCT space FROM space_records WHERE code_hmac = $1 AND collection = $2 \
-         AND value IS NOT NULL",
+         AND space LIKE $3 AND value IS NOT NULL",
     )
     .bind(code_hash)
     .bind(index::CODE)
+    .bind(format!("at://%/space/{}/self", crate::spacehost::ADMIN_TYPE))
     .fetch_all(&state.db)
     .await
     .map_err(|e| e.to_string())?;
-    let orgs: std::collections::BTreeSet<String> =
-        spaces.iter().filter_map(|s| SpaceUri::parse(s)).map(|s| s.authority).collect();
+    let orgs: BTreeSet<String> = spaces
+        .iter()
+        .filter_map(|s| SpaceUri::parse(s))
+        .filter(|s| s.kind == crate::spacehost::ADMIN_TYPE)
+        .map(|s| s.authority)
+        .collect();
     for org in orgs {
         let Some(org) = index::load(state, &org).await? else { continue };
         if let Some(conference) = org.conferences.values().find(|c| c.has_code(code_hash)) {
-            return row(state, conference.space()).await;
+            return Ok(Some(conference.space().to_owned()));
         }
     }
     Ok(None)
@@ -618,6 +691,11 @@ async fn unbound_listed<'a>(
 /// to: an entry with both, written as the super admin on behalf of the owner
 /// who imported the handle, so it counts only while they're an owner, and a
 /// handle that later changes hands doesn't take the place with it.
+///
+/// The role the row gives is written first (as the conference's super admin,
+/// who may be someone else), and the binding last: once someone is on the
+/// list by DID the binding isn't tried again, so a role that failed after it
+/// would never be given.
 async fn bind_list_entry(
     state: &AppState,
     org: &Org,
@@ -625,6 +703,7 @@ async fn bind_list_entry(
     did: &str,
     entry: &index::ListEntry,
 ) -> Result<(), String> {
+    give_list_role(state, conference, did, entry).await?;
     let space = conference.space();
     let handle = match state.resolver.resolve_did(&org.super_admin).await {
         Ok(identity) => identity.handle,
@@ -643,7 +722,7 @@ async fn bind_list_entry(
     acting
         .create_in(state, &SpaceUri::admin(&org.did).to_string(), index::LIST_ENTRY, None, bound)
         .await?;
-    give_list_role(state, conference, did, entry).await
+    Ok(())
 }
 
 /// The role a list row gives, for someone it matched only at join time (a
@@ -961,4 +1040,29 @@ pub async fn public_record(state: &AppState, uri: &str) -> Result<Value, String>
     }
     let record: Value = crate::net::read_json(res).await?;
     record.get("value").cloned().ok_or_else(|| format!("{uri} has no value"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn records_are_paged_newest_first_by_a_cursor() {
+        let place =
+            |us: u64, rkey: &str| (us, "3rev".to_owned(), "did:plc:a".to_owned(), rkey.to_owned());
+        let items: Vec<(Place, u64)> = [(5, "e"), (1, "a"), (3, "c"), (3, "d"), (2, "b")]
+            .map(|(us, k)| (place(us, k), us))
+            .to_vec();
+        let (first, cursor) = page_of(items.clone(), None, 2);
+        assert_eq!(first, [5, 3]);
+        let cursor = cursor.expect("there's more");
+        let after = parse_place(&cursor).expect("a cursor parses");
+        assert_eq!(after, place(3, "d"));
+        let (second, cursor) = page_of(items.clone(), Some(&after), 2);
+        assert_eq!(second, [3, 2], "the other record of the same time isn't skipped");
+        let (third, cursor) = page_of(items, Some(&parse_place(&cursor.unwrap()).unwrap()), 2);
+        assert_eq!(third, [1]);
+        assert_eq!(cursor, None, "the last page");
+        assert_eq!(parse_place("12 3rev did:plc:a"), None);
+    }
 }

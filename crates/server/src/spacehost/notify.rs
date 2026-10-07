@@ -460,10 +460,11 @@ async fn send(state: &AppState, space: &str, jtis: &[String]) -> Result<(), Stri
 
 /// Sends revocations to each writer's PDS, addressed to one of its writers.
 /// If a PDS refuses that one (its account was deleted or moved, say), the
-/// next writer on it is tried, up to [`WRITERS_PER_PDS`], so one gone
-/// account can't keep a PDS from ever hearing of revocations. Any other
-/// refusal would be the same for every writer, so it isn't sent again; a
-/// PDS that doesn't take revocations at all is left alone for a while.
+/// writer is remembered as gone there for a while, and the next writer on it
+/// is tried, up to [`WRITERS_PER_PDS`] a pass, so one gone account can't keep
+/// a PDS from ever hearing of revocations. Any other refusal would be the
+/// same for every writer, so it isn't sent again; a PDS that doesn't take
+/// revocations at all is left alone for a while.
 async fn deliver(state: &AppState, space: &str, jtis: &[String]) -> Result<(), String> {
     let mut by_pds: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for writer in sync::writers(state, space).await? {
@@ -480,25 +481,25 @@ async fn deliver(state: &AppState, space: &str, jtis: &[String]) -> Result<(), S
         }
         let mut tried = Vec::new();
         let mut delivered = false;
-        let mut all_writers_refused = false;
-        let last =
-            last_writers().lock().expect("the writer memo isn't poisoned").get(&pds).cloned();
-        let order = writers_to_try(&pds, writers);
-        // The writers after the last one taken, which the next pass moves past.
-        let fresh = order.iter().filter(|w| Some(*w) != last.as_ref()).count();
+        let order = writers_to_try(&pds, space, writers);
+        if order.is_empty() {
+            failures.push(format!("every writer on {pds} is gone there for now"));
+            continue;
+        }
         for writer in order {
             match send_revocations(state, space, &pds, &writer, jtis).await {
                 Ok(()) => {
-                    remember_writer(&pds, &writer);
+                    remember_writer(&pds, space, &writer);
                     delivered = true;
                     break;
                 }
                 Err(failure) => {
-                    let kind = failure.kind;
                     tried.push(failure.why);
-                    all_writers_refused = kind == Refusal::Writer;
-                    match kind {
-                        Refusal::Writer => continue,
+                    match failure.kind {
+                        Refusal::Writer => {
+                            mark_gone(&pds, space, &writer);
+                            continue;
+                        }
                         Refusal::Unsupported => rest(&pds),
                         Refusal::Other => {}
                     }
@@ -507,10 +508,6 @@ async fn deliver(state: &AppState, space: &str, jtis: &[String]) -> Result<(), S
             }
         }
         if !delivered {
-            if all_writers_refused {
-                // The next pass starts on the writers after these.
-                move_on(&pds, fresh);
-            }
             failures.push(tried.join("; "));
         }
     }
@@ -522,29 +519,52 @@ async fn deliver(state: &AppState, space: &str, jtis: &[String]) -> Result<(), S
 const WRITERS_PER_PDS: usize = 10;
 /// How long a PDS that doesn't take revocations is left alone.
 const REST_MS: i64 = 10 * 60 * 1000;
+/// How long a writer a PDS refused as gone is skipped there.
+const GONE_MS: i64 = 60 * 60 * 1000;
 
 type Memo<T> = std::sync::Mutex<std::collections::HashMap<String, T>>;
 
-/// The writer each PDS last took revocations for.
+/// A memo key for a writer list: one PDS's writers in one space.
+fn pds_in(pds: &str, space: &str) -> String {
+    format!("{pds} {space}")
+}
+
+/// The writer each PDS last took a space's revocations for.
 fn last_writers() -> &'static Memo<String> {
     static MEMO: std::sync::OnceLock<Memo<String>> = std::sync::OnceLock::new();
     MEMO.get_or_init(Default::default)
 }
 
-/// Where in its writers the next pass starts on each PDS, after passes on
-/// which every writer tried was refused.
-fn next_writers() -> &'static Memo<usize> {
-    static MEMO: std::sync::OnceLock<Memo<usize>> = std::sync::OnceLock::new();
+/// Writers a PDS refused as gone, by PDS and writer, until when they're
+/// skipped there.
+fn gone() -> &'static Memo<i64> {
+    static MEMO: std::sync::OnceLock<Memo<i64>> = std::sync::OnceLock::new();
     MEMO.get_or_init(Default::default)
 }
 
-fn move_on(pds: &str, by: usize) {
-    let mut memo = next_writers().lock().expect("the writer memo isn't poisoned");
-    if memo.len() >= 10_000 {
-        memo.clear();
+/// Remembers a writer as gone from a PDS, and forgets them as the writer it
+/// last took a space's revocations for.
+fn mark_gone(pds: &str, space: &str, writer: &str) {
+    {
+        let mut memo = gone().lock().expect("the gone memo isn't poisoned");
+        if memo.len() >= 10_000 {
+            memo.clear();
+        }
+        memo.insert(format!("{pds} {writer}"), now_ms() + GONE_MS);
     }
-    let at = memo.entry(pds.to_owned()).or_default();
-    *at = at.wrapping_add(by);
+    let mut last = last_writers().lock().expect("the writer memo isn't poisoned");
+    let key = pds_in(pds, space);
+    if last.get(&key).is_some_and(|w| w == writer) {
+        last.remove(&key);
+    }
+}
+
+fn is_gone(pds: &str, writer: &str) -> bool {
+    gone()
+        .lock()
+        .expect("the gone memo isn't poisoned")
+        .get(&format!("{pds} {writer}"))
+        .is_some_and(|until| *until > now_ms())
 }
 
 /// When each PDS that doesn't take revocations is tried again.
@@ -553,12 +573,12 @@ fn resting() -> &'static Memo<i64> {
     MEMO.get_or_init(Default::default)
 }
 
-fn remember_writer(pds: &str, writer: &str) {
+fn remember_writer(pds: &str, space: &str, writer: &str) {
     let mut memo = last_writers().lock().expect("the writer memo isn't poisoned");
     if memo.len() >= 10_000 {
         memo.clear();
     }
-    memo.insert(pds.to_owned(), writer.to_owned());
+    memo.insert(pds_in(pds, space), writer.to_owned());
 }
 
 fn rest(pds: &str) {
@@ -575,24 +595,19 @@ fn resting_until(pds: &str) -> Option<String> {
     (until > now_ms()).then(|| crate::spacehost::index::iso(until as u64 * 1000))
 }
 
-/// The writers to address a PDS's revocations to, at most
-/// [`WRITERS_PER_PDS`]: the one it last took first, then the others from
-/// where the last pass refused by every writer left off, so no run of gone
-/// writers keeps a PDS from hearing of revocations for good.
-fn writers_to_try(pds: &str, mut writers: Vec<String>) -> Vec<String> {
-    let last = last_writers().lock().expect("the writer memo isn't poisoned").get(pds).cloned();
+/// The writers to address a PDS's revocations for a space to, at most
+/// [`WRITERS_PER_PDS`]: the one it last took first, then the others, leaving
+/// out those it refused as gone lately, so no run of gone writers keeps a
+/// PDS from hearing of revocations for good.
+fn writers_to_try(pds: &str, space: &str, mut writers: Vec<String>) -> Vec<String> {
+    writers.retain(|w| !is_gone(pds, w));
+    let last = last_writers()
+        .lock()
+        .expect("the writer memo isn't poisoned")
+        .get(&pds_in(pds, space))
+        .cloned();
     let first =
         last.and_then(|last| writers.iter().position(|w| *w == last)).map(|at| writers.remove(at));
-    if !writers.is_empty() {
-        let start = next_writers()
-            .lock()
-            .expect("the writer memo isn't poisoned")
-            .get(pds)
-            .copied()
-            .unwrap_or_default();
-        let len = writers.len();
-        writers.rotate_left(start % len);
-    }
     let mut order: Vec<String> = first.into_iter().chain(writers).collect();
     order.truncate(WRITERS_PER_PDS);
     order
@@ -732,30 +747,48 @@ mod tests {
     #[test]
     fn a_pds_hears_from_a_few_writers_the_one_it_last_took_first() {
         let pds = "https://pds.test.example";
+        let space = "at://did:plc:a/space/app.eventside.conference/1";
         let writers: Vec<String> = (0..10).map(|i| format!("did:plc:w{i}")).collect();
-        assert_eq!(writers_to_try(pds, writers.clone()), writers[..WRITERS_PER_PDS]);
-        remember_writer(pds, "did:plc:w7");
-        let order = writers_to_try(pds, writers);
+        assert_eq!(writers_to_try(pds, space, writers.clone()), writers[..WRITERS_PER_PDS]);
+        remember_writer(pds, space, "did:plc:w7");
+        let order = writers_to_try(pds, space, writers.clone());
         assert_eq!(order.len(), WRITERS_PER_PDS);
         assert_eq!(order[0], "did:plc:w7");
+        // Another space's writer list on the same PDS isn't affected.
+        let other = "at://did:plc:a/space/app.eventside.conference/2";
+        assert_eq!(writers_to_try(pds, other, writers)[0], "did:plc:w0");
     }
 
     #[test]
     fn a_pds_whose_first_writers_are_gone_hears_from_the_later_ones() {
         let pds = "https://gone-first.test.example";
+        let space = "at://did:plc:a/space/app.eventside.conference/1";
+        let other = "at://did:plc:a/space/app.eventside.conference/2";
         let writers: Vec<String> = (0..25).map(|i| format!("did:plc:w{i:02}")).collect();
-        let first = writers_to_try(pds, writers.clone());
+        let first = writers_to_try(pds, space, writers.clone());
         assert_eq!(first, writers[..WRITERS_PER_PDS]);
-        // Every one of them was refused: the next pass tries the next ones.
-        move_on(pds, first.len());
-        let second = writers_to_try(pds, writers.clone());
+        // Every one of them was refused as gone: the next pass, in this
+        // space or another with the same writers, tries the next ones.
+        for writer in &first {
+            mark_gone(pds, space, writer);
+        }
+        let second = writers_to_try(pds, other, writers.clone());
         assert_eq!(second, writers[WRITERS_PER_PDS..2 * WRITERS_PER_PDS]);
-        move_on(pds, second.len());
-        let third = writers_to_try(pds, writers.clone());
-        assert!(third.contains(&writers[24]), "the last writers get their turn");
-        assert!(third.contains(&writers[0]), "and it wraps around");
-        // Once one is taken, it's tried first.
-        remember_writer(pds, &writers[22]);
-        assert_eq!(writers_to_try(pds, writers)[0], "did:plc:w22");
+        for writer in &second {
+            mark_gone(pds, other, writer);
+        }
+        assert_eq!(writers_to_try(pds, space, writers.clone()), writers[2 * WRITERS_PER_PDS..]);
+        // Once one is taken, it's tried first; once it's gone, it isn't.
+        remember_writer(pds, space, &writers[22]);
+        assert_eq!(writers_to_try(pds, space, writers.clone())[0], "did:plc:w22");
+        mark_gone(pds, space, &writers[22]);
+        let after = writers_to_try(pds, space, writers.clone());
+        assert!(!after.contains(&writers[22]));
+        assert_eq!(after[0], "did:plc:w20");
+        // Everyone gone: nobody to try until they're tried again later.
+        for writer in &writers {
+            mark_gone(pds, space, writer);
+        }
+        assert!(writers_to_try(pds, space, writers).is_empty());
     }
 }

@@ -9,7 +9,7 @@ use serde_json::Value;
 
 use super::credential::{for_self, signed_headers};
 use super::index::{self, Org, Rec};
-use super::{CONFERENCE_TYPE, INTAKE_TYPE, SpaceUri};
+use super::{ADMIN_TYPE, CONFERENCE_TYPE, INTAKE_TYPE, SpaceUri};
 use crate::AppState;
 use crate::crypto::tid_micros;
 use crate::db::now_ms;
@@ -18,6 +18,24 @@ use crate::db::now_ms;
 const PAGE: usize = 100;
 /// The most bytes a page of ops may be.
 const PAGE_CAP: usize = 4 * 1024 * 1024;
+
+/// The most bytes a record in an intake space may be. A join or leave is a
+/// few fields; anything bigger isn't one.
+const INTAKE_RECORD_CAP: usize = 4 * 1024;
+/// The most records one repo may have in an intake space. Anyone can write
+/// there, so this bounds what one writer can make us keep and re-derive.
+const INTAKE_RECORDS_PER_REPO: i64 = 1000;
+
+/// Whether a record version in a space goes into the index. Intake spaces
+/// take writes from anyone: only joins and leaves of a sensible size are
+/// kept there, so nothing else a writer puts in one costs us anything.
+fn indexed(space: &str, collection: &str, version: &Version) -> bool {
+    if SpaceUri::parse(space).is_none_or(|s| s.kind != INTAKE_TYPE) {
+        return true;
+    }
+    matches!(collection, index::JOIN | index::LEAVE)
+        && version.value.as_ref().is_none_or(|v| v.len() <= INTAKE_RECORD_CAP)
+}
 
 /// A record's state after an op: its revision, CID and value (none when
 /// deleted).
@@ -131,7 +149,9 @@ pub async fn sync_repo(state: &AppState, space: &str, repo: &str) -> Result<(), 
     let seen_at = now_ms();
     let mut db = state.db.acquire().await.map_err(|e| e.to_string())?;
     for op in &ops {
-        if let Some((collection, rkey, version)) = version(op) {
+        if let Some((collection, rkey, version)) = version(op)
+            && indexed(space, &collection, &version)
+        {
             apply(&mut db, space, repo, &collection, &rkey, &version, seen_at).await?;
         }
     }
@@ -152,8 +172,20 @@ pub async fn sync_repo(state: &AppState, space: &str, repo: &str) -> Result<(), 
     index::bump(state, &parsed.authority).await
 }
 
+/// A code record's HMAC, for finding a code's conference without deriving
+/// every organization: only for code records in an admin space, the only
+/// ones that count.
+fn code_hmac_of(space: &str, collection: &str, value: Option<&str>) -> Option<String> {
+    if collection != index::CODE || SpaceUri::parse(space).is_none_or(|s| s.kind != ADMIN_TYPE) {
+        return None;
+    }
+    let value: Value = serde_json::from_str(value?).ok()?;
+    value.get("codeHash").and_then(Value::as_str).map(str::to_owned)
+}
+
 /// Writes a record's version into the index, unless it has a later one, and
-/// notes when this version was first seen.
+/// notes when this version was first seen. A repo already at its limit of
+/// records in an intake space gets no new ones.
 async fn apply(
     db: &mut sqlx::AnyConnection,
     space: &str,
@@ -163,13 +195,23 @@ async fn apply(
     version: &Version,
     seen_at: i64,
 ) -> Result<(), String> {
-    // A code record's HMAC, for finding a code's conference without
-    // deriving every organization.
-    let code_hmac = (collection == index::CODE)
-        .then_some(version.value.as_deref())
-        .flatten()
-        .and_then(|v| serde_json::from_str::<Value>(v).ok())
-        .and_then(|v| v.get("codeHash").and_then(Value::as_str).map(str::to_owned));
+    if SpaceUri::parse(space).is_some_and(|s| s.kind == INTAKE_TYPE) {
+        let (count, exists) = sqlx::query_as::<_, (i64, i64)>(
+            "SELECT COUNT(*), COALESCE(SUM(CASE WHEN collection = $3 AND rkey = $4 THEN 1 ELSE 0 END), 0) \
+             FROM space_records WHERE space = $1 AND repo = $2",
+        )
+        .bind(space)
+        .bind(repo)
+        .bind(collection)
+        .bind(rkey)
+        .fetch_one(&mut *db)
+        .await
+        .map_err(|e| e.to_string())?;
+        if exists == 0 && count >= INTAKE_RECORDS_PER_REPO {
+            return Ok(());
+        }
+    }
+    let code_hmac = code_hmac_of(space, collection, version.value.as_deref());
     sqlx::query(
         "INSERT INTO space_records (space, repo, collection, rkey, rev, cid, value, code_hmac) \
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
@@ -218,11 +260,19 @@ async fn read(mut res: reqwest::Response) -> Result<Value, String> {
 /// One repo in one space, as reindex read it: each record's latest version.
 type Repo = BTreeMap<(String, String), Version>;
 
-/// Applies ops to what's known of a repo, as `apply` does to the index.
-fn absorb(repo: &mut Repo, ops: &[Value]) {
+/// Applies ops to what's known of a repo in a space, as `sync_repo` and
+/// `apply` do to the index.
+fn absorb(space: &str, repo: &mut Repo, ops: &[Value]) {
+    let intake = SpaceUri::parse(space).is_some_and(|s| s.kind == INTAKE_TYPE);
     for op in ops {
-        if let Some((collection, rkey, version)) = version(op) {
+        if let Some((collection, rkey, version)) = version(op)
+            && indexed(space, &collection, &version)
+        {
             let key = (collection, rkey);
+            let full = intake && repo.len() as i64 >= INTAKE_RECORDS_PER_REPO;
+            if full && !repo.contains_key(&key) {
+                continue;
+            }
             if repo.get(&key).is_none_or(|v| v.rev <= version.rev) {
                 repo.insert(key, version);
             }
@@ -240,7 +290,8 @@ fn recs_of(org: &str, read: &BTreeMap<(String, String), Repo>) -> Vec<Rec> {
     for ((space, repo), records) in read {
         for ((collection, rkey), version) in records {
             let counted = *space == admin
-                || space.starts_with(&intake)
+                || (space.starts_with(&intake)
+                    && matches!(collection.as_str(), index::JOIN | index::LEAVE))
                 || (space.starts_with(&conference)
                     && matches!(collection.as_str(), index::ROLE | index::RULES));
             let (Some(value), true) = (&version.value, counted) else { continue };
@@ -306,7 +357,7 @@ pub async fn reindex(state: &AppState, org: &str) -> Result<Reindexed, String> {
         if let Some(latest) = latest_rev(&ops) {
             synced.insert(key.clone(), latest);
         }
-        absorb(read.entry(key).or_default(), &ops);
+        absorb(space, read.entry(key).or_default(), &ops);
         Ok::<_, String>(())
     };
     // From the super admin, out. Without their repo there's nothing to
@@ -434,7 +485,9 @@ mod tests {
     #[test]
     fn a_repo_keeps_each_records_latest_version() {
         let mut repo = Repo::new();
+        let space = "at://did:plc:org/space/app.eventside.conference/3conf";
         absorb(
+            space,
             &mut repo,
             &[
                 json!({ "collection": "a.b.c", "rkey": "1", "rev": "3aaa", "cid": "x", "value": { "n": 1 } }),
@@ -445,6 +498,7 @@ mod tests {
         );
         // An older op read later doesn't bring a record back.
         absorb(
+            space,
             &mut repo,
             &[
                 json!({ "collection": "a.b.c", "rkey": "3", "rev": "3aac", "cid": "z", "value": { "n": 3 } }),
@@ -455,5 +509,58 @@ mod tests {
         assert!(!repo.contains_key(&key("2")), "a write whose value a later op carries");
         assert_eq!(repo[&key("3")].rev, "3aad");
         assert!(repo[&key("3")].value.is_none(), "deleted");
+    }
+
+    fn intake_space() -> String {
+        SpaceUri::new("did:plc:atmosphereorgaaaaaaaaaaa", INTAKE_TYPE, "3conf").to_string()
+    }
+
+    #[test]
+    fn an_intake_space_keeps_only_joins_and_leaves() {
+        let space = intake_space();
+        let big = "x".repeat(INTAKE_RECORD_CAP + 1);
+        let mut repo = Repo::new();
+        absorb(
+            &space,
+            &mut repo,
+            &[
+                json!({ "collection": index::JOIN, "rkey": "1", "rev": "3aaa", "cid": "a", "value": {} }),
+                json!({ "collection": index::LEAVE, "rkey": "2", "rev": "3aab", "cid": "b", "value": {} }),
+                json!({ "collection": "com.example.junk", "rkey": "3", "rev": "3aac", "cid": "c", "value": {} }),
+                json!({ "collection": index::JOIN, "rkey": "4", "rev": "3aad", "cid": "d", "value": { "pad": big } }),
+            ],
+        );
+        let kept: Vec<&str> = repo.keys().map(|(_, rkey)| rkey.as_str()).collect();
+        assert_eq!(kept, ["1", "2"]);
+
+        // However many a writer makes, only so many are kept.
+        let ops: Vec<Value> = (0..INTAKE_RECORDS_PER_REPO + 50)
+            .map(|i| json!({ "collection": index::JOIN, "rkey": format!("r{i:05}"), "rev": format!("3b{i:05}"), "cid": "x", "value": {} }))
+            .collect();
+        let mut repo = Repo::new();
+        absorb(&space, &mut repo, &ops);
+        assert_eq!(repo.len() as i64, INTAKE_RECORDS_PER_REPO);
+
+        // Nor are other records read back out of an intake space.
+        let mut read = BTreeMap::new();
+        let mut junk = Repo::new();
+        junk.insert(
+            ("com.example.junk".to_owned(), "1".to_owned()),
+            Version { rev: "3aaaaaaaaaa22".into(), cid: None, value: Some("{}".into()) },
+        );
+        read.insert((space.clone(), "did:plc:writer".to_owned()), junk);
+        assert!(recs_of("did:plc:atmosphereorgaaaaaaaaaaa", &read).is_empty());
+    }
+
+    #[test]
+    fn only_an_admin_spaces_code_records_name_a_code() {
+        let value = Some(r#"{"codeHash":"h"}"#);
+        let admin = SpaceUri::admin("did:plc:atmosphereorgaaaaaaaaaaa").to_string();
+        assert_eq!(code_hmac_of(&admin, index::CODE, value).as_deref(), Some("h"));
+        assert_eq!(code_hmac_of(&intake_space(), index::CODE, value), None);
+        let conference =
+            SpaceUri::new("did:plc:atmosphereorgaaaaaaaaaaa", CONFERENCE_TYPE, "3conf").to_string();
+        assert_eq!(code_hmac_of(&conference, index::CODE, value), None);
+        assert_eq!(code_hmac_of(&admin, index::JOIN, value), None);
     }
 }

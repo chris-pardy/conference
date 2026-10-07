@@ -547,3 +547,32 @@ test('TC-11: a code alone finds its conference among several organizations (revi
   expect(answer.body.status).toBe('joined')
   expect(answer.body.conference).toBe(second.conference.space)
 })
+
+// Regressions from adversarial review round 6.
+
+test('TC-31: a list role that couldn’t be given is given on a later join (review round 6)', async ({ viv }) => {
+  const olga = await viv.createAccount(viv.handle('olga'))
+  const pim = await viv.createAccount(viv.handle('pim'))
+  const org = await createOrg(dep, olga)
+  await addAdmin(dep, org, pim, 'owner')
+  const conference = await createConference(dep, org, {
+    ...ATMOSPHERECONF,
+    superAdmin: pim,
+    methods: ['list', 'code'],
+  })
+  const code = await sharedCode(dep, conference, uniqueCode('atmosphere27'))
+  const zoeHandle = viv.handle('zoe')
+  await importList(dep, conference, [{ handle: zoeHandle, role: 'speaker' }])
+  const zoe = await Attendee.signIn(dep, await viv.createAccount(zoeHandle))
+
+  // Pim, who writes the conference's roles, is down: the code lets Zoe in.
+  await takeOffline(viv.url, pim)
+  try {
+    expect((await zoe.join({ conference: conference.space, code })).body.status).toBe('joined')
+  } finally {
+    await bringOnline(viv.url, pim)
+  }
+  const again = await zoe.join({ conference: conference.space })
+  expect(again.body.status).toBe('joined')
+  expect(again.body.role, 'the row’s role, once Pim is back').toBe('speaker')
+})

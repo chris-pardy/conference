@@ -61,12 +61,41 @@ pub async fn get_space(
     .into_response()
 }
 
+#[derive(serde::Deserialize)]
+pub struct MembersParams {
+    space: String,
+    limit: Option<i64>,
+    cursor: Option<String>,
+}
+
+/// How many members a page of `listMembers` has, unless asked for fewer.
+const MEMBERS_PAGE: i64 = 100;
+/// The most members a page of `listMembers` has.
+const MEMBERS_PAGE_MAX: i64 = 500;
+
+/// One page of DIDs, in order: those after the cursor, at most `limit`, and
+/// the cursor for the next page if there's more.
+fn page_of<'a, T>(
+    items: impl Iterator<Item = (&'a String, T)>,
+    after: Option<&str>,
+    limit: usize,
+) -> (Vec<(&'a String, T)>, Option<String>) {
+    let mut page: Vec<_> = items
+        .filter(|(did, _)| after.is_none_or(|after| did.as_str() > after))
+        .take(limit + 1)
+        .collect();
+    let more = page.len() > limit;
+    page.truncate(limit);
+    let cursor = more.then(|| page.last().map(|(did, _)| (*did).clone())).flatten();
+    (page, cursor)
+}
+
 /// `app.eventside.space.listMembers`: everyone who is or was a member, with
-/// their periods.
+/// their periods, by DID, paged by `limit` and `cursor`.
 pub async fn list_members(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Query(params): Query<SpaceParams>,
+    Query(params): Query<MembersParams>,
 ) -> Response {
     let (space, org) = match authorized(&state, &headers, &params.space).await {
         Ok(found) => found,
@@ -80,25 +109,59 @@ pub async fn list_members(
             "periods": periods.iter().map(Period::to_json).collect::<Vec<_>>(),
         })
     };
-    let members: Vec<Value> = if space.kind == CONFERENCE_TYPE {
+    let limit = params.limit.unwrap_or(MEMBERS_PAGE).clamp(1, MEMBERS_PAGE_MAX) as usize;
+    let after = params.cursor.as_deref();
+    let (members, cursor): (Vec<Value>, _) = if space.kind == CONFERENCE_TYPE {
         let Some(conference) = org.conference(&space.to_string()) else {
             return refuse(StatusCode::NOT_FOUND, "SpaceNotFound", "Space not found");
         };
-        conference
-            .members
-            .iter()
+        let (page, cursor) = page_of(conference.members.iter(), after, limit);
+        let members = page
+            .into_iter()
             .map(|(did, periods)| entry(did, periods, conference.is_member(did), true))
-            .collect()
+            .collect();
+        (members, cursor)
     } else {
         // The admin space, and intake spaces (which admins read, and anyone writes).
         let writes = space.kind == super::ADMIN_TYPE;
-        org.readers(&space.to_string())
-            .iter()
-            .map(|did| {
+        let readers = org.readers(&space.to_string());
+        let (page, cursor) = page_of(readers.iter().map(|did| (did, ())), after, limit);
+        let members = page
+            .into_iter()
+            .map(|(did, ())| {
                 let since = org.admins.get(did).map_or(org.created_us, |a| a.since_us);
                 entry(did, &[Period { since, until: None }], true, writes)
             })
-            .collect()
+            .collect();
+        (members, cursor)
     };
-    Json(json!({ "members": members })).into_response()
+    let mut out = json!({ "members": members });
+    if let Some(cursor) = cursor {
+        out["cursor"] = json!(cursor);
+    }
+    Json(out).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn members_are_paged_by_did() {
+        let dids: Vec<String> = (0..5).map(|i| format!("did:plc:m{i}")).collect();
+        let (first, cursor) = page_of(dids.iter().map(|d| (d, ())), None, 2);
+        assert_eq!(
+            first.iter().map(|(d, _)| d.as_str()).collect::<Vec<_>>(),
+            ["did:plc:m0", "did:plc:m1"]
+        );
+        let cursor = cursor.expect("there's more");
+        let (second, _) = page_of(dids.iter().map(|d| (d, ())), Some(&cursor), 2);
+        assert_eq!(
+            second.iter().map(|(d, _)| d.as_str()).collect::<Vec<_>>(),
+            ["did:plc:m2", "did:plc:m3"]
+        );
+        let (last, cursor) = page_of(dids.iter().map(|d| (d, ())), Some("did:plc:m3"), 2);
+        assert_eq!(last.len(), 1);
+        assert_eq!(cursor, None);
+    }
 }

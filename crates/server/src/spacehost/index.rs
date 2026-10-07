@@ -650,22 +650,25 @@ impl Org {
     }
 }
 
-/// The index's records for an organization: its admin and intake spaces,
-/// and the role and rules records in its conference spaces, each with when
-/// our host first saw it.
+/// The index's records for an organization: its admin space, the joins and
+/// leaves in its intake spaces, and the role and rules records in its
+/// conference spaces, each with when our host first saw it.
 pub async fn records(state: &AppState, org: &str) -> Result<Vec<Rec>, String> {
     let rows = sqlx::query_as::<_, (String, String, String, String, String, String, Option<i64>)>(
         "SELECT r.space, r.repo, r.collection, r.rkey, r.rev, r.value, s.seen_at FROM space_records r \
          LEFT JOIN space_record_seen s ON s.space = r.space AND s.repo = r.repo \
          AND s.collection = r.collection AND s.rkey = r.rkey AND s.rev = r.rev \
          WHERE r.value IS NOT NULL AND \
-         (r.space = $1 OR r.space LIKE $2 OR (r.space LIKE $3 AND r.collection IN ($4, $5)))",
+         (r.space = $1 OR (r.space LIKE $2 AND r.collection IN ($6, $7)) \
+         OR (r.space LIKE $3 AND r.collection IN ($4, $5)))",
     )
     .bind(SpaceUri::admin(org).to_string())
     .bind(format!("at://{org}/space/{INTAKE_TYPE}/%"))
     .bind(format!("at://{org}/space/{CONFERENCE_TYPE}/%"))
     .bind(ROLE)
     .bind(RULES)
+    .bind(JOIN)
+    .bind(LEAVE)
     .fetch_all(&state.db)
     .await
     .map_err(|e| format!("could not read the index: {e}"))?;
@@ -848,6 +851,12 @@ enum Event {
     Deny,
     /// A join no rule admitted: a request, if requests were on.
     Request,
+    /// The super admin's mark that someone became an admin: a member from
+    /// then, banned or not, since admins can't be banned.
+    AdminStart,
+    /// Her mark that they stopped being one: their admin period ends, and a
+    /// ban from before or during it holds again.
+    AdminEnd,
 }
 
 /// Whose an event in a person's timeline is.
@@ -1039,6 +1048,12 @@ fn derive_conference(
                         .or_default()
                         .push((rec.us, event == Event::Admit));
                 }
+                // Her admin marks bound a period no ban cuts short.
+                let event = match event {
+                    Event::Admit if marks_admin && rec.repo == super_admin => Event::AdminStart,
+                    Event::Remove if marks_admin && rec.repo == super_admin => Event::AdminEnd,
+                    other => other,
+                };
                 // Admin periods and email matches are no one's verdict on
                 // the person's attendance: like their own joins, they end
                 // whatever the super admin last decided. Only she writes
@@ -1166,8 +1181,10 @@ fn derive_conference(
         // The bans in force: an overridden one ends with an `Unban`.
         let mut bans = 0usize;
         let mut super_says: Option<bool> = None;
+        // Within an admin period: a member whatever the bans.
+        let mut admin = false;
         for (us, event, by) in timeline {
-            let admits = event == Event::Admit;
+            let admits = matches!(event, Event::Admit | Event::AdminStart);
             match by {
                 By::SuperAdmin => super_says = Some(admits),
                 By::OtherAdmin if super_says.is_some_and(|says| says != admits) => continue,
@@ -1176,7 +1193,14 @@ fn derive_conference(
             }
             match event {
                 Event::Admit if bans == 0 && since.is_none() => since = Some(us),
-                Event::Remove | Event::Leave | Event::Ban => {
+                Event::AdminStart => {
+                    admin = true;
+                    since.get_or_insert(us);
+                }
+                // A ban while they were an admin counts from when it ends.
+                Event::Ban if admin => bans += 1,
+                Event::AdminEnd | Event::Remove | Event::Leave | Event::Ban => {
+                    admin &= event != Event::AdminEnd;
                     if let Some(start) = since.take() {
                         periods.push(Period { since: start, until: Some(us) });
                     }
@@ -1720,6 +1744,51 @@ mod tests {
         let conference = org.conference(&space(CONFERENCE_TYPE)).unwrap();
         assert!(!conference.banned.contains(bram));
         assert!(conference.is_member(bram));
+    }
+
+    #[test]
+    fn a_banned_persons_admin_period_ends_rather_than_vanishing() {
+        let bram = "did:plc:bramaaaaaaaaaaaaaaaaaaaa";
+        let kees = "did:plc:keesaaaaaaaaaaaaaaaaaaaa";
+        let ban = |us: u64| {
+            rec(
+                &SpaceUri::admin(ORG).to_string(),
+                kees,
+                BAN,
+                &format!("b{us}"),
+                us,
+                json!({ "space": space(CONFERENCE_TYPE), "subject": bram }),
+            )
+        };
+        let marked = |rkey: &str, via: &str, us: u64| {
+            let mut value = json!({ "space": space(CONFERENCE_TYPE), "subject": bram, "via": via });
+            if via == VIA_ADMIN_REMOVED {
+                value["until"] = json!(iso(us));
+            }
+            rec(&SpaceUri::admin(ORG).to_string(), OLGA, MEMBER, rkey, us, value)
+        };
+        // Banned by Kees at 20 (or at 35, while an admin), Bram is an admin
+        // from 30 until 40: a member then, and banned again after.
+        for banned_at in [20, 35] {
+            let org = org_with(
+                &["code"],
+                true,
+                vec![
+                    admin_rec(kees, "owner", 1),
+                    ban(banned_at),
+                    marked("m1", VIA_ADMIN, 30),
+                    marked("m2", VIA_ADMIN_REMOVED, 40),
+                    join(bram, 50, None, json!({})),
+                ],
+            );
+            let conference = org.conference(&space(CONFERENCE_TYPE)).unwrap();
+            assert!(!conference.was_member_at(bram, 25));
+            assert!(conference.was_member_at(bram, 35), "an admin then (ban at {banned_at})");
+            assert!(conference.was_member_at(bram, 39));
+            assert!(!conference.was_member_at(bram, 45));
+            assert!(!conference.is_member(bram), "the ban holds again (ban at {banned_at})");
+            assert!(conference.banned.contains(bram));
+        }
     }
 
     #[test]

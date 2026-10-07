@@ -1468,6 +1468,47 @@ at the PR alongside rounds 1 to 4:
   only the organizations with that code, and a wrong one loads none.
   `reindex` fills the column in for an index made before.
 
+**Review round 6 design notes (2026-10-06).** The round-6 fixes, to raise
+at the PR alongside rounds 1 to 5:
+
+- **Binding a late list handle writes the role first.** The row's role (as
+  the conference's super admin) is written before the bound `listEntry`
+  (as the organization's), as the email step already did, since once
+  someone is on the list by DID the binding isn't tried again.
+- **Intake spaces keep only joins and leaves.** Anyone can write to an
+  intake space, so the index keeps only `app.eventside.intake.join` and
+  `.leave` records there, of at most 4 KiB each and at most 1,000 per
+  repo per intake space (a repo at the limit gets no new records; its
+  existing ones still update). Everything else a writer puts there is
+  dropped when read, by sync and by `reindex`, and the index reads intake
+  spaces by those two collections only.
+- **An admin period suspends a ban rather than lifting it.** Someone
+  banned by an owner and later made an admin is a member from the super
+  admin's `orgAdmin` mark until her `orgAdminRemoved` mark (a ban during
+  the period too), so their admin-era records and `listMembers` period
+  stay; the ban holds again from the removal.
+- **Revocations skip writers a PDS refused as gone.** Instead of a rotation
+  cursor per PDS, a writer a PDS refuses as gone is skipped there for an
+  hour (and forgotten as the writer it last took); the last writer taken is
+  remembered per PDS and space. Passes, concurrent or in other spaces,
+  can't throw each other off. If every writer on a PDS is gone, it's tried
+  again once the hour is up. Not persisted, as before.
+- **`listRecords` and `listMembers` are paged.** `limit` (default 100, at
+  most 500) and an opaque `cursor`: for `listRecords`, the last record's
+  place in its order (when it counts from, revision, author, key); for
+  `listMembers`, the last DID. A response has `cursor` only when there's
+  more. `listRecords` still reads a collection's rows to judge and order
+  them, but parses and sends only the page's values. The PWA reads the
+  first page of announcements.
+- **Codes are looked up by HMAC only in admin spaces.** The `code_hmac`
+  column is set only for code records in an admin space, the lookup reads
+  only those, and `codes issue` checks uniqueness through the same lookup
+  instead of deriving every organization.
+- **Migrations folded.** The review migrations (0003 to 0005) are folded
+  into `0002_conference_space.sql`, since nothing has been deployed. A
+  database made by an earlier build of this branch fails the migration
+  checksum and has to be deleted (the worktree's git-ignored `data/` was).
+
 **Red-test gate (2026-10-06):** the user approved the red tests and the
 surfaces they pin (see Build notes), with these contract changes:
 
@@ -2295,3 +2336,47 @@ unchanged.
    write and by `reindex`), so only organizations with that code are
    loaded. Integration TC-11 (round 5) covers two organizations, a wrong
    code, and an index from before the column after `reindex`.
+
+### Round 6
+
+Reviewer: a fresh subagent following `adversarial-review`. Verdict: not
+clean (0 blocking, 2 major, 3 minor, 2 nit). After the rework: `pnpm check`
+green (lint, build, Rust 85 + unit 122 + integration 101 + tooling 33 + e2e
+35), and `scripts/check-tests-unchanged.sh` reports the frozen tests
+unchanged.
+
+1. **[major] A list role that failed to be written was never given.**
+   Binding wrote the bound `listEntry` first, then the role as the
+   conference's super admin; if that failed, later joins saw the person on
+   the list by DID and never tried again. **Fixed:** the role is written
+   first and the binding last. Integration TC-31 (round 6), with the
+   conference super admin's PDS down.
+2. **[major] Intake spaces stored anything anyone wrote.** Every
+   collection, of any size, was kept and re-derived on each load.
+   **Fixed:** only joins and leaves of at most 4 KiB, at most 1,000 per
+   repo per intake space, are kept (sync and `reindex`), and the index
+   reads intake spaces by those collections only. Rust test
+   `an_intake_space_keeps_only_joins_and_leaves`.
+3. **[minor] A banned person's admin-era membership vanished after their
+   removal as an admin** (a regression from round 5 #5). **Fixed:** the
+   super admin's admin marks bound a membership period that no ban cuts
+   short; the ban holds again from the removal mark. Rust test
+   `a_banned_persons_admin_period_ends_rather_than_vanishing`.
+4. **[minor] The revocation writer rotation was keyed by PDS only.** Passes
+   for different spaces (or concurrent ones) moved each other's offsets,
+   and a gone last writer stayed first. **Fixed:** the rotation is
+   replaced by remembering writers a PDS refused as gone (skipped there for
+   an hour, and dropped as its last writer); the last writer is kept per
+   PDS and space. Rust tests in `notify`.
+5. **[minor] `listRecords` and `listMembers` weren't paged.** **Fixed:**
+   `limit` (default 100, at most 500) and `cursor` on both; the frozen
+   tests' data is well under a page. Rust tests
+   `records_are_paged_newest_first_by_a_cursor` and
+   `members_are_paged_by_did`.
+6. **[nit] `codes issue` derived every organization; the code lookup read
+   any space.** **Fixed:** `codes issue` uses the HMAC lookup, and the
+   column is set and read only for admin-space code records. Rust test
+   `only_an_admin_spaces_code_records_name_a_code`.
+7. **[nit] Migrations 0003 to 0005 amended 0002 in the same PR, and 0005
+   had no backfill.** **Fixed:** folded into 0002 (see "Review round 6
+   design notes"); the worktree's local databases were deleted.

@@ -1191,12 +1191,8 @@ async fn codes_issue(state: &AppState, args: &Args) -> Result<Done, String> {
     }
     let hash = state.secrets.code_hmac(&code);
     // A code names its conference, so it must be unique across all of them.
-    for authority in authority::all(&state.db).await? {
-        if let Some(other) = index::load(state, &authority.did).await?
-            && other.conferences.values().any(|c| c.has_code(&hash))
-        {
-            return Err(format!("the code {code} is already in use"));
-        }
+    if super::code_conference(state, &hash).await?.is_some() {
+        return Err(format!("the code {code} is already in use"));
     }
     let mut record = json!({ "space": space.to_string(), "codeHash": hash, "personal": personal });
     if let Some(expires) = args.flag("expires") {
