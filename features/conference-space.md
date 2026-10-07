@@ -1685,6 +1685,26 @@ raise at the PR alongside the simplification:
   `assignedBy` the new importer, so it doesn't go when the first owner
   does. Only the same role from the same owner is left alone.
 
+**Review round 13 design notes (2026-10-07).** The round-13 fixes, and
+one question for the PR:
+
+- **A removed or demoted owner's bans and removals stop counting too,**
+  which can let people back in. TC-53 makes that the rule ("a former
+  admin's decisions stop counting"), so they aren't re-issued
+  automatically, which would also raise them to the super admin's rank.
+  Instead `org admin remove` and a demotion name everyone it lets back in
+  or un-bans (`letBackIn` with `--json`), with how to keep them out.
+  **For the PR:** whether an owner's bans should outlive their role is a
+  product decision worth confirming.
+- **A demotion finds every conference's writer before writing anything,**
+  as removal does, so a conference super admin who isn't connected fails it
+  with nothing changed.
+- **A list role taken over by another owner's import keeps the time it took
+  effect** when the role is the same. A different role doesn't replace
+  another owner's list-given owner or staff role: it's kept and reported,
+  as admin-given roles are. The first row for a person in a file decides
+  their role.
+
 **Red-test gate (2026-10-06):** the user approved the red tests and the
 surfaces they pin (see Build notes), with these contract changes:
 
@@ -2881,3 +2901,32 @@ green (lint, build, Rust 94 + unit 122 + integration 111 + tooling 33 + e2e
    handle and DID.
 6. **[nit] A row repeated in one file rewrote its role each time.**
    **Fixed:** roles given in the run are tracked.
+
+### Round 13
+
+Reviewer: a fresh subagent following `adversarial-review`. Verdict: not
+clean (0 blocking, 1 major, 2 minor, 1 nit). It confirmed the TC-52 change
+is still the only changed frozen file, and found no regressions from the
+round-12 fixes. After the rework: `pnpm check` green (lint, build, Rust 94 +
+unit 122 + integration 113 + tooling 33 + e2e 35), and `check:frozen` warns
+only about `tests/integration/conference-admins.test.ts`.
+
+1. **[major] Removing or demoting an owner silently lifted their bans and
+   removals,** letting people back in. **Fixed by reporting, re-issuing
+   declined:** TC-53 (approved) says a former admin's decisions stop
+   counting, and a ban is one; re-issuing them as the super admin's would
+   contradict it and raise them to her rank. Both commands now name the
+   people let back in or un-banned, with how to keep them out, and the
+   design notes flag the question for the PR. Integration TC-28 (review
+   round 13).
+2. **[minor] A list role taken over by another owner reset its `since`,
+   and a different role replaced another owner's list-given staff role.**
+   **Fixed:** the same role keeps its time; a different one leaves an owner
+   or staff list role alone and reports it. Integration TC-34 (review
+   round 13).
+3. **[minor] A demotion resolved conference writers after writing the
+   admin record.** **Fixed:** all are resolved first. Not covered by an
+   integration test: the helpers can't make a conference super admin who
+   isn't connected.
+4. **[nit] With two rows for one person in a file, which role won depended
+   on what was stored.** **Fixed:** the first row decides.

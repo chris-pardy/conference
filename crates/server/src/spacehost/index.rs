@@ -385,6 +385,11 @@ impl Conference {
         self.list.iter().any(|e| e.did.as_deref() == Some(did))
     }
 
+    /// When `did`'s role took effect, if they have one.
+    pub fn role_since(&self, did: &str) -> Option<u64> {
+        self.roles.contains_key(did).then(|| self.role_since.get(did).copied()).flatten()
+    }
+
     /// Whether `did`'s role came from an attendee list (a `via: list` role).
     pub fn has_list_role(&self, did: &str) -> bool {
         self.list_roles.contains(did)
@@ -796,6 +801,27 @@ pub async fn with_admin_as(
         &state.secrets,
         &state.oauth.client_id_for("atproto"),
     ))
+}
+
+/// Who'd be let back in by `changed`: (conference, person) for everyone who
+/// isn't a member of one of `org`'s conferences now but would be, or is
+/// banned now and wouldn't be, as when the admin whose ban or removal kept
+/// them out stops counting.
+pub fn would_let_in(org: &Org, changed: &Org, except: &str) -> Vec<(String, String)> {
+    let mut back = Vec::new();
+    for conference in org.conferences.values() {
+        let space = conference.space();
+        let Some(then) = changed.conference(space) else { continue };
+        let members = then.current_members().filter(|did| !conference.is_member(did));
+        let unbanned = conference.banned.iter().filter(|did| !then.banned.contains(*did));
+        let people: BTreeSet<&String> = members.chain(unbanned).collect();
+        for did in people {
+            if did != except {
+                back.push((space.to_owned(), did.clone()));
+            }
+        }
+    }
+    back
 }
 
 /// Who's a member of each of `org`'s conferences now but wouldn't be in

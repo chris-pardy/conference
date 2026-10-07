@@ -331,13 +331,22 @@ async fn org_admin(state: &AppState, args: &Args, add: bool) -> Result<Done, Str
         // owner and staff roles they gave, stop counting, and so may the
         // memberships that rest on them. They're kept with
         // `--keep-admissions`, and reported otherwise.
+        // Their bans stop counting too, which can let people back in: named.
         let demoted = role == Role::Staff && org.admin_role(&subject) == Some(Role::Owner);
-        let lost = if demoted {
+        let (lost, back) = if demoted {
             let changed = index::with_admin_as(state, &org, &subject, Some(role)).await?;
-            index::would_lose(&org, &changed, &subject)
+            (
+                index::would_lose(&org, &changed, &subject),
+                index::would_let_in(&org, &changed, &subject),
+            )
         } else {
-            Vec::new()
+            (Vec::new(), Vec::new())
         };
+        // Every conference's writer is found before anything is written.
+        let mut writers = Vec::new();
+        for conference in org.conferences.values() {
+            writers.push((conference, conference_super_admin(state, conference).await?));
+        }
         let keep = args.flag("keep-admissions").is_some();
         let kept = if keep {
             keep_admissions(state, &acting, &org, &subject, &lost).await?
@@ -362,7 +371,7 @@ async fn org_admin(state: &AppState, args: &Args, add: bool) -> Result<Done, Str
         // and its end once they're removed.
         let now = index::iso(now_ms() as u64 * 1000);
         let new_admin = !org.admins.contains_key(&subject);
-        for conference in org.conferences.values() {
+        for (conference, writer) in writers {
             if new_admin {
                 acting
                     .create_in(
@@ -374,7 +383,6 @@ async fn org_admin(state: &AppState, args: &Args, add: bool) -> Result<Done, Str
                     )
                     .await?;
             }
-            let writer = conference_super_admin(state, conference).await?;
             writer
                 .put_in(
                     state,
@@ -387,10 +395,11 @@ async fn org_admin(state: &AppState, args: &Args, add: bool) -> Result<Done, Str
         }
         after_change(state, &org).await?;
         let text = format!("{who} is now {} of {}.", role.as_str(), org.did)
-            + &lost_report(state, &acting, who, &lost, keep).await;
+            + &lost_report(state, &acting, who, &lost, keep).await
+            + &back_report(state, who, &back).await;
         return done(
             text,
-            json!({ "did": subject, "role": role.as_str(), "lost": lost_json(&lost, keep), "kept": lost_json(&lost, !keep) }),
+            json!({ "did": subject, "role": role.as_str(), "lost": lost_json(&lost, keep), "kept": lost_json(&lost, !keep), "letBackIn": back_json(&back) }),
         );
     }
     // The super admin is always an owner, with or without an `admin` record.
@@ -454,6 +463,10 @@ async fn org_admin(state: &AppState, args: &Args, add: bool) -> Result<Done, Str
     // reported.
     let changed = index::with_admin_as(state, &org, &subject, None).await?;
     let lost = index::would_lose(&org, &changed, &subject);
+    // Their bans and removals stop counting too, which can let people back
+    // in: named, not re-issued (TC-53: a former admin's decisions stop
+    // counting).
+    let back = index::would_let_in(&org, &changed, &subject);
     let keep = args.flag("keep-admissions").is_some();
     let kept =
         if keep { keep_admissions(state, &acting, &org, &subject, &lost).await? } else { vec![] };
@@ -490,7 +503,8 @@ async fn org_admin(state: &AppState, args: &Args, add: bool) -> Result<Done, Str
     }
     after_change(state, &org).await?;
     let mut text = format!("{who} is no longer an admin of {}.", org.did)
-        + &lost_report(state, &acting, who, &lost, keep).await;
+        + &lost_report(state, &acting, who, &lost, keep).await
+        + &back_report(state, who, &back).await;
     if !untidy.is_empty() {
         text.push_str(&format!(
             "\nThese role records they gave don't count any more, but couldn't be deleted: {}",
@@ -499,7 +513,7 @@ async fn org_admin(state: &AppState, args: &Args, add: bool) -> Result<Done, Str
     }
     done(
         text,
-        json!({ "did": subject, "lost": lost_json(&lost, keep), "kept": lost_json(&lost, !keep) }),
+        json!({ "did": subject, "lost": lost_json(&lost, keep), "kept": lost_json(&lost, !keep), "letBackIn": back_json(&back) }),
     )
 }
 
@@ -600,6 +614,32 @@ async fn lost_report(
         text.push_str(&format!("\n  {space}: {}", names.join(", ")));
     }
     text
+}
+
+/// The people a change to an admin let back in (their ban or removal no
+/// longer counting), by conference.
+async fn back_report(state: &AppState, who: &str, back: &[(String, String)]) -> String {
+    if back.is_empty() {
+        return String::new();
+    }
+    let people: BTreeSet<&String> = back.iter().map(|(_, did)| did).collect();
+    let mut text = format!(
+        "\n{} people {who} had banned or removed aren't kept out by it any more, and may be \
+         members again; `member ban` or `member remove` keeps them out:",
+        people.len()
+    );
+    let mut by_space: BTreeMap<&str, Vec<String>> = BTreeMap::new();
+    for (space, did) in back {
+        by_space.entry(space).or_default().push(handle_of(state, did).await);
+    }
+    for (space, names) in by_space {
+        text.push_str(&format!("\n  {space}: {}", names.join(", ")));
+    }
+    text
+}
+
+fn back_json(back: &[(String, String)]) -> Vec<Value> {
+    back.iter().map(|(space, did)| json!({ "space": space, "did": did })).collect()
 }
 
 /// The people a change to an admin took out (or kept), for `--json`; empty
@@ -1498,22 +1538,38 @@ async fn list_import(state: &AppState, args: &Args) -> Result<Done, String> {
             }
             continue;
         }
-        // The same list role from the same owner (or given already in this
-        // run) keeps the time it took effect. Another owner's is replaced by
-        // this one's, so it doesn't go when that owner does.
-        let same_role = conference.has_list_role(&did)
-            && conference.roles.get(&did) == Some(&role)
-            && conference.role_deciders.get(&did) == Some(&acting.did);
-        if same_role || !given.insert(did.clone()) {
+        // The first row for a person in the file decides their role.
+        if !given.insert(did.clone()) {
             continue;
         }
+        let current = conference.roles.get(&did).filter(|_| conference.has_list_role(&did));
+        let theirs = conference.role_deciders.get(&did) == Some(&acting.did);
+        // The same list role from the same owner is left as it is.
+        if theirs && current == Some(&role) {
+            continue;
+        }
+        // Another owner's list gave them owner or staff: not this list's to
+        // change, as with roles an admin gave.
+        if !theirs && current.is_some_and(|r| r != &role && matches!(r.as_str(), "owner" | "staff"))
+        {
+            if !kept.contains(&did) {
+                kept.push(did);
+            }
+            continue;
+        }
+        // Otherwise this owner's list gives it, so it doesn't go when another
+        // owner does. The same role taken over keeps the time it took effect.
+        let since = conference
+            .role_since(&did)
+            .filter(|_| current == Some(&role))
+            .unwrap_or(now_ms() as u64 * 1000);
         writer
             .put_in(
                 state,
                 &space.to_string(),
                 index::ROLE,
                 &did,
-                json!({ "subject": did, "role": role, "assignedBy": acting.did, "via": "list", "since": index::iso(now_ms() as u64 * 1000) }),
+                json!({ "subject": did, "role": role, "assignedBy": acting.did, "via": "list", "since": index::iso(since) }),
             )
             .await?;
     }

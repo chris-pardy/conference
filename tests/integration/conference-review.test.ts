@@ -911,6 +911,53 @@ test('TC-53: losing an owner’s code is reported, and demoting them can keep it
   expect(await bram.isMember(conference.space)).toBe(false)
 })
 
+// Regressions from adversarial review round 13.
+
+test('TC-28: removing an owner names who their ban no longer keeps out (review round 13)', async ({ viv }) => {
+  const { org, conference } = await seedConference(dep, accountsIn(viv), { methods: ['code'] })
+  const kees = await viv.createAccount(viv.handle('kees'))
+  await addAdmin(dep, org, kees, 'owner')
+  const code = await sharedCode(dep, conference, uniqueCode('atmosphere27'))
+  const bram = await Attendee.signIn(dep, await viv.createAccount(viv.handle('bram')))
+  expect((await bram.join({ conference: conference.space, code })).body.status).toBe('joined')
+  await cliOk(dep, ['member', 'ban', bram.person.handle, '--conference', conference.space, '--as', kees.handle])
+
+  const demoted = await cliOk(dep, ['org', 'admin', 'add', kees.handle, '--org', org.did, '--role', 'staff'])
+  expect(demoted.stdout, 'the demotion names Bram').toContain(bram.person.handle)
+  const removed = await cliOkJson(dep, ['org', 'admin', 'remove', kees.handle, '--org', org.did])
+  expect(removed.letBackIn).toEqual([])
+})
+
+test('TC-34: an owner’s list role taken over by another owner keeps its time; a different one isn’t replaced (review round 13)', async ({
+  viv,
+}) => {
+  const { org, conference, superAdmin } = await seedConference(dep, accountsIn(viv), { methods: ['list'] })
+  const kees = await viv.createAccount(viv.handle('kees'))
+  const sem = await viv.createAccount(viv.handle('sem'))
+  await addAdmin(dep, org, kees, 'owner')
+  await addAdmin(dep, org, sem, 'owner')
+  const zoe = await viv.createAccount(viv.handle('zoe'))
+  const importAs = (as: string, role: string) =>
+    cliOk(dep, ['list', 'import', listFile([`${zoe.handle},,${role}`]), '--conference', conference.space, '--as', as])
+  await importAs(kees.handle, 'staff')
+  expect((await (await Attendee.signIn(dep, zoe)).join({ conference: conference.space })).body.role).toBe('staff')
+  await writeSpaceRecord(viv.url, zoe, conference.space, NSID.announcement, announcement('Zoe: doors at 9'))
+  const asOlga = await Attendee.signIn(dep, superAdmin)
+  const zoes = async () => {
+    const answer = await asOlga.listRecords(conference.space, NSID.announcement)
+    return (answer.body.records as Json[]).filter((r) => r.author === zoe.did)
+  }
+  await eventually(zoes, (records) => records.length === 1, 'Zoe’s announcement is shown')
+
+  const other = await importAs(sem.handle, 'speaker')
+  expect(other.stdout, 'Kees’s staff role is kept').toContain(zoe.did)
+  await importAs(sem.handle, 'staff')
+  await cliOk(dep, ['org', 'admin', 'remove', kees.handle, '--org', org.did])
+  expect(await zoes(), 'her announcement from before the takeover').toHaveLength(1)
+  const page = await (await Attendee.signIn(dep, zoe)).getConference(conference.space)
+  expect(page.body.viewer?.role).toBe('staff')
+})
+
 /** An attendee list file with the given `handle,email,role` rows. */
 function listFile(rows: string[]): string {
   const file = join(mkdtempSync(join(tmpdir(), 'eventside-list-')), 'attendees.csv')
