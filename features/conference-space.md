@@ -718,19 +718,45 @@ still valid and not used up. If it passes, the server signs the record and
 writes it with the signature inside. If it fails, nothing is written and the
 command says why.
 
-- **The key:** a dedicated verification method, `#eventside_attest`, in the
-  authority's DID document. Its private half is held by our server and kept
+- **The keys:** one or more dedicated verification methods in the
+  authority's DID document, `#eventside_attest` and then
+  `#eventside_attest_2` and so on. A DID document holds one key per
+  fragment, so several keys means several fragments. Its private half is held by our server and kept
   separate from `#atproto_space` (credentials), so a leaked credential key
   can't forge decisions and the other way round. Whoever manages the DID
   document is in charge: any app they give the private key to can attest,
   and they take that power away by rotating the key out.
-- **The signature,** a field on the record:
-  `sig: {key: "did:…#eventside_attest", signedAt, role, sig}`. `sig` is a
-  low-S ECDSA P-256 signature over the DAG-CBOR of
-  `{$type: "app.eventside.attestation", cid, repo, space, collection, rkey,
-  signedAt, role}`, where `cid` is the record's CID computed without its
-  `sig` field. Binding the repo, space and record key means a signed record
-  copied into another repo, space or key doesn't verify.
+- **The signature follows the badge.blue attestation spec** (Nick
+  Gerakines' "ATProtocol Attestation Specification",
+  tangled.org/strings/ngerakines.me/3m3fy2xuahc22). That keeps our records
+  readable by its tooling, such as the `atproto-attestation` Rust crate, and
+  lets us move to remote attestations in a separate repo later without
+  changing what readers check.
+  - A record carries a `signatures` array. Each entry is an inline
+    attestation:
+    `{$type: "app.eventside.attest.signature", key:
+    "did:plc:…#eventside_attest", space, seq, role, signedAt, signature:
+    {$bytes}}`.
+  - **What's signed:**
+    1. Copy the entry and delete `signature`. That copy is `$sig`, so
+       `key`, `space`, `seq`, `role` and `signedAt` are all signed.
+    2. Add `repository`: the DID of the repo holding the record.
+    3. Remove `signatures` from the record and add the `$sig` object.
+    4. Encode as canonical DAG-CBOR, take the SHA-256, and build a CIDv1
+       (dag-cbor, sha2-256).
+    5. Sign the 36 CID bytes with low-S ECDSA (P-256).
+  - **Verifying:** rebuild `$sig` the same way, with the repo the record was
+    read from, and check the signature against `key`. The key's DID must be
+    the space's authority, and its fragment must start with
+    `eventside_attest`.
+  - Because `repository` and `space` are inside the signed CID, a signed
+    record copied into another repo or another space doesn't verify. A copy
+    within the same repo and space repeats the same `seq`, and readers
+    count each `seq` once.
+  - **Later: remote attestations.** Once we host a repo for the authority
+    (the reference PDS), a `signatures` entry can be a `strongRef` to a
+    proof record `{cid}` in the authority's repo. The CID is built the same
+    way. Readers accept either form.
 - **`role`** is the author's role when the server signed: `superAdmin`,
   `owner`, `staff`, or `self` for a person's own join or leave.
 - **`signedAt`** comes from our server's clock, strictly increasing per
@@ -787,7 +813,7 @@ recorded in the standing decision's signature**, not the author's role now:
 **Joins are signed too.** When the PWA joins, our server checks the join
 (code valid and not used up, DID on the list, conference open, verified
 email matched) and writes `app.eventside.intake.join {code?, via, role?,
-sig}` into the person's intake repo, signed with `role: "self"`. `via` is
+signatures}` into the person's intake repo, signed with `role: "self"`. `via` is
 `code`, `list`, `email`, `open` or `request`, and only `request` leaves
 them pending. So:
 
@@ -814,16 +840,23 @@ conference sidecar) are signed the same way. Readers trust a signature by
 the authority, not "written by the super admin's DID". They're still written
 to the conference's super admin's repo, so TC-35 keeps its meaning.
 
-**Key rotation.** A signature names its key by fragment.
+**Key rotation, through multiple keys.** A signature names its key by
+fragment, and a record may carry several signatures.
 
-- **Ordinary rotation:** add a new key (`#eventside_attest_2`) and sign with
-  it, leaving the old one listed, so earlier signatures keep verifying in
-  `did:plc` and `did:web` alike.
-- **A compromised key:** remove it. Every signature it made stops verifying.
-  Decisions worth keeping are re-signed by editing their records, through
-  the admin's session, and a forged record is deleted. Records we can't
-  edit any more, such as a disconnected former admin's, stop counting,
-  which is accepted (the user, round 5).
+1. **Add** a new key (`#eventside_attest_2`) to the DID document. New
+   records are signed with it.
+2. **Re-sign** standing records by editing them, adding a signature by the
+   new key next to the old one.
+3. **Remove** the old key once nothing standing depends on it alone.
+
+A record counts if any of its signatures verifies against a key the DID
+document lists now.
+
+- **A compromised key:** remove it straight away. Every signature that
+  depends only on it stops verifying. Decisions worth keeping are re-signed
+  by editing their records through the admin's session, and forged records
+  are deleted. Records we can't edit any more, such as a disconnected
+  former admin's, stop counting, which is accepted (the user, round 5).
 
 **Content records aren't signed.** Plans, chat, RSVPs and other members'
 records are still judged by their commit `repoRev` against membership
@@ -853,7 +886,8 @@ the text above they contradict):
   committed.
 - **The signing journal** is operational state, not a log of record: the
   per-authority `seq` counter and the pending entries. It's added to Data
-  and Components, with `#eventside_attest` and the `sig` field. If it's
+  and Components, with the `#eventside_attest*` keys and the `signatures`
+  field. If it's
   lost, the counter restarts above the highest `seq` found in the records.
 - **Each person can have more than one way in.** Membership comes from
   replaying that person's committed entries in `seq` order, not from their
@@ -876,10 +910,6 @@ the text above they contradict):
   - **Code use limits** count distinct DIDs. Rejoining with the same code
     doesn't use it up again, and a personal code works again for the DID
     it's bound to (TC-14).
-- **The signature covers the record without `sig`:** the SHA-256 of the
-  DAG-CBOR encoding of the record with `sig` removed, encoded as the
-  repository encodes it. The record key is fixed before writing (`putRecord`
-  with a TID we choose).
 - **Tests that go:** `--keep-admissions` and its tests, the round 13 and 14
   TC-28 regressions in `conference-review.test.ts`, and the TC-58 test in
   `conference-admins-keep.test.ts` (added after the freeze, not frozen),
@@ -1283,6 +1313,16 @@ quietly changed other people's memberships.
   way to publish a signing key too. Later in the round the user deferred
   this: "don't worry about the personal accounts for now".
 
+- Later in the round:
+  - Signature option (A): signed records in the admins' repos. "Don't worry
+    about deleted or re-signed, we can delete and edit records to do that
+    if we need to." So there's no decision log.
+  - A former admin being able to delete their own bans is "part of the
+    design".
+  - Allow multiple attestation keys, and rotate keys that way.
+  - Follow badge.blue's attestation design, so attestations can move to a
+    separate repo (remote attestations) later.
+
 **Changes** (see "Signed decisions" above):
 
 - Every permission record, join and leave is checked by our server when
@@ -1332,6 +1372,8 @@ quietly changed other people's memberships.
   Atmosphere's DID document. The same record copied into Mallory's repo
   fails.
 - **TC-63 (new):** *Rotating the signing key keeps earlier decisions.*
+  (With round 5's multiple keys: adding a key and re-signing keeps them;
+  removing a key drops records signed only by it.)
   After the operator adds a new signing key, Bram (admitted before) is still
   a member, and a new admission is signed with the new key.
 - **TC-64 (new):** *A join written by another app is a request.* Ana writes
