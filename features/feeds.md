@@ -1,7 +1,7 @@
 ---
-status: analysis
-impact:
-depends-on: [ui-blocks, space-sync, attendee-sign-in]
+status: design-review
+impact: cross-cutting
+depends-on: [ui-blocks, attendee-sign-in, conference-space, space-sync]
 branch:
 tests-commit:
 ---
@@ -223,6 +223,79 @@ algorithmic and need no hand pinning.
   eventside. For the architecture analysis.
 
 ## Architecture analysis
+
+**Existing code touched:**
+
+- `web/src/Shell.tsx` and `web/src/routes/`: the app has only the shell and
+  sign-in today. Feeds become its main screens: a conference's main feed
+  at its root, and a route per scoped feed.
+- `web/src/blocks/`: posts render through `<BlockCard surface="feed">`,
+  and computed cards through the same renderer. A `SourceResolver` (the
+  seam in `SourceResolver.ts`) has to resolve sources against the
+  conference's private space for the viewer. `block-actions` plans the
+  live one; feeds needs at least a read-only one first.
+- `lexicons/app/eventside/`: only `auth` and `block` exist. New lexicons
+  go under `app.eventside.feed.*`.
+- `crates/server/src/`: only auth, identity and OAuth exist. Feed
+  assembly, per-viewer filtering, the skeleton API, `getCardData`, push
+  and the outside-service client are all new.
+- The parked `feature/conference-space` branch (at `eacd33e`) has a space
+  host (`crates/server/src/spacehost/`). Feeds needs the private space it
+  would host, so whatever the `conference-space` rewrite keeps of it is
+  this feature's foundation.
+
+**Features affected:**
+
+- [`conference-space`](conference-space.md) (`ready` on `main`, paused on
+  its branch): its access model is replaced by one private space per
+  conference, hosted under eventside's `did:web`, which attendees write to
+  and eventside reads, with an organizer-chosen list of other apps that
+  may read it. Its roles (who organizes, who's a member) become feed
+  audiences and moderators. It needs a rewrite before feeds can be built,
+  so feeds depends on it.
+- [`space-sync`](space-sync.md) (`analysis`): its model mostly holds:
+  members can only `read_self`, the appview reads everything and serves
+  views. Two things change. The space's authority is eventside itself, so
+  the appview doesn't need a delegation token from an organizer's session
+  to get credentials. And the app allow-list is the organizer's to
+  extend, not fixed to the appview. Its index is what feeds are assembled
+  from.
+- [`block-actions`](block-actions.md) (`analysis`): actions already live
+  in the attendee's repo in the space, which fits. Its views
+  (`actionTally`, `actionList`) and computed cards overlap: either views
+  stay as sources inside cards, or `getCardData` subsumes them. Its live
+  `subscribeSources` socket is the natural carrier for live feeds.
+- [`block-offline`](block-offline.md) (`analysis`): posting offline goes
+  through its queue, and cached feeds sit beside its optimistic overlay.
+- [`block-sandbox`](block-sandbox.md) (`analysis`): wasm feed algorithms
+  would run on its runtime later (not for Nov 1).
+- [`ui-blocks`](ui-blocks.md) (`complete`): unchanged code, but its "Feed
+  shape" decision (one timeline with scoped sub-feeds) is generalized into
+  feeds, and the `feed` surface gets its real host.
+- [`attendee-sign-in`](attendee-sign-in.md) (`complete`): posting as an
+  attendee needs a `space:` write scope on `app.eventside.feed.*` added to
+  the sign-in scope list, which asks existing sessions to sign in again.
+- [`plans`](plans.md) (`design-review`): plans become feeds (each plan's
+  chat), plan items are posts, and its "changed", "invited you" and
+  "featured" reasons and "past plans drop out" become algorithm rules. Its
+  audiences (groups, connections) have to use feed audience kinds.
+
+**New shared surfaces:**
+
+- Lexicons: the feed record, the post record, pin, hide and author-bar
+  records, and the audience kinds shared by feeds and posts.
+- The skeleton API that every algorithm implements, built-in or outside.
+- `getFeed` (hydrated, filtered per viewer) and `getCardData`, which every
+  experience (polls, Q&A, mark-safe, plans, chat) builds on.
+- The per-viewer visibility check, which other features will call to
+  decide what a viewer may see.
+- The app's navigation: every screen is a feed.
+
+**Verdict:** cross-cutting. It adds lexicons and XRPC endpoints that every
+experience builds on, sets the app's navigation, changes the premise of
+`conference-space` and `space-sync`, and reshapes `plans` and
+`block-actions`. It needs a design review, and it depends on the
+`conference-space` rewrite for the private space it reads from.
 
 ## Design review
 
