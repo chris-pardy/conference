@@ -832,46 +832,17 @@ records are still judged by their commit `repoRev` against membership
 periods (see "Which records count"). The periods now come from signed
 decisions.
 
-#### Hosting from a person's own account (round 5)
+#### Hosting from a person's own account (deferred)
 
-A small event (Sanne & Joost's wedding) can use a person's own DID as its
-authority instead of a minted organization. The person is its super admin.
-
-**"Host events from your account":** `eventside admin org host
-<handle>` (the CLI for the MVP, a PWA screen later):
-
-1. An OAuth sign-in with purpose `host`, asking for `identity:*` besides
-   `ADMIN_SCOPES`. It's a separate grant, not in `LOGIN_SCOPES`.
-2. `com.atproto.identity.requestPlcOperationSignature`, so their PDS emails
-   them a code.
-3. They enter the code. `com.atproto.identity.signPlcOperation` produces
-   one update that keeps their document as it is and adds:
-   - the service `#atproto_space_host` → our `PUBLIC_URL`
-   - the verification methods `#atproto_space` (credentials) and
-     `#eventside_attest` (signing), keys our server generates and holds
-   Their own `#atproto` signing key and their rotation keys are untouched.
-4. We submit it with `com.atproto.identity.submitPlcOperation`, check the
-   resolved document, and record the authority with them as super admin
-   (the same as `org adopt`).
-
-- **Leaving us:** `org unhost`, the same email-confirmed update, removing
-  the three entries. Signatures made before stay checkable only while the
-  key is listed, so unhosting first exports the decision log.
-- **`did:web`:** the CLI prints the three entries to add to `did.json`, then
-  `org adopt` checks them.
-- **A key published as a record in their repo** was considered and left
-  out: it doesn't make us the space host, and deleting it would break every
-  signature.
-
-**What vivarium needs** (we add it, as with 0.0.3):
-
-- **Deferring to a declared host:** a vivarium account whose DID document
-  names another `#atproto_space_host` must not host spaces under that DID
-  itself. Round 3 already noted it refuses writes then.
-- **`identity:*` over OAuth:** vivarium's `identity` endpoints take session
-  ("access") auth. They need to accept an OAuth session that holds
-  `identity:*`. Its signature token check accepts any token, which is fine
-  for tests.
+Small events that use a person's own DID as their authority were raised in
+round 5 and deferred by the user ("don't worry about the personal accounts
+for now"). The sketch, for when it comes back:
+- **Setup:** one email-confirmed PLC update (`requestPlcOperationSignature`,
+  `signPlcOperation`, `submitPlcOperation`, with `identity:*`) adds our
+  `#atproto_space_host` and our `#atproto_space` and `#eventside_attest`
+  keys. The person's own keys are untouched.
+- **Vivarium** would need to defer to a declared host for its own accounts,
+  and accept OAuth `identity:*` on those endpoints.
 
 #### Components
 
@@ -1244,10 +1215,10 @@ quietly changed other people's memberships.
   document. That's acceptable: "any app with the private key part can
   attest records. Whomever is managing the org DID document is in charge."
 - Small events that use a person's own DID, not an organization's, need a
-  way to publish a signing key too.
+  way to publish a signing key too. Later in the round the user deferred
+  this: "don't worry about the personal accounts for now".
 
-**Changes** (see "Signed decisions" and "Hosting from a person's own
-account" above):
+**Changes** (see "Signed decisions" above):
 
 - Every permission record, join and leave is checked by our server when
   it's taken, then signed with the authority's `#eventside_attest` key.
@@ -1266,12 +1237,10 @@ account" above):
 - Staff can issue codes.
 - Admin records are never deleted. Our host keeps a decision log of
   verified signed records, so deleting one doesn't withdraw it.
-- A person's own DID can be an authority: one email-confirmed PLC update
-  adds our space host and our two keys (`org host`, `org unhost`).
-  Vivarium needs two additions for it.
+- Hosting from a person's own DID is sketched and deferred.
 - **Alternatives considered:**
   - a key published as a record in the admin space or the person's repo:
-    rejected, it doesn't make us the host and is fragile on deletion
+    rejected, because deleting the record breaks every signature
   - receipts in a repo the authority owns: deferred until we run the
     reference PDS; same rule for readers
 
@@ -1301,14 +1270,10 @@ account" above):
 - **TC-63 (new):** *Rotating the signing key keeps earlier decisions.*
   After the operator adds a new signing key, Bram (admitted before) is still
   a member, and a new admission is signed with the new key.
-- **TC-64 (new):** *Sanne hosts her wedding from her own account.* After
-  `org host` and the emailed code, her DID document names our server as
-  host with our two keys, and her own signing key is unchanged. She creates
-  the wedding as its super admin, and Ana joins with the invite link.
-- **TC-65 (new):** *A join written by another app is a request.* Ana writes
+- **TC-64 (new):** *A join written by another app is a request.* Ana writes
   a join with a valid code from another app, without our signature. With
   requests on she's pending; otherwise she isn't a member.
-- **TC-66 (new):** *Staff can issue codes.* Pim issues a shared code, and
+- **TC-65 (new):** *Staff can issue codes.* Pim issues a shared code, and
   Bram joins with it.
 - Unchanged in meaning: TC-13, TC-14, TC-18, TC-50, TC-51, TC-52 and TC-54.
   Their checks move to signing time. The frozen tests may need no change,
