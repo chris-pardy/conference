@@ -843,6 +843,12 @@ for now"). The sketch, for when it comes back:
   keys. The person's own keys are untouched.
 - **Vivarium** would need to defer to a declared host for its own accounts,
   and accept OAuth `identity:*` on those endpoints.
+- **The user's preferred direction (2026-10-07):** revisit it with
+  **records plus access delegates** rather than a DID-document change. The
+  person publishes a record that delegates to our server, and our signatures
+  point to that delegation. Two problems to solve then: the space host
+  (without `#atproto_space_host`, spaces fall back to the person's PDS),
+  and deleting the delegation record, which the decision log could cover.
 
 #### Components
 
