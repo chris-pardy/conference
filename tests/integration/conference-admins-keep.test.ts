@@ -1,14 +1,15 @@
 import { afterAll, beforeAll, expect, test, vi } from '@vivarium-dev/client/vitest'
-import { eventually, ownSpaceRecords } from '../support/atproto.ts'
 import {
   Attendee,
   accountsIn,
-  addAdmin,
   cli,
+  cliOk,
   type Deployment,
   deploy,
   memberAction,
   seedConference,
+  sharedCode,
+  uniqueCode,
 } from '../support/conference.ts'
 
 // Seeding an organization takes several CLI runs and OAuth round trips.
@@ -22,39 +23,22 @@ afterAll(async () => {
   await dep?.stop()
 })
 
-test('TC-58: An owner can keep the people a departing admin let in', async ({ viv }) => {
-  const { org, conference, superAdmin, admins } = await seedConference(dep, accountsIn(viv), {
-    staff: ['pim'],
-    methods: ['code'],
-  })
+test('TC-58: An owner can undo a former admin’s admissions', async ({ viv }) => {
+  const { org, conference, admins } = await seedConference(dep, accountsIn(viv), { staff: ['pim'], methods: ['code'] })
+  const code = await sharedCode(dep, conference, uniqueCode('atmosphere27'))
   const bram = await Attendee.signIn(dep, await viv.createAccount(viv.handle('bram')))
+  const ana = await Attendee.signIn(dep, await viv.createAccount(viv.handle('ana')))
+  // Ana joined with a code, and Pim admitted her too; Bram has only Pim's say-so.
+  expect((await ana.join({ conference: conference.space, code })).body.status).toBe('joined')
   expect((await memberAction(dep, conference, ['member', 'add'], bram.person, { as: admins.pim })).code).toBe(0)
-  expect(await bram.isMember(conference.space)).toBe(true)
+  expect((await memberAction(dep, conference, ['member', 'add'], ana.person, { as: admins.pim })).code).toBe(0)
+  await cliOk(dep, ['org', 'admin', 'remove', admins.pim.handle, '--org', org.did])
+  expect(await bram.isMember(conference.space), 'Pim’s admission still stands (TC-53)').toBe(true)
 
-  // Olga removes Pim, and keeps Pim's admissions.
-  const removed = await cli(dep, ['org', 'admin', 'remove', admins.pim.handle, '--org', org.did, '--keep-admissions'])
-  expect(removed.code, removed.stderr).toBe(0)
+  // Olga undoes Pim's admissions.
+  const undone = await cli(dep, ['org', 'admin', 'undo', admins.pim.handle, '--org', org.did, '--admissions'])
+  expect(undone.code, undone.stderr).toBe(0)
 
-  expect(await bram.isMember(conference.space), 'Bram is still a member').toBe(true)
-  // Now on Olga's say-so: her own member record admits him.
-  const hers = await ownSpaceRecords(viv.url, superAdmin, org.adminSpace, 'app.eventside.admin.member')
-  expect(
-    hers.some((r) => r.value.subject === bram.person.did && r.value.space === conference.space && !r.value.until),
-    'Olga’s member record for Bram',
-  ).toBe(true)
-
-  // Without that choice, TC-53 applies.
-  const lotte = await viv.createAccount(viv.handle('lotte'))
-  await addAdmin(dep, org, lotte, 'staff')
-  const cas = await Attendee.signIn(dep, await viv.createAccount(viv.handle('cas')))
-  expect((await memberAction(dep, conference, ['member', 'add'], cas.person, { as: lotte })).code).toBe(0)
-  expect(await cas.isMember(conference.space)).toBe(true)
-  const plain = await cli(dep, ['org', 'admin', 'remove', lotte.handle, '--org', org.did])
-  expect(plain.code, plain.stderr).toBe(0)
-  await eventually(
-    () => cas.isMember(conference.space),
-    (member) => !member,
-    'Cas stops being a member',
-  )
-  expect(await bram.isMember(conference.space), 'Bram is still in').toBe(true)
+  expect(await bram.isMember(conference.space), 'Bram is no longer a member').toBe(false)
+  expect(await ana.isMember(conference.space), 'Ana still is, through her code').toBe(true)
 })

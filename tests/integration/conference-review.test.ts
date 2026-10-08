@@ -769,28 +769,6 @@ test('TC-52: a decision staff can’t make isn’t left on record to count later
   expect(await ana.isMember(conference.space)).toBe(true)
 })
 
-test('TC-58: what a kept member wrote before the keep is still shown (review round 11)', async ({ viv }) => {
-  const { org, conference, superAdmin, admins } = await seedConference(dep, accountsIn(viv), {
-    staff: ['pim'],
-    methods: ['code'],
-  })
-  const bramAccount = await viv.createAccount(viv.handle('bram'))
-  const bram = await Attendee.signIn(dep, bramAccount)
-  await cliOk(dep, ['member', 'add', bramAccount.handle, '--conference', conference.space, '--as', admins.pim.handle])
-  await writeSpaceRecord(viv.url, bramAccount, conference.space, NSID.event, plan('Bram’s canal walk'))
-  const asOlga = await Attendee.signIn(dep, superAdmin)
-  const bramsPlans = async () => {
-    const answer = await asOlga.listRecords(conference.space, NSID.event)
-    expect(answer.status).toBe(200)
-    return (answer.body.records as Json[]).filter((r) => r.author === bramAccount.did)
-  }
-  await eventually(bramsPlans, (records) => records.length === 1, 'Bram’s plan is listed')
-
-  await cliOk(dep, ['org', 'admin', 'remove', admins.pim.handle, '--org', org.did, '--keep-admissions'])
-  expect(await bram.isMember(conference.space)).toBe(true)
-  expect(await bramsPlans(), 'his plan from before the keep').toHaveLength(1)
-})
-
 test('TC-16: a bad role on an unresolved row refuses the import, and re-importing adds nothing twice (review round 11)', async ({
   viv,
 }) => {
@@ -853,80 +831,7 @@ test('TC-32: a list role another owner gave is taken over by a later import, and
   expect(answer.body.role, 'Kees’s list gives the role now').toBe('speaker')
 })
 
-test('TC-53: losing an owner’s code is reported, and demoting them can keep its admissions (review round 12)', async ({
-  viv,
-}) => {
-  const { org, conference } = await seedConference(dep, accountsIn(viv), { methods: ['code'] })
-  const kees = await viv.createAccount(viv.handle('kees'))
-  const sem = await viv.createAccount(viv.handle('sem'))
-  await addAdmin(dep, org, kees, 'owner')
-  await addAdmin(dep, org, sem, 'owner')
-  const keesCode = (
-    await cliOkJson(dep, [
-      'codes',
-      'issue',
-      '--conference',
-      conference.space,
-      '--shared',
-      uniqueCode('kees'),
-      '--as',
-      kees.handle,
-    ])
-  ).codes[0]
-  const semCode = (
-    await cliOkJson(dep, [
-      'codes',
-      'issue',
-      '--conference',
-      conference.space,
-      '--shared',
-      uniqueCode('sem'),
-      '--as',
-      sem.handle,
-    ])
-  ).codes[0]
-  const ana = await Attendee.signIn(dep, await viv.createAccount(viv.handle('ana')))
-  const bram = await Attendee.signIn(dep, await viv.createAccount(viv.handle('bram')))
-  expect((await ana.join({ conference: conference.space, code: keesCode })).body.status).toBe('joined')
-  expect((await bram.join({ conference: conference.space, code: semCode })).body.status).toBe('joined')
-
-  // Kees made staff, keeping who his code let in.
-  const demoted = await cliOk(dep, [
-    'org',
-    'admin',
-    'add',
-    kees.handle,
-    '--org',
-    org.did,
-    '--role',
-    'staff',
-    '--keep-admissions',
-  ])
-  expect(demoted.stdout).toContain(ana.person.handle)
-  expect(await ana.isMember(conference.space), 'kept').toBe(true)
-
-  // Sem removed without keeping: the people his code let in are named.
-  const removed = await cliOk(dep, ['org', 'admin', 'remove', sem.handle, '--org', org.did])
-  expect(removed.stdout).toContain(bram.person.handle)
-  expect(await bram.isMember(conference.space)).toBe(false)
-})
-
 // Regressions from adversarial review round 13.
-
-test('TC-28: removing an owner names who their ban no longer keeps out (review round 13)', async ({ viv }) => {
-  const { org, conference } = await seedConference(dep, accountsIn(viv), { methods: ['code'] })
-  const kees = await viv.createAccount(viv.handle('kees'))
-  await addAdmin(dep, org, kees, 'owner')
-  const code = await sharedCode(dep, conference, uniqueCode('atmosphere27'))
-  const bram = await Attendee.signIn(dep, await viv.createAccount(viv.handle('bram')))
-  expect((await bram.join({ conference: conference.space, code })).body.status).toBe('joined')
-  await cliOk(dep, ['member', 'ban', bram.person.handle, '--conference', conference.space, '--as', kees.handle])
-
-  const demoted = await cliOk(dep, ['org', 'admin', 'add', kees.handle, '--org', org.did, '--role', 'staff'])
-  expect(demoted.stdout, 'the demotion names Bram').toContain(bram.person.handle)
-  const removed = await cliOkJson(dep, ['org', 'admin', 'remove', kees.handle, '--org', org.did])
-  expect(removed.letBackIn).toEqual([])
-})
 
 test('TC-34: an owner’s list role taken over by another owner keeps its time; a different one isn’t replaced (review round 13)', async ({
   viv,
@@ -960,58 +865,6 @@ test('TC-34: an owner’s list role taken over by another owner keeps its time; 
 
 // Regressions from adversarial review round 14.
 
-test('TC-52: promoting staff to owner reports, or keeps, who its re-ranked decisions take out (review round 14)', async ({
-  viv,
-}) => {
-  const { org, conference, admins } = await seedConference(dep, accountsIn(viv), {
-    staff: ['pim', 'lotte'],
-    methods: ['code'],
-  })
-  const code = await sharedCode(dep, conference, uniqueCode('atmosphere27'))
-  const ana = await Attendee.signIn(dep, await viv.createAccount(viv.handle('ana')))
-  expect((await ana.join({ conference: conference.space, code })).body.status).toBe('joined')
-  const as = (who: { handle: string }, action: string) =>
-    cliOk(dep, ['member', action, ana.person.handle, '--conference', conference.space, '--as', who.handle])
-  await as(admins.pim, 'remove')
-  await as(admins.lotte, 'add')
-  expect(await ana.isMember(conference.space)).toBe(true)
-
-  // Pim's removal would now outrank Lotte's later admission.
-  const promoted = await cliOk(dep, [
-    'org',
-    'admin',
-    'add',
-    admins.pim.handle,
-    '--org',
-    org.did,
-    '--role',
-    'owner',
-    '--keep-admissions',
-  ])
-  expect(promoted.stdout).toContain(ana.person.handle)
-  expect(await ana.isMember(conference.space), 'kept').toBe(true)
-})
-
-test('TC-28: re-adding a removed owner reports who their old ban takes out again (review round 14)', async ({
-  viv,
-}) => {
-  const { org, conference } = await seedConference(dep, accountsIn(viv), { methods: ['code'] })
-  const kees = await viv.createAccount(viv.handle('kees'))
-  await addAdmin(dep, org, kees, 'owner')
-  const code = await sharedCode(dep, conference, uniqueCode('atmosphere27'))
-  const bram = await Attendee.signIn(dep, await viv.createAccount(viv.handle('bram')))
-  expect((await bram.join({ conference: conference.space, code })).body.status).toBe('joined')
-  await cliOk(dep, ['member', 'ban', bram.person.handle, '--conference', conference.space, '--as', kees.handle])
-  const removed = await cliOkJson(dep, ['org', 'admin', 'remove', kees.handle, '--org', org.did])
-  expect(removed.letBackIn.map((p: Json) => p.did)).toContain(bram.person.did)
-
-  const readded = await cliOkJson(dep, ['org', 'admin', 'add', kees.handle, '--org', org.did, '--role', 'owner'])
-  expect(
-    readded.lost.map((p: Json) => p.did),
-    'his ban counts again',
-  ).toContain(bram.person.did)
-})
-
 test('TC-32: removing the owner whose list last gave a role hands it to another owner whose list gives it too (review round 14)', async ({
   viv,
 }) => {
@@ -1034,34 +887,6 @@ test('TC-32: removing the owner whose list last gave a role hands it to another 
 })
 
 // Regressions from adversarial review round 15.
-
-test('TC-58: re-adding an owner while keeping admissions keeps someone their old ban would take out (review round 15)', async ({
-  viv,
-}) => {
-  const { org, conference } = await seedConference(dep, accountsIn(viv), { methods: ['code'] })
-  const kees = await viv.createAccount(viv.handle('kees'))
-  await addAdmin(dep, org, kees, 'owner')
-  const code = await sharedCode(dep, conference, uniqueCode('atmosphere27'))
-  const bram = await Attendee.signIn(dep, await viv.createAccount(viv.handle('bram')))
-  expect((await bram.join({ conference: conference.space, code })).body.status).toBe('joined')
-  await cliOk(dep, ['member', 'ban', bram.person.handle, '--conference', conference.space, '--as', kees.handle])
-  await cliOk(dep, ['org', 'admin', 'remove', kees.handle, '--org', org.did])
-  expect(await bram.isMember(conference.space)).toBe(true)
-
-  const readded = await cliOk(dep, [
-    'org',
-    'admin',
-    'add',
-    kees.handle,
-    '--org',
-    org.did,
-    '--role',
-    'owner',
-    '--keep-admissions',
-  ])
-  expect(readded.stdout).toContain(bram.person.handle)
-  expect(await bram.isMember(conference.space), 'kept, as the command says').toBe(true)
-})
 
 test('TC-32: demoting an owner hands their list roles on, or they stop counting (review round 15)', async ({ viv }) => {
   const { org, conference } = await seedConference(dep, accountsIn(viv), { methods: ['list'] })
