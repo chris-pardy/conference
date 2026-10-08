@@ -1,5 +1,5 @@
 ---
-status: blocked
+status: implementing
 impact: cross-cutting
 depends-on: [attendee-sign-in]
 branch: feature/conference-space
@@ -3722,3 +3722,21 @@ it adds an old-key copy instead of replacing the record (see
   by `now` (#4, #5), `codes revoke` (#6); decide #3.
 - **(b) Fix them, then review once more** (round 18).
 - **(c) Ship as is**, recording #2 and #3 as accepted gaps.
+
+**Decision (the user, 2026-10-08):** "good to go to round 20", agreeing to
+the plan proposed after round 17:
+- **Rework:** fix round 17 #1 (accept write notices from former admins in
+  the admin space, so their edits and deletions reach the live index), #2
+  (a join by code counts at the code issuer's rank), #4 (resolve the
+  pending journal entry after a failed read-back) and #5 (don't carry a
+  fast clock forward into later `signedAt`s).
+- **Accepted by design:** #3, rejoining by deleting your own leave. A later
+  ban or removal still stands over it.
+- **Approved test fix:** TC-63's test in `conference-signed.test.ts`
+  (acdcbc5) gets one fix. It builds Dirk's record URI from the `rkey` that
+  `listRecords` returns, instead of reading `dirkBefore.uri`, so the old-key
+  copy replaces the original record. Commit it on its own:
+  `test(conference-space): TC-63 build the record URI from its rkey
+  (approved)`.
+- **Review rounds 18 to 20.** If round 20 isn't clean, set
+  `status: blocked`.
