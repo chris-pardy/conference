@@ -316,8 +316,9 @@ Plans you went to stay in your history, with their page and chat.
   `childOf`, and featuring needs its notion of who counts as an organizer
   (co-owners).
 - [`feeds`](feeds.md) (being specced; it replaced `conference-feed`): it
-  has to carry plan items with the reasons "changed", "invited you" and "featured", pins for featured
-  whole-conference plans, and the rule that past plans drop out.
+  has to carry plan items with the reasons "changed", "invited you" and
+  "featured", pins for featured whole-conference plans, and the rule that
+  past plans drop out.
 - [`groups`](groups.md) and [`places`](places.md) (not specced): plans
   defines how it references them (a group URI in an audience, a place URI
   in a location), which sets their public shape before they're
