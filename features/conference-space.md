@@ -363,6 +363,319 @@ It needs a design review.
 
 ## Design review
 
+**Approach.**
+
+- **The authority** is the organization's own account on a PDS that
+  supports spaces. In tests that's vivarium's PDS (`createAccount`).
+  - The PDS mints its `did:plc`, and its repo is a normal repo.
+  - At setup, one PLC operation adds three entries to its DID document:
+    - `#atproto_space_host`, naming eventside;
+    - `#atproto_space`, the key eventside signs space credentials with;
+    - `#eventside_attest`, the key eventside signs decisions with.
+  - The operation needs the account's email token, which vivarium's mail
+    catcher supplies in tests.
+  - Eventside holds a session for the organization account and writes as
+    it.
+  - Because the authority's repo is an ordinary one:
+    - the authority's records in the space are read the way any writer's
+      are, from its PDS;
+    - the public calendar event and its sidecar live in the
+      organization's public repo, as the brainstorm says;
+    - the same path serves personal DIDs later.
+  - The old branch minted a PDS-less `did:plc` instead. That would have
+    meant our host keeping a repo for it (MST, commits, `listRepoOps` in
+    vivarium's format) and answering as its PDS. This approach drops that
+    work.
+- **The space** is `app.eventside.private`, with one rkey per conference.
+  Eventside is the space host.
+  - **Writers:** the host's member list, mirrored from the decisions. The
+    authority is always a writer.
+  - **Credentials** (a change from the old `credential.rs`):
+    - A member's delegation only ever gets `read_self`.
+    - Eventside's own client reads everything.
+    - Another app reads everything only if:
+      - it's on the allowed-apps record for `read`; **and**
+      - the delegation comes from an owner or a staff member.
+    - So attendees never read other people's records, through eventside
+      or any other app. The organizer decides which apps read the
+      conference, and does so through their own delegation.
+- **Admins act as themselves.** Each admin connects once from the CLI
+  (`eventside admin connect`, over OAuth, as on the old branch).
+  - A command run `--as <handle>` acts under that admin's session, so
+    the actor's identity is verified, not claimed.
+  - The organization account's session is what eventside writes with.
+- **Decisions.** Every admin action, and every join or leave, goes
+  through `decide(conference, subject, action, actor)`. The steps run in
+  one database transaction, with `BEGIN IMMEDIATE` so the CLI process
+  and the server serialize:
+  1. Read the subject's state **from the `decisions` log**:
+     - the last effective decision about them;
+     - its kind: `admit`, `remove`, `ban` or `role`;
+     - its rank: `owner`, `staff` or `self`.
+  2. Check the actor's role now, and apply the precedence table below.
+  3. Append the decision to the log, with a `seq` from the database.
+     Order is by `seq`, never by clock.
+  4. Write an **outbox** entry. A worker in the server applies it, and
+     replays any unapplied entries on start:
+     - write or delete the signed record in the authority's repo;
+     - update the host's member list;
+     - on removal or ban, revoke the person's outstanding credentials at
+       writers' PDSes, using the old `notify.rs`.
+
+  The log is what decides. The records in the repo are a signed,
+  readable copy of it.
+- **Precedence.** Ranks are owner > staff > self. A system actor such as
+  `program-import` acts at staff rank.
+
+  | Actor | Subject's last decision | Action | Allowed? |
+  |---|---|---|---|
+  | anyone | none, or a lapsed admission | admit (any method) | yes, unless banned |
+  | self | any admission | leave | yes, always |
+  | self | removal by staff or self | rejoin by a method | yes |
+  | self | removal by an owner | rejoin by a method | no; it needs a staff or owner admit |
+  | self | ban (any rank) | rejoin | no |
+  | staff | admission by an owner | remove, ban, change role | yes: staff may **tighten** |
+  | staff | removal or ban by an owner | admit, unban | no: staff can't **loosen** an owner's decision |
+  | staff | anything about an owner or staff member | any | only owners act on admins |
+  | owner | any | any | yes |
+  | owner | the last owner | remove, demote, leave | no: there's always one owner |
+
+  - **Unban** restores eligibility to join, not membership.
+  - **A ban** can be placed on someone who has never joined.
+  - **An owner demoted to staff** keeps owner rank on the decisions they
+    made as an owner. Those decisions still need an owner to loosen
+    them, even the person who made them.
+  - **Role changes** are decisions too. Staff can make an attendee a
+    speaker, even one an owner admitted.
+- **A former admin's decisions stand.** Decisions keep the rank they
+  were made with, and are never re-checked against anyone's current
+  role.
+- **What leaving and removal do to content.** This settles a conflict
+  between the brainstorm and [`feeds`](feeds.md):
+  - **Leave, remove or ban:** eventside stops serving that person's
+    records while they're not a member. The feeds filter adds "the
+    author is a member now".
+  - **Rejoin:** their records written while a member come back.
+  - **Records written while not a member** are never served.
+  - Feeds' acceptance decisions are kept either way. Only serving
+    depends on current membership.
+  - "When written" is the time eventside received or indexed the record,
+    never the record's `createdAt`, which its author controls.
+- **Signing.**
+  - Records are signed with the old `attest.rs` (badge.blue inline
+    attestation, with `repository` = the authority, and the log `seq` in
+    the attestation).
+  - A record counts for readers only if it verifies against an
+    `#eventside_attest` key listed in the DID document now.
+  - **Re-signing** for a key rotation is driven from the decisions log,
+    never from what's in the repo, so a record forged with a leaked key
+    isn't laundered. Re-signing changes only the key and `signedAt`. The
+    decision, its rank and its time stay the same, and nothing is
+    re-checked.
+  - For Nov 1, keys are only added. Removing one comes later.
+- **Joining** keeps the first design's flows from `conference/` on the
+  old branch, and each one ends in `decide`.
+- **Every request checks membership.** The BFF checks it on each request,
+  never from a cached session, so a removal takes effect at once.
+- **Allowed apps** are one signed record per conference,
+  `app.eventside.conference.apps`. Owners and staff can change it.
+- **"Conference created"** is an outbox entry.
+  [`feeds`](feeds.md)' worker consumes it and writes the main feed
+  record, using the authority write API below.
+
+**Components.**
+
+- **`crates/server/src/spacehost/`**, salvaged:
+  - `credential.rs`, with the new read rule;
+  - `notify.rs` and `sync.rs`, reading every writer, the authority
+    included, from its PDS;
+  - `attest.rs`;
+  - `authority.rs`, reworked: no minting; it connects the organization
+    account and adds keys by PLC operation;
+  - `index.rs`, cut down to a records index.
+- **`crates/server/src/conference/`:**
+  - `decide.rs`: the precedence table, the log, the outbox;
+  - `join.rs`;
+  - `membership.rs`;
+  - `apps.rs`;
+  - `authority_repo.rs`: put and delete records as the authority, used
+    by `decide` and by feeds;
+  - `cli.rs`;
+  - `api.rs`.
+- **A fresh migration:**
+  - authorities and their sessions;
+  - conferences;
+  - `decisions`, with `seq`;
+  - the outbox;
+  - codes, lists, requests and email HMACs;
+  - the records index.
+- **`space-sync` is folded in.** Its parts land here:
+  - eventside's credentials;
+  - registering as a syncer;
+  - backfill;
+  - the records index;
+  - the ingest hook that feeds uses.
+
+  Write notifications for records written behind eventside's back are
+  kept, but feeds and this feature mostly index on write.
+
+**Data** (each record has `$type` and `createdAt`; DIDs are `did` format):
+
+- **`app.eventside.conference.member`** (authority's repo, in the space;
+  rkey = the subject's DID): `{subject, role, method, decidedBy,
+  decidedRank, seq, decidedAt, signatures}`.
+- **`app.eventside.conference.ban`:** `{subject, decidedBy, decidedRank,
+  seq, decidedAt, signatures}`.
+- **`app.eventside.conference.apps`:** `{apps: [{client?: uri, service?:
+  did, uses: [read|cardProvider|feedGenerator]}], signatures}`.
+- **`app.eventside.conference.sidecar`** (the organization's public repo,
+  public conferences only): `{event, space, methods, theme, template}`.
+  Invite-only conferences keep their settings in eventside's database,
+  so nothing public names them. Their invite link carries the space and
+  the code.
+- **Eventside's database:** `decisions` (authoritative), the outbox,
+  codes, lists, requests, email HMACs, admin and organization sessions,
+  and the records index.
+- **Audiences for feeds:**
+  - `#organizers` = owners and staff;
+  - `#members` = everyone admitted.
+  - Speakers are members with a role, and aren't organizers.
+
+**Interfaces.**
+
+- **XRPC for the PWA:**
+  - `app.eventside.conference.get`
+  - `join`, which returns `joined`, `pending`, `emailNeeded` or `refused`
+  - `leave`
+  - `getMembership`
+- **Rust, for other features:**
+  - `membership::is_member(conf, did, at: Received)` and
+    `membership::is_member_now`;
+  - `membership::role`;
+  - `decide`;
+  - `apps::allowed(conf, id, use)`;
+  - `authority_repo::put` and `delete`;
+  - outbox events (`conference.created`).
+- **The space host:** credentials (with the new read rule),
+  notifications, revocation, and the read endpoints.
+- **The CLI:**
+  - `org connect` (the organization account, plus the PLC update)
+  - `admin connect`
+  - `conference create`
+  - `admin add|remove`
+  - `join set`
+  - `list import`
+  - `code create`
+  - `requests …`
+  - `member add|remove|ban|unban|role`
+  - `apps allow|disallow`
+
+**Edits to [`feeds`](feeds.md)** (it's `ready`, so these need the user's
+approval):
+
+- The private space's authority is the organization's DID, not
+  eventside's `did:web`.
+- Feed records count only from the authority's repo, and eventside
+  writes them through `authority_repo`.
+- `depends-on` drops `space-sync`.
+- The visibility filter adds "the author is a member now".
+- Moderator scopes: a person who becomes a moderator is asked to sign in
+  again the next time they try a moderator action.
+
+**Impact on existing features.**
+
+- **`feeds`:** as above.
+- **`space-sync`:** superseded and folded in.
+- **`block-actions`:** its ingest rule is `is_member(at: Received)`, and
+  it serves only current members' actions.
+- **`attendee-sign-in`:**
+  - adds `space:` scopes;
+  - adds `transition:email`, asked for only when needed;
+  - existing sessions are asked to sign in again.
+- **`plans`:** uses `#organizers`.
+
+**Alternatives.**
+
+- **Our host keeps a PDS-less authority's repo** (the first draft):
+  - It needs a hand-written MST, commits and `listRepoOps` in vivarium's
+    format, and a `#atproto_pds` pointing at us.
+  - The public event would then have to live in an owner's repo.
+  - Too much to get right for Nov 1.
+- **Precedence read from repo records:** a removal deletes the record, so
+  the next decision has nothing to compare against.
+- **Members reading through allowed apps:** it would expose ballots and
+  mark-safe responses to every attendee.
+- **Decisions attributed by the operator** (`--as` with no session):
+  simpler, but the role check would only be a claim.
+- **Signed decisions in each admin's own repo** (the first design):
+  rejected.
+
+**Risks.**
+
+- **The demo network.** bsky.social doesn't implement
+  `com.atproto.space.*`, so the demo's organization account needs a PDS
+  that supports spaces.
+- **Schedule.**
+  - Nov 1 is 24 days away, and feeds comes after this.
+  - Proposed Nov 1 slice:
+    - the organization account;
+    - a public conference;
+    - shared code, open joining, and a list matched by handle;
+    - the CLI;
+    - precedence from the log;
+    - adding keys.
+  - Proposed fast-follow:
+    - email matching;
+    - request and approve;
+    - personal codes;
+    - invite-only;
+    - removing keys.
+  - This slices methods you chose; it doesn't drop them. It's your call.
+- **Outbox lag.** Records reach the repo shortly after the decision
+  commits. Readers that only see the repo lag slightly. Eventside itself
+  reads the log.
+
+### Round 1
+
+The draft was critiqued before being presented. Folded in:
+
+- **Precedence comes from the decisions log, ordered by `seq`.** A
+  removal deletes the repo record, so reading precedence from records
+  lost owner removals.
+- **A full precedence table:**
+  - staff may tighten an owner's decision, but not loosen it;
+  - only owners act on admins;
+  - there's always at least one owner;
+  - the rules for unban, pre-emptive bans and demoted owners are spelled
+    out.
+- **Members only ever hold `read_self`.** Other apps read with an
+  owner's or staff member's delegation. The old credential rule let
+  every attendee read everything through an allowed app.
+- **The authority is an organization account on a PDS that supports
+  spaces**, rather than a host-kept repo for a PDS-less DID. That
+  removes the repo code, and puts the public event back in the
+  authority's repo, as the brainstorm says.
+- **Invite-only settings stay out of public repos.**
+- **Admins act under their own connected sessions.**
+- **Leaving, removal and bans stop the person's records being served**
+  until they rejoin. "When written" means when eventside received the
+  record.
+- **`decide` runs in one transaction**, with an outbox that's replayed on
+  start. Credentials are revoked, and membership is checked on every
+  request.
+- **For feeds:** an authority write API, `#organizers` defined, the
+  "created" event through the outbox, and edits to `feeds.md` listed.
+- **Re-signing** comes from the log, and only key removal is deferred.
+- **`space-sync` is folded in.**
+- **Records get `$type` and `createdAt`.**
+- **Staff can manage allowed apps**, as the brainstorm's roles say.
+- **A Nov 1 slice** is proposed.
+- The done criterion still says attendees see the main feed. That needs
+  feeds, so before feeds lands, the test for it checks that the main
+  feed record exists.
+
+Awaiting the user's review.
+
 ## Test cases
 
 ## Review log
