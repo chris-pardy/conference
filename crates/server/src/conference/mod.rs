@@ -494,11 +494,20 @@ pub async fn join(
     let admission = match conference.admits(did, code_hash.as_deref(), now, &none) {
         Some(Via::Code) => Some(Via::Code),
         // A code that doesn't admit is refused, whatever else is on, unless
-        // the person is let in by their role or the list anyway.
+        // the person is let in by their role or the list anyway. A valid
+        // code issued below the rank of a removal or denial that stands
+        // about them is refused as such, not as an invalid code.
         _ if code.is_some()
             && !matches!(conference.admits(did, None, now, &none), Some(Via::Role | Via::List)) =>
         {
-            return if hidden { not_found() } else { invalid_code() };
+            let valid = code_hash.as_deref().is_some_and(|h| {
+                conference.settings.has("code") && conference.code_admits(h, did, now, &none)
+            });
+            return match (hidden, valid) {
+                (true, _) => not_found(),
+                (false, true) => Json(answer("refused")).into_response(),
+                (false, false) => invalid_code(),
+            };
         }
         other => other,
     };
@@ -547,7 +556,10 @@ pub async fn join(
                 {
                     return Err(CODE_INVALID.into());
                 }
-                true
+                // A join by code counts at the rank the code was issued at.
+                conference
+                    .code_rank(hash)
+                    .is_some_and(|rank| conference.join_stands_over(&user_did, rank))
             }
             (Some(_), _) => conference.admits(&user_did, None, now, &BTreeSet::new()).is_some(),
             (None, _) => conference.settings.has("request"),
@@ -861,7 +873,10 @@ async fn try_email_step(state: &AppState, id_hash: &str, space: &str) -> Result<
         let Some(conference) = org.conference(&conference_space) else {
             return Err(REFUSED.into());
         };
-        let listed = conference.list.iter().any(|e| e.email_hmac.as_deref() == Some(&hmac));
+        // At the rank its row was imported at, like any join by a rule.
+        let listed = conference
+            .email_rank(&hmac)
+            .is_some_and(|rank| conference.join_stands_over(&did, rank));
         if conference.banned.contains(&did) || !conference.settings.has("list") || !listed {
             return Err(REFUSED.into());
         }

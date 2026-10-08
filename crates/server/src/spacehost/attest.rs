@@ -38,7 +38,7 @@ pub const FUTURE_US: u64 = 5 * 60 * 1_000_000;
 /// How long a pending journal entry blocks others. One older than this is
 /// from a signing that never finished (a crash), and counts for nothing.
 const PENDING_MS: i64 = 2 * 60_000;
-/// How long a finished journal entry that isn't a code's use is kept.
+/// How long a journal entry is kept, unless it's a code's committed use.
 const PRUNE_MS: i64 = 24 * 60 * 60_000;
 
 /// The rank a signature records: the role of whoever acted when our host
@@ -472,8 +472,8 @@ async fn reserve_in(
     .await
     .map_err(db)?;
     let lock = if backend == Backend::Postgres { " FOR UPDATE" } else { "" };
-    let (next_seq, last_signed) = sqlx::query_as::<_, (i64, i64)>(&format!(
-        "SELECT next_seq, last_signed_at FROM signing_counters WHERE authority = $1{lock}"
+    let next_seq = sqlx::query_scalar::<_, i64>(&format!(
+        "SELECT next_seq FROM signing_counters WHERE authority = $1{lock}"
     ))
     .bind(authority)
     .fetch_one(&mut *conn)
@@ -481,10 +481,35 @@ async fn reserve_in(
     .map_err(db)?;
     let now = now_ms();
     let live = now - PENDING_MS;
-    // Finished entries matter only for a code's uses; the rest are pruned.
+    let org = index::load(state, authority)
+        .await?
+        .ok_or_else(|| format!("{authority} isn't an organization we host"))?;
+    // A pending entry whose record the index now has (it was written, but
+    // reading it back failed, and the write notification brought it in) is
+    // committed: it no longer blocks, and a code's use stays counted.
+    let pending = sqlx::query_scalar::<_, i64>(
+        "SELECT seq FROM signing_journal WHERE authority = $1 AND state = 'pending'",
+    )
+    .bind(authority)
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(db)?;
+    for seq in pending.into_iter().filter(|seq| org.seqs.contains(&(*seq as u64))) {
+        sqlx::query(
+            "UPDATE signing_journal SET state = 'committed' WHERE authority = $1 AND seq = $2",
+        )
+        .bind(authority)
+        .bind(seq)
+        .execute(&mut *conn)
+        .await
+        .map_err(db)?;
+    }
+    // Entries matter only for a code's uses once they're done, or have
+    // lapsed: the rest are pruned, and so is a code's entry that never
+    // committed.
     sqlx::query(
-        "DELETE FROM signing_journal WHERE authority = $1 AND code_hash IS NULL \
-         AND state <> 'pending' AND created_at < $2",
+        "DELETE FROM signing_journal WHERE authority = $1 AND created_at < $2 \
+         AND (code_hash IS NULL OR state <> 'committed')",
     )
     .bind(authority)
     .bind(now - PRUNE_MS)
@@ -512,22 +537,20 @@ async fn reserve_in(
     }
     let mut journal = Journal::default();
     if let Some(code_hash) = &claim.code_hash {
+        // A pending use counts until it's committed, voided or pruned: one
+        // whose record is written but not yet indexed still uses the code.
         journal.code_users = sqlx::query_scalar::<_, String>(
             "SELECT DISTINCT subject FROM signing_journal WHERE authority = $1 AND code_hash = $2 \
-             AND subject IS NOT NULL AND (state = 'committed' OR (state = 'pending' AND created_at > $3))",
+             AND subject IS NOT NULL AND state <> 'void'",
         )
         .bind(authority)
         .bind(code_hash)
-        .bind(live)
         .fetch_all(&mut *conn)
         .await
         .map_err(db)?
         .into_iter()
         .collect();
     }
-    let org = index::load(state, authority)
-        .await?
-        .ok_or_else(|| format!("{authority} isn't an organization we host"))?;
     let rank = match signer {
         Signer::Person(_) => Rank::Person,
         Signer::Admin(did) => Rank::of_admin(&org, did).ok_or_else(|| {
@@ -538,7 +561,11 @@ async fn reserve_in(
         check(&org, &journal)?;
     }
     let seq = (next_seq.max(1) as u64).max(org.max_seq + 1);
-    let signed_ms = now.max(last_signed + 1);
+    // `seq` orders; `signedAt` is the clock now. It isn't carried forward
+    // from the last signing, so one signed while the clock ran fast doesn't
+    // date every later one ahead (past what readers accept) once it's put
+    // right.
+    let signed_ms = now;
     sqlx::query(
         "UPDATE signing_counters SET next_seq = $2, last_signed_at = $3 WHERE authority = $1",
     )

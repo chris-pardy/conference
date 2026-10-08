@@ -3648,8 +3648,9 @@ The round 16 regressions are in a new file,
 
 Reviewer: a fresh subagent following `adversarial-review`. Verdict: not
 clean (0 blocking, 1 major, 4 minor, 1 nit). Both freeze checks report only
-the approved changes, and `pnpm check` is green. Not reworked: round 17 was
-the last round allowed (see "Blocked after round 17").
+the approved changes, and `pnpm check` is green. Reworked after the user's
+decision of 2026-10-08 (see "Blocked after round 17"); what was done is noted
+under each finding.
 
 1. **[major] A former admin's edits and deletions in the admin space never
    reach the live index**, because `notifyWrite` takes admin-space writes
@@ -3658,25 +3659,67 @@ the last round allowed (see "Blocked after round 17").
    then deletes his ban: Bram is refused until a `reindex`, then joins.
    Suggested fix: accept admin-space notices from everyone `named_admins`
    lists (only verified records count anyway).
+   **Fixed:** the admin space takes write notices from everyone an `admin`
+   record names, former admins included; our host still signs nothing new
+   for them. Integration "TC-53: a former admin's deletion reaches the index
+   without a reindex (review round 17)"; Rust
+   `a_former_admins_writes_to_the_admin_space_are_taken`.
 2. **[minor] Staff can still let someone an owner removed back in by
    issuing them a code**: a person's own join stands over any removal, and
    staff may issue codes. Round 16 closed the role path only. Suggested fix:
    give a code join the rank of the code that admitted it.
+   **Fixed:** a join counts at the rank of the rule that admits it: a code
+   at the rank it was issued at, a role at the rank it was given at, a list
+   row (by DID or email) at the rank it was imported at. It stands over a
+   standing removal or denial only if that rank is at least the
+   decision's; otherwise it's refused when it's signed (`refused`, not an
+   invalid code). An open conference still admits anyone not banned. The
+   join's own standing decision is still the person's (`self`), so staff can
+   still remove someone who joined with the super admin's code (TC-52).
+   Role and list are the same gap as the code, so they're closed with it.
+   Integration "TC-52: staff can't let someone an owner removed back in
+   with a code (review round 17)"; Rust
+   `a_join_counts_at_the_rank_of_the_rule_that_admits_it`.
 3. **[minor] A person who left can rejoin, with no rule admitting them now,
    by deleting their own signed leave** ("records are the source of
    truth"). Suggested: a journal tombstone for committed leaves, or accept.
+   **Accepted by design** (the user, 2026-10-08): rejoining by deleting
+   your own leave is allowed; a later ban or removal still stands over it.
 4. **[minor] After a failed read-back (round 16 #3), the journal entry
    stays pending for good**: nothing commits it when the write notification
    indexes the record, so decisions about the person get "try again" for
    the full two minutes, the row is never pruned, and a code use stops
    counting after two minutes.
+   **Fixed:** the index now knows every `seq` a counting record carries;
+   each signing first commits the pending entries whose record is indexed,
+   so they stop blocking at once. A code's pending use counts until it's
+   committed, voided or pruned (not just two minutes), and any entry but a
+   code's committed use is pruned after a day, pending or not. Integration
+   "TC-55: a decision written but not read back doesn't block the next one
+   once indexed (review round 17)"; Rust
+   `the_index_knows_which_signings_are_written`.
 5. **[minor] One signing with a fast clock poisons `signedAt`** for every
    later one (it's forced strictly increasing), and readers ignore
    signatures more than five minutes ahead, so later decisions are
    reported done but don't count until real time catches up. Since `seq`
    orders, `signedAt` could just be `now`.
+   **Fixed:** `signedAt` is the clock when signing, not carried forward
+   (`seq` orders). Readers keep a membership period from ending before it
+   began if a clock is put back. Integration "TC-55: one signing with a fast
+   clock doesn't date later ones ahead (review round 17)"; Rust
+   `a_clock_put_back_doesnt_end_a_period_before_it_began`.
 6. **[nit] No way to revoke a single code** (`codes revoke`); only `org
    admin undo --codes` revokes, all of one admin's codes at once.
+   **Fixed:** `codes revoke <code> --conference <space>`, checked at the
+   code's rank like `undo --codes`. Writing it showed that `codeRevoke`
+   was missing from the admin OAuth scopes, so `org admin undo --codes`
+   could never write one either: added (admins connected before are asked
+   to reconnect, TC-45). Integration "TC-65: one code can be revoked, at
+   its issuer's rank (review round 17)".
+
+Also, as the user approved, TC-63's test now takes Dirk's `rkey` from
+`listRecords` (commit `81c62e1`, on its own), so the old-key copy replaces
+the original record instead of sitting beside it.
 
 ### Blocked after round 17
 

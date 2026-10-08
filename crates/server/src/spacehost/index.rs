@@ -289,6 +289,8 @@ pub struct Code {
 pub struct ListEntry {
     /// The owner who imported it.
     pub by: String,
+    /// The rank it was imported at.
+    pub rank: Rank,
     pub did: Option<String>,
     pub email_hmac: Option<String>,
     pub role: Option<String>,
@@ -390,6 +392,9 @@ pub struct Conference {
     /// When each role took effect: its record's `since`, else when it was
     /// signed. A role counts for what its holder wrote from then.
     role_since: BTreeMap<String, u64>,
+    /// The rank each role was given at: a person's own join (a list's
+    /// role) is `self`.
+    role_ranks: BTreeMap<String, Rank>,
     /// When each person was an admin of the organization, from the super
     /// admin's `orgAdmin` and `orgAdminRemoved` member records.
     admin_periods: BTreeMap<String, Vec<Period>>,
@@ -517,8 +522,37 @@ impl Conference {
         }
     }
 
+    /// Whether a join that a rule decided at `rank` admits may stand over
+    /// the decision about `did` that stands now: a removal or denial stands
+    /// unless the rule's rank is at least its own. So a code staff issued,
+    /// or a role staff gave, doesn't let back in someone an owner removed.
+    pub fn join_stands_over(&self, did: &str, rank: Rank) -> bool {
+        match self.people.get(did).and_then(|s| s.decision) {
+            Some((above, false)) => rank >= above,
+            _ => true,
+        }
+    }
+
+    /// The rank a code was issued at.
+    pub fn code_rank(&self, hash: &str) -> Option<Rank> {
+        self.codes.get(hash).map(|c| c.rank)
+    }
+
+    /// The highest rank of the list rows naming `did`.
+    fn list_rank(&self, did: &str) -> Option<Rank> {
+        self.list.iter().filter(|e| e.did.as_deref() == Some(did)).map(|e| e.rank).max()
+    }
+
+    /// The highest rank of the list rows with an email's HMAC.
+    pub fn email_rank(&self, hmac: &str) -> Option<Rank> {
+        self.list.iter().filter(|e| e.email_hmac.as_deref() == Some(hmac)).map(|e| e.rank).max()
+    }
+
     /// The rule that admits a join by `did` now, if any: a pre-assigned
     /// role, the attendee list by DID, a valid code, or an open conference.
+    /// A role, list row or code counts only at the rank it was given at
+    /// ([`Self::join_stands_over`]); an open conference admits anyone not
+    /// banned.
     pub fn admits(
         &self,
         did: &str,
@@ -527,13 +561,18 @@ impl Conference {
         also: &BTreeSet<String>,
     ) -> Option<Via> {
         let settings = &self.settings;
-        if self.roles.contains_key(did) && (!self.list_roles.contains(did) || settings.has("list"))
+        let stands = |rank: Option<Rank>| rank.is_some_and(|rank| self.join_stands_over(did, rank));
+        if self.roles.contains_key(did)
+            && (!self.list_roles.contains(did) || settings.has("list"))
+            && stands(self.role_ranks.get(did).copied())
         {
             Some(Via::Role)
-        } else if settings.has("list") && self.on_list(did) {
+        } else if settings.has("list") && stands(self.list_rank(did)) {
             Some(Via::List)
         } else if settings.has("code")
-            && code_hash.is_some_and(|h| self.code_admits(h, did, now_us, also))
+            && code_hash.is_some_and(|h| {
+                self.code_admits(h, did, now_us, also) && stands(self.code_rank(h))
+            })
         {
             Some(Via::Code)
         } else if settings.has("open") {
@@ -625,6 +664,8 @@ pub struct Org {
     pub conferences: BTreeMap<String, Conference>,
     /// The highest `seq` any record's signature carries.
     pub max_seq: u64,
+    /// Every `seq` a record that counts carries: whose signings are written.
+    pub seqs: BTreeSet<u64>,
 }
 
 impl Org {
@@ -684,13 +725,17 @@ impl Org {
         }
     }
 
-    /// Whose writes enter a space: members, admins, or (intake) anyone.
+    /// Whose writes enter a space: members, admins (former admins too, in
+    /// the admin space: their decisions still stand, so their edits and
+    /// deletions must reach the index as a reindex would find them), or
+    /// (intake) anyone. Only what's signed counts, and our host signs
+    /// nothing new for a former admin.
     pub fn can_write(&self, space: &SpaceUri, did: &str) -> bool {
         match space.kind.as_str() {
             CONFERENCE_TYPE => {
                 self.conferences.get(&space.to_string()).is_some_and(|c| c.is_member(did))
             }
-            ADMIN_TYPE => self.is_admin(did),
+            ADMIN_TYPE => self.is_admin(did) || self.named_admins.contains(did),
             INTAKE_TYPE => true,
             _ => false,
         }
@@ -988,6 +1033,7 @@ pub fn derive(
         admin_settings,
         conferences,
         max_seq,
+        seqs,
     }
 }
 
@@ -1062,6 +1108,7 @@ fn derive_conference(settings: Settings, history: Vec<Settings>, cx: &Context) -
             }
             LIST_ENTRY => list.push(ListEntry {
                 by: rec.repo.clone(),
+                rank: sig.rank,
                 did: rec.str("did").map(str::to_owned),
                 email_hmac: rec.str("emailHmac").map(str::to_owned),
                 role: rec.str("role").map(str::to_owned),
@@ -1078,6 +1125,7 @@ fn derive_conference(settings: Settings, history: Vec<Settings>, cx: &Context) -
         since: u64,
         list: bool,
         by: Option<String>,
+        rank: Rank,
     }
     let mut given: BTreeMap<String, Given> = BTreeMap::new();
     let mut rules = None;
@@ -1096,6 +1144,7 @@ fn derive_conference(settings: Settings, history: Vec<Settings>, cx: &Context) -
                             since: rec.str("since").and_then(parse_iso_us).unwrap_or(sig.signed_us),
                             list: rec.str("via") == Some("list"),
                             by: rec.str("assignedBy").map(str::to_owned),
+                            rank: sig.rank,
                         },
                     );
                 }
@@ -1148,6 +1197,7 @@ fn derive_conference(settings: Settings, history: Vec<Settings>, cx: &Context) -
                                     since: sig.signed_us,
                                     list: true,
                                     by: None,
+                                    rank: Rank::Person,
                                 },
                             );
                         }
@@ -1165,6 +1215,7 @@ fn derive_conference(settings: Settings, history: Vec<Settings>, cx: &Context) -
     let mut list_roles = BTreeSet::new();
     let mut role_deciders = BTreeMap::new();
     let mut role_since = BTreeMap::new();
+    let mut role_ranks = BTreeMap::new();
     for (subject, g) in given {
         if !matches!(g.role.as_str(), "owner" | "staff" | "speaker") {
             continue;
@@ -1176,6 +1227,7 @@ fn derive_conference(settings: Settings, history: Vec<Settings>, cx: &Context) -
             role_deciders.insert(subject.clone(), by);
         }
         role_since.insert(subject.clone(), g.since);
+        role_ranks.insert(subject.clone(), g.rank);
         roles.insert(subject, g.role);
     }
 
@@ -1234,7 +1286,8 @@ fn derive_conference(settings: Settings, history: Vec<Settings>, cx: &Context) -
                 Event::AdminEnd => {
                     standing.grounds.retain(|g| *g != Ground::OrgAdmin);
                     if let Some(start) = admin_since.take() {
-                        admin_marks.push(Period { since: start, until: Some(sig.signed_us) });
+                        let until = sig.signed_us.max(start);
+                        admin_marks.push(Period { since: start, until: Some(until) });
                     }
                 }
                 Event::Join => {
@@ -1265,7 +1318,10 @@ fn derive_conference(settings: Settings, history: Vec<Settings>, cx: &Context) -
             match (member, since) {
                 (true, None) => since = Some(sig.signed_us),
                 (false, Some(start)) => {
-                    periods.push(Period { since: start, until: Some(sig.signed_us) });
+                    // `signedAt` is the signer's clock, ordered by `seq`, not
+                    // by time: a clock put back can't end a period before it
+                    // began.
+                    periods.push(Period { since: start, until: Some(sig.signed_us.max(start)) });
                     since = None;
                 }
                 _ => {}
@@ -1311,6 +1367,7 @@ fn derive_conference(settings: Settings, history: Vec<Settings>, cx: &Context) -
         list_roles,
         role_deciders,
         role_since,
+        role_ranks,
         admin_periods,
         rules,
         members,
@@ -1729,6 +1786,99 @@ mod tests {
         // Revoked by an admin of its rank, it admits no one.
         world.decide(OLGA, Rank::SuperAdmin, CODE_REVOKE, "", json!({ "codeHash": hash }));
         assert!(!world.conference().code_admits(&hash, ANA, T0, &none));
+    }
+
+    #[test]
+    fn a_join_counts_at_the_rank_of_the_rule_that_admits_it() {
+        let secrets = Secrets::for_tests();
+        let staff_code = secrets.code_hmac("crew");
+        let super_code = secrets.code_hmac("atmosphere27");
+        let mut world = World::new(&["code"]);
+        world.decide(PIM, Rank::Staff, CODE, "", json!({ "codeHash": staff_code }));
+        world.decide(OLGA, Rank::SuperAdmin, CODE, "", json!({ "codeHash": super_code }));
+        world.join(ANA, json!({ "via": "code", "code": "atmosphere27" }));
+        // Pim, staff, gives her a role while she's a member.
+        world.sign(
+            &space(CONFERENCE_TYPE),
+            OLGA,
+            ROLE,
+            ANA,
+            Rank::Staff,
+            json!({ "subject": ANA, "role": "speaker" }),
+        );
+        let none = BTreeSet::new();
+        assert_eq!(world.conference().admits(ANA, Some(&staff_code), T0, &none), Some(Via::Role));
+        // Kees, an owner, removes her: neither staff's code nor staff's role
+        // stands over that, but the super admin's code does.
+        world.decide(KEES, Rank::Owner, MEMBER, ANA, json!({ "via": "removed", "until": iso(T0) }));
+        let conference = world.conference();
+        assert!(conference.code_admits(&staff_code, ANA, T0, &none), "the code itself is valid");
+        assert_eq!(conference.admits(ANA, Some(&staff_code), T0, &none), None);
+        assert_eq!(conference.admits(ANA, Some(&super_code), T0, &none), Some(Via::Code));
+        // Staff's removal is another matter: staff's code stands over it.
+        world.decide(PIM, Rank::Staff, MEMBER, BRAM, json!({ "via": "removed", "until": iso(T0) }));
+        let conference = world.conference();
+        assert_eq!(conference.admits(BRAM, Some(&staff_code), T0, &none), Some(Via::Code));
+    }
+
+    #[test]
+    fn a_former_admins_writes_to_the_admin_space_are_taken() {
+        let mut world = World::new(&["code"]);
+        let admin = SpaceUri::admin(ORG);
+        world.sign(
+            &admin.to_string(),
+            OLGA,
+            ADMIN,
+            PIM,
+            Rank::SuperAdmin,
+            json!({ "subject": PIM, "role": "none" }),
+        );
+        let org = world.org();
+        assert!(!org.is_admin(PIM));
+        assert!(org.can_write(&admin, PIM), "his edits and deletions reach the index");
+        assert!(org.can_write(&admin, KEES));
+        assert!(!org.can_write(&admin, BRAM));
+    }
+
+    #[test]
+    fn a_clock_put_back_doesnt_end_a_period_before_it_began() {
+        let mut world = World::new(&["open"]);
+        world.join(ANA, json!({ "via": "open" }));
+        let joined = world.recs.last().unwrap().us;
+        // Signed later (by `seq`), dated earlier.
+        world.seq += 1;
+        let value = signed(
+            json!({ "$type": LEAVE }),
+            &world.key,
+            ORG,
+            &space(INTAKE_TYPE),
+            world.seq,
+            Rank::Person,
+            joined - 500_000,
+            ANA,
+        );
+        world.recs.push(Rec {
+            space: space(INTAKE_TYPE),
+            repo: ANA.into(),
+            collection: LEAVE.into(),
+            rkey: "l".into(),
+            rev: String::new(),
+            us: joined,
+            value,
+        });
+        let conference = world.conference();
+        assert!(!conference.is_member(ANA));
+        let periods = &conference.members[ANA];
+        assert!(periods.iter().all(|p| p.until.is_some_and(|until| until >= p.since)));
+    }
+
+    #[test]
+    fn the_index_knows_which_signings_are_written() {
+        let mut world = World::new(&["open"]);
+        world.join(ANA, json!({ "via": "open" }));
+        let org = world.org();
+        assert!(org.seqs.contains(&world.seq));
+        assert!(!org.seqs.contains(&(world.seq + 1)));
     }
 
     #[test]

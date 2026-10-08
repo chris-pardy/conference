@@ -46,6 +46,7 @@ const USAGE: &str = "usage: conference-server admin <command> [--json] [--as <ha
   conference super-admin <handle> --conference <space>
   join set --conference <space> --methods code,request,list,open
   codes issue --conference <space> (--shared <code> | --personal) [--expires <iso>] [--max-uses <n>]
+  codes revoke <code> --conference <space>
   list import <csv> --conference <space>
   requests list --conference <space>
   requests approve|deny <handle> --conference <space>
@@ -172,6 +173,7 @@ async fn run(state: &AppState, args: &Args) -> Result<Done, String> {
         ["conference", "super-admin", ..] => conference_handover(state, args).await,
         ["join", "set", ..] => join_set(state, args).await,
         ["codes", "issue", ..] => codes_issue(state, args).await,
+        ["codes", "revoke", ..] => codes_revoke(state, args).await,
         ["list", "import", ..] => list_import(state, args).await,
         ["requests", "list", ..] => requests_list(state, args).await,
         ["requests", action @ ("approve" | "deny"), ..] => decide(state, args, action).await,
@@ -531,25 +533,7 @@ async fn org_admin_undo(state: &AppState, args: &Args) -> Result<Done, String> {
             }
         } else {
             for (hash, _) in conference.codes_by(&subject) {
-                let check: Check = Box::new(|org: &Org, _: &Journal| {
-                    let c = org.conference(&space).ok_or("the conference is gone")?;
-                    let code = c.codes.get(&hash).ok_or("the code is gone")?;
-                    let rank = Rank::of_admin(org, &acting.did).ok_or("not an admin now")?;
-                    if rank < code.rank {
-                        return Err(format!(
-                            "it was issued by {}, and {} can't revoke it",
-                            rank_name(code.rank),
-                            acting.handle
-                        ));
-                    }
-                    Ok(())
-                });
-                let record = json!({ "space": space, "codeHash": hash });
-                let signing = Signing { check: Some(check), ..Signing::default() };
-                match acting
-                    .create_signed(state, &admin_space, index::CODE_REVOKE, None, record, signing)
-                    .await
-                {
+                match revoke_code(state, &acting, &org.did, &space, &hash).await {
                     Ok(_) => undone.push(json!({ "space": space, "codeHash": hash })),
                     Err(why) => left.push(format!("a code in {space}: {why}")),
                 }
@@ -1499,6 +1483,53 @@ async fn codes_issue(state: &AppState, args: &Args) -> Result<Done, String> {
         .create_in(state, &SpaceUri::admin(&org.did).to_string(), index::CODE, None, record)
         .await?;
     done(format!("Code: {code}"), json!({ "codes": [code] }))
+}
+
+/// Revokes one code with a signed `codeRevoke`, by an admin of the rank
+/// it was issued at or higher.
+async fn codes_revoke(state: &AppState, args: &Args) -> Result<Done, String> {
+    let code = args.word(2, "the code")?.trim().to_owned();
+    let (space, org) = conference(state, args).await?;
+    let (acting, _) = acting(state, args, &org).await?;
+    let hash = state.secrets.code_hmac(&code);
+    let space = space.to_string();
+    let conference = org.conference(&space).ok_or("the conference is gone")?;
+    match conference.codes.get(&hash) {
+        None => return Err(format!("{code} isn't one of this conference's codes")),
+        Some(c) if c.revoked => return Err(format!("{code} is already revoked")),
+        Some(_) => {}
+    }
+    revoke_code(state, &acting, &org.did, &space, &hash).await?;
+    after_change(state, &org).await?;
+    done(format!("Revoked {code}."), json!({ "revoked": [{ "space": space, "codeHash": hash }] }))
+}
+
+/// Writes a signed `codeRevoke` for a code (by HMAC), checked as it's
+/// signed: the acting admin's rank now must be at least the code's.
+async fn revoke_code(
+    state: &AppState,
+    acting: &Acting,
+    org: &str,
+    space: &str,
+    hash: &str,
+) -> Result<String, String> {
+    let check: Check = Box::new(move |org: &Org, _: &Journal| {
+        let c = org.conference(space).ok_or("the conference is gone")?;
+        let code = c.codes.get(hash).ok_or("the code is gone")?;
+        let rank = Rank::of_admin(org, &acting.did).ok_or("not an admin now")?;
+        if rank < code.rank {
+            return Err(format!(
+                "it was issued by {}, and {} can't revoke it",
+                rank_name(code.rank),
+                acting.handle
+            ));
+        }
+        Ok(())
+    });
+    let record = json!({ "space": space, "codeHash": hash });
+    let signing = Signing { check: Some(check), ..Signing::default() };
+    let admin_space = SpaceUri::admin(org).to_string();
+    acting.create_signed(state, &admin_space, index::CODE_REVOKE, None, record, signing).await
 }
 
 async fn list_import(state: &AppState, args: &Args) -> Result<Done, String> {

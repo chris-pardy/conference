@@ -23,7 +23,7 @@ pub const ADMIN_SCOPES: &[&str] = &[
     "repo:community.lexicon.calendar.event",
     "repo:app.eventside.conference",
     "space:app.eventside.conference?authority=*&action=create&action=update&action=delete&collection=app.eventside.conference&collection=app.eventside.conference.role&collection=app.eventside.conference.rules&collection=community.lexicon.calendar.event",
-    "space:app.eventside.admin?authority=*&action=read&action=create&action=update&action=delete&collection=app.eventside.admin.admin&collection=app.eventside.admin.space&collection=app.eventside.admin.member&collection=app.eventside.admin.ban&collection=app.eventside.admin.deny&collection=app.eventside.admin.code&collection=app.eventside.admin.listEntry",
+    "space:app.eventside.admin?authority=*&action=read&action=create&action=update&action=delete&collection=app.eventside.admin.admin&collection=app.eventside.admin.space&collection=app.eventside.admin.member&collection=app.eventside.admin.ban&collection=app.eventside.admin.deny&collection=app.eventside.admin.code&collection=app.eventside.admin.codeRevoke&collection=app.eventside.admin.listEntry",
     "blob:*/*",
 ];
 
