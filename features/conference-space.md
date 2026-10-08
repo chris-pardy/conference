@@ -1,5 +1,5 @@
 ---
-status: implementing
+status: blocked
 impact: cross-cutting
 depends-on: [attendee-sign-in]
 branch: feature/conference-space
@@ -3643,3 +3643,82 @@ was green.
 The round 16 regressions are in a new file,
 `tests/integration/conference-review-signed.test.ts`, since
 `conference-review.test.ts` is under the `acdcbc5` freeze.
+
+### Round 17
+
+Reviewer: a fresh subagent following `adversarial-review`. Verdict: not
+clean (0 blocking, 1 major, 4 minor, 1 nit). Both freeze checks report only
+the approved changes, and `pnpm check` is green. Not reworked: round 17 was
+the last round allowed (see "Blocked after round 17").
+
+1. **[major] A former admin's edits and deletions in the admin space never
+   reach the live index**, because `notifyWrite` takes admin-space writes
+   only from current admins; `reindex` (which crawls former admins) does
+   apply them, so the two disagree. Kees bans Bram, is removed as an admin,
+   then deletes his ban: Bram is refused until a `reindex`, then joins.
+   Suggested fix: accept admin-space notices from everyone `named_admins`
+   lists (only verified records count anyway).
+2. **[minor] Staff can still let someone an owner removed back in by
+   issuing them a code**: a person's own join stands over any removal, and
+   staff may issue codes. Round 16 closed the role path only. Suggested fix:
+   give a code join the rank of the code that admitted it.
+3. **[minor] A person who left can rejoin, with no rule admitting them now,
+   by deleting their own signed leave** ("records are the source of
+   truth"). Suggested: a journal tombstone for committed leaves, or accept.
+4. **[minor] After a failed read-back (round 16 #3), the journal entry
+   stays pending for good**: nothing commits it when the write notification
+   indexes the record, so decisions about the person get "try again" for
+   the full two minutes, the row is never pruned, and a code use stops
+   counting after two minutes.
+5. **[minor] One signing with a fast clock poisons `signedAt`** for every
+   later one (it's forced strictly increasing), and readers ignore
+   signatures more than five minutes ahead, so later decisions are
+   reported done but don't count until real time catches up. Since `seq`
+   orders, `signedAt` could just be `now`.
+6. **[nit] No way to revoke a single code** (`codes revoke`); only `org
+   admin undo --codes` revokes, all of one admin's codes at once.
+
+### Blocked after round 17
+
+Round 5's plan allowed review rounds 16 and 17, and round 17 isn't clean,
+so this needs a human decision.
+
+| Round | Blocking | Major | Minor | Nit |
+|-------|----------|-------|-------|-----|
+| 16 | 0 | 1 | 4 | 1 |
+| 17 | 0 | 1 | 4 | 1 |
+
+**What recurs.** The signed-decisions design removed the family that
+rounds 11–15 kept finding (a role change re-deriving other people's
+memberships): no round since has found one. What the two rounds found
+instead is mostly at the edges of "records are the source of truth" and of
+check-then-sign:
+
+- **Ways around a standing decision through another kind of record:** a
+  signed record moved into another collection (round 16, fixed), a role
+  that admits (round 16, fixed), and a code that admits (round 17 #2).
+  Each "way in" a lower rank can create is a way around a higher rank's
+  removal, unless it carries its signer's rank.
+- **Withdrawal by deletion:** a former admin's deletions don't reach the
+  live index (round 17 #1), and a person can undo their own leave by
+  deleting it (round 17 #3).
+- **The journal's edges:** a decision committed but not yet indexed (round
+  16 #3) and its fix's never-finished pending entry (round 17 #4), and
+  `signedAt` monotonicity (round 17 #5).
+
+**Current state:** every frozen test, the round 5 tests and every review
+regression pass; `pnpm check` is green (warning only on the approved
+`conference-admins.test.ts`); `scripts/check-tests-unchanged.sh acdcbc5`
+reports only `conference-review.test.ts`, whose two rewrites the user's
+approval records. Also open for the user: TC-63's frozen test reads
+`dirkBefore.uri`, which vivarium's space `listRecords` doesn't return, so
+it adds an old-key copy instead of replacing the record (see
+"Implementation of design round 5").
+
+**The choices:**
+- **(a) Fix round 17's findings without another review**, then ship. The
+  fixes are local: accept former admins' notices (#1), rank code joins by
+  their code (#2), commit pending entries on indexing and date `signedAt`
+  by `now` (#4, #5), `codes revoke` (#6); decide #3.
+- **(b) Fix them, then review once more** (round 18).
+- **(c) Ship as is**, recording #2 and #3 as accepted gaps.
