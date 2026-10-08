@@ -30,6 +30,10 @@ const USAGE: &str = "usage: conference-server admin <command> [--json] [--as <ha
   org show --org <did>
   org admin add <handle> --org <did> [--role owner|staff] [--keep-admissions]
   org admin remove <handle> --org <did> [--keep-admissions]
+  org admin undo <handle> --org <did> (--admissions | --codes) [--conference <space>]
+  org keys add --org <did>
+  org keys resign --org <did>
+  org keys remove <fragment> --org <did>
   connect <handle>
   reindex --org <did>
   conference create --org <did> (--name … --starts … --ends … --city … [--description …] | --event <at-uri>)
@@ -50,7 +54,8 @@ const USAGE: &str = "usage: conference-server admin <command> [--json] [--as <ha
 const ROLES: &[&str] = &["owner", "staff", "speaker"];
 
 /// Flags that take no value.
-const SWITCHES: &[&str] = &["json", "invite-only", "personal", "yes", "keep-admissions"];
+const SWITCHES: &[&str] =
+    &["json", "invite-only", "personal", "yes", "keep-admissions", "admissions", "codes"];
 
 struct Args {
     words: Vec<String>,
@@ -152,6 +157,10 @@ async fn run(state: &AppState, args: &Args) -> Result<Done, String> {
         ["org", "show", ..] => org_show(state, args).await,
         ["org", "admin", "add", ..] => org_admin(state, args, true).await,
         ["org", "admin", "remove", ..] => org_admin(state, args, false).await,
+        // Signed decisions (design review round 5): stubs until they're built.
+        ["org", "admin", "undo", ..] | ["org", "keys", "add" | "resign" | "remove", ..] => {
+            Err(format!("not implemented: {}", words.join(" ")))
+        }
         ["connect", ..] => connect(state, args).await,
         ["reindex", ..] => reindex(state, args).await,
         ["conference", "create", ..] => conference_create(state, args).await,
