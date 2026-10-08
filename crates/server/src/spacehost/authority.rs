@@ -246,6 +246,46 @@ pub async fn remove_attest_key(state: &AppState, did: &str, fragment: &str) -> R
     Ok(())
 }
 
+/// Brings our copy of an authority's attestation keys in line with its DID
+/// document: a key the document no longer lists (rotated out by the
+/// operator with their recovery key, say) is removed here too. Returns the
+/// fragments removed.
+pub async fn reconcile_attest_keys(state: &AppState, did: &str) -> Result<Vec<String>, String> {
+    let doc = state
+        .resolver
+        .did_document(did)
+        .await
+        .map_err(|e| format!("couldn't resolve {did}: {e:?}"))?;
+    let listed: Vec<String> = doc
+        .get("verificationMethod")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|m| m.get("id")?.as_str()?.rsplit('#').next().map(str::to_owned))
+        .collect();
+    let ours = sqlx::query_scalar::<_, String>(
+        "SELECT fragment FROM attest_keys WHERE authority = $1 AND removed_at IS NULL",
+    )
+    .bind(did)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| e.to_string())?;
+    let mut removed = Vec::new();
+    for fragment in ours.into_iter().filter(|f| !listed.contains(f)) {
+        sqlx::query(
+            "UPDATE attest_keys SET removed_at = $3, private_key = NULL WHERE authority = $1 AND fragment = $2",
+        )
+        .bind(did)
+        .bind(&fragment)
+        .bind(now_ms())
+        .execute(&state.db)
+        .await
+        .map_err(|e| e.to_string())?;
+        removed.push(fragment);
+    }
+    Ok(removed)
+}
+
 /// Changes a minted DID's verification methods with a PLC operation signed
 /// by our rotation key, on top of its latest operation.
 async fn update_plc(

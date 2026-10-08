@@ -38,7 +38,7 @@ const USAGE: &str = "usage: conference-server admin <command> [--json] [--as <ha
   org admin undo <handle> --org <did> (--admissions | --codes) [--conference <space>]
   org keys add --org <did>
   org keys resign --org <did>
-  org keys remove <fragment> --org <did>
+  org keys remove <fragment> --org <did> [--force]
   connect <handle>
   reindex --org <did>
   conference create --org <did> (--name … --starts … --ends … --city … [--description …] | --event <at-uri>)
@@ -59,7 +59,8 @@ const USAGE: &str = "usage: conference-server admin <command> [--json] [--as <ha
 const ROLES: &[&str] = &["owner", "staff", "speaker"];
 
 /// Flags that take no value.
-const SWITCHES: &[&str] = &["json", "invite-only", "personal", "yes", "admissions", "codes"];
+const SWITCHES: &[&str] =
+    &["json", "invite-only", "personal", "yes", "admissions", "codes", "force"];
 
 struct Args {
     words: Vec<String>,
@@ -587,13 +588,34 @@ async fn org_keys_remove(state: &AppState, args: &Args) -> Result<Done, String> 
     let fragment = args.word(3, "the key's fragment")?;
     let did = args.need("org")?;
     let before = org(state, did).await?;
+    // Nothing standing may depend on the key alone, unless --force says so.
+    let keys = attest::keys(&state.db, did).await?;
+    let without = keys.without(fragment.trim_start_matches('#'));
+    let now = now_ms() as u64 * 1000;
+    let mut alone = Vec::new();
+    for rec in index::records(state, did).await? {
+        if attest::verify(&rec.value, &rec.repo, &rec.space, &keys, now).is_some()
+            && attest::verify(&rec.value, &rec.repo, &rec.space, &without, now).is_none()
+        {
+            alone.push(format!("{} {}/{} in {}", rec.repo, rec.collection, rec.rkey, rec.space));
+        }
+    }
+    if !alone.is_empty() && args.flag("force").is_none() {
+        return Err(format!(
+            "{} records are signed only with #{fragment}, and would stop counting; re-sign them \
+             with `org keys resign --org {did}`, or run this again with --force:\n  {}",
+            alone.len(),
+            alone.join("\n  ")
+        ));
+    }
     authority::remove_attest_key(state, did, fragment).await?;
     index::bump(state, did).await?;
     after_change(state, &before).await?;
-    done(
-        format!("Removed #{fragment} from {did}."),
-        json!({ "removed": format!("{did}#{fragment}") }),
-    )
+    let mut text = format!("Removed #{fragment} from {did}.");
+    if !alone.is_empty() {
+        text.push_str(&format!(" {} records signed only with it no longer count.", alone.len()));
+    }
+    done(text, json!({ "removed": format!("{did}#{fragment}"), "stoppedCounting": alone }))
 }
 
 /// Re-signs the standing records with the newest key: each record whose
@@ -1907,14 +1929,27 @@ async fn member_role(state: &AppState, args: &Args) -> Result<Done, String> {
             take_role(state, &writer, &space.to_string(), &subject, &acting).await?;
         }
     } else {
+        // A role lets its holder join, so for someone who isn't a member it
+        // is an admission: it must not contradict a standing decision (or
+        // ban) of a higher rank than the acting admin's.
+        let space_uri = space.to_string();
+        let admits = |org: &Org| -> Result<(), String> {
+            let conference = org.conference(&space_uri).ok_or("the conference is gone")?;
+            if conference.is_member(&subject) {
+                return Ok(());
+            }
+            decision_allowed(org, conference, &subject, who, &acting, "add")
+        };
+        admits(&org)?;
+        let check: Check = Box::new(|org: &Org, _: &Journal| admits(org));
         writer
             .put_signed(
                 state,
-                &space.to_string(),
+                &space_uri,
                 index::ROLE,
                 &subject,
                 json!({ "subject": subject, "role": role, "assignedBy": acting.did, "since": index::iso(now_ms() as u64 * 1000) }),
-                Signing { by: Some(&acting.did), ..Signing::default() },
+                Signing { by: Some(&acting.did), claim: Claim::about(&space_uri, &subject), check: Some(check) },
             )
             .await?;
     }

@@ -3598,3 +3598,48 @@ unchanged.
   signed records: unsigned records, grounds and ranks, a demoted author's
   ban, unsigned joins as requests, copies and versions of a `seq`, code
   limits by distinct DIDs, and signature checks.
+
+### Round 16
+
+Reviewer: a fresh subagent following `adversarial-review`. Verdict: not
+clean (0 blocking, 1 major, 4 minor, 1 nit). It confirmed `c6e7d41`'s check
+reports only the approved TC-52 and TC-53 changes, and `acdcbc5`'s only the
+two recorded rewrites in `conference-review.test.ts`, and that `pnpm check`
+was green.
+
+1. **[major] A signed record moved into another collection still
+   verified**, because the collection is in its path, not in what's
+   signed: staff could turn their signed deny or removal into a ban.
+   **Fixed:** a signed record counts only in the collection its signed
+   `$type` names. Rust test
+   `a_signed_record_moved_into_another_collection_doesnt_count`.
+2. **[minor] Staff could let someone an owner removed back in by giving
+   them a role**, which admits on joining. **Fixed:** for someone who isn't
+   a member, a role is checked as an admission (`member add`) against the
+   standing decision and any ban, inside the signing transaction.
+   Integration "TC-52: staff can't let someone an owner removed back in
+   with a role (review round 16)".
+3. **[minor] A decision whose read-back failed was marked committed**, so
+   the next check didn't see it. **Fixed:** its journal entry stays
+   pending (blocking another decision about the person) until it lapses,
+   by which time the write notification has normally brought it in; the
+   same for joins and leaves.
+4. **[minor] `org keys remove` silently dropped records that hadn't been
+   re-signed.** **Fixed:** it refuses while any record verifies only by
+   that key, listing them, unless `--force` (which then reports how many
+   stopped counting). Integration "TC-63: a key that standing records
+   depend on alone isn't removed without --force (review round 16)".
+5. **[minor] Our copy of the keys was never reconciled with the DID
+   document.** **Fixed in part:** `reindex` now removes any key the DID
+   document no longer lists (one rotated out with the operator's recovery
+   key, say). Declined: refreshing on a timer as well. The operator who
+   rotates a key out behind our back runs `reindex`, as after any repair,
+   and checking PLC on every derive would put the network in every
+   membership check.
+6. **[nit] Journal entries for code uses are never pruned.** Left: they're
+   what keeps a code's limits while records are written, and one small row
+   per code join is cheap.
+
+The round 16 regressions are in a new file,
+`tests/integration/conference-review-signed.test.ts`, since
+`conference-review.test.ts` is under the `acdcbc5` freeze.

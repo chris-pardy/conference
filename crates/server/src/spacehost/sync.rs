@@ -475,6 +475,14 @@ pub async fn reindex(state: &AppState, org: &str) -> Result<Reindexed, String> {
         format!("couldn't read the super admin's repo, so nothing was changed: {why}")
     })?;
     let eventside = state.oauth.client_id_for("atproto");
+    // The keys as the DID document lists them now, not only as we last wrote it.
+    match super::authority::reconcile_attest_keys(state, org).await {
+        Ok(removed) if !removed.is_empty() => {
+            eprintln!("reindex: {org}'s DID document no longer lists #{}", removed.join(", #"))
+        }
+        Ok(_) => {}
+        Err(why) => eprintln!("reindex: couldn't check {org}'s attestation keys: {why}"),
+    }
     let keys = super::attest::keys(&state.db, org).await?;
     let derive = |read: &BTreeMap<(String, String), Repo>| {
         index::derive(

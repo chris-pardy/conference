@@ -120,6 +120,16 @@ impl Keys {
     pub fn fragments(&self) -> impl Iterator<Item = &String> {
         self.keys.keys()
     }
+
+    /// The same keys, less one.
+    pub fn without(&self, fragment: &str) -> Self {
+        let mut less = self.clone();
+        less.keys.remove(fragment);
+        let mut seed = less.fingerprint.to_vec();
+        seed.extend_from_slice(format!("-{fragment}").as_bytes());
+        less.fingerprint = crypto::sha256(&seed);
+        less
+    }
 }
 
 /// An authority's current attestation keys, from our copy of what its DID

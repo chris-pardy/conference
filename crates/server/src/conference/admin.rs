@@ -162,12 +162,17 @@ impl Acting {
             body["space"] = json!(space);
         }
         let written = self.procedure(state, nsid, &body).await;
-        if written.is_ok()
-            && let Some(space) = space
+        // Read back, or the next check wouldn't see it: until it's in the
+        // index, its journal entry stays pending, blocking another decision
+        // about the same person (until the write notification brings it in,
+        // or the entry lapses).
+        let indexed = match (written.is_ok(), space) {
+            (true, Some(space)) => self.synced(state, space).await,
+            _ => true,
+        };
+        if let Some(ticket) = &ticket
+            && (written.is_err() || indexed)
         {
-            self.synced(state, space).await;
-        }
-        if let Some(ticket) = &ticket {
             attest::finish(state, ticket, written.is_ok()).await;
         }
         written.map(drop)
@@ -272,7 +277,7 @@ impl Acting {
         };
         self.procedure(state, nsid, &body).await?;
         if let Some(space) = space {
-            self.synced(state, space).await;
+            let _ = self.synced(state, space).await;
         }
         Ok(())
     }
@@ -288,7 +293,7 @@ impl Acting {
         let body =
             json!({ "space": space, "repo": self.did, "collection": collection, "rkey": rkey });
         self.procedure(state, "com.atproto.space.deleteRecord", &body).await?;
-        self.synced(state, space).await;
+        let _ = self.synced(state, space).await;
         Ok(())
     }
 
@@ -355,13 +360,15 @@ impl Acting {
 
     /// Reads the admin's repo in a space into the index, now that they've
     /// written to it. The PDS's write notification would too, a moment later.
-    async fn synced(&self, state: &AppState, space: &str) {
+    async fn synced(&self, state: &AppState, space: &str) -> bool {
         if let Err(why) = sync::sync_repo(state, space, &self.did).await {
             eprintln!(
                 "warning: couldn't read {}'s records in {space} back yet: {why}",
                 self.handle
             );
+            return false;
         }
+        true
     }
 }
 

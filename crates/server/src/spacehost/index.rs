@@ -904,7 +904,11 @@ pub fn derive(
     let mut unsigned_joins: Vec<&Rec> = Vec::new();
     let mut max_seq = 0;
     for rec in ordered {
-        match attest::verify(&rec.value, &rec.repo, &rec.space, keys, now_us) {
+        // The collection is in the record's path, not in what's signed: a
+        // record counts only in the collection its signed `$type` names, so
+        // one moved into another collection (a deny into bans) doesn't.
+        let in_place = rec.str("$type") == Some(rec.collection.as_str());
+        match attest::verify(&rec.value, &rec.repo, &rec.space, keys, now_us).filter(|_| in_place) {
             Some(sig) => {
                 max_seq = max_seq.max(sig.seq);
                 if seqs.insert(sig.seq) {
@@ -1474,6 +1478,8 @@ mod tests {
         ) {
             self.seq += 1;
             let us = T0 + self.seq * 1000;
+            let mut value = value;
+            value["$type"] = json!(collection);
             let value = signed(value, &self.key, ORG, space, self.seq, rank, us, repo);
             self.recs.push(Rec {
                 space: space.to_owned(),
@@ -1680,6 +1686,22 @@ mod tests {
         world.recs.retain(|r| r.rkey != "copy");
         world.recs.push(elsewhere);
         assert!(world.conference().is_member(BRAM));
+    }
+
+    #[test]
+    fn a_signed_record_moved_into_another_collection_doesnt_count() {
+        let mut world = World::new(&["request"]);
+        world.decide(PIM, Rank::Staff, DENY, BRAM, json!({ "$type": DENY }));
+        let moved = Rec {
+            collection: BAN.into(),
+            rkey: "moved".into(),
+            rev: "3zzzzzzzzzzzz".into(),
+            ..world.recs.last().unwrap().clone()
+        };
+        world.recs.push(moved);
+        let conference = world.conference();
+        assert!(!conference.banned.contains(BRAM));
+        assert_eq!(conference.standing(BRAM).ban, None);
     }
 
     #[test]

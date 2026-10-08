@@ -685,12 +685,21 @@ async fn write_intake(
         }
         Err(e) => Err(xrpc_error(StatusCode::BAD_GATEWAY, "UpstreamFailure", &format!("{e:?}"))),
     };
-    if written.is_ok()
-        && let Err(why) = sync::sync_repo(state, intake, did).await
-    {
-        eprintln!("conference: couldn't read {did}'s {collection} back yet: {why}");
+    let indexed = match written.is_ok() {
+        true => match sync::sync_repo(state, intake, did).await {
+            Ok(_) => true,
+            Err(why) => {
+                eprintln!("conference: couldn't read {did}'s {collection} back yet: {why}");
+                false
+            }
+        },
+        false => true,
+    };
+    // Not read back yet: the entry stays pending, so the next check about
+    // them waits for it (see `Acting::write`).
+    if indexed {
+        attest::finish(state, &ticket, written.is_ok()).await;
     }
-    attest::finish(state, &ticket, written.is_ok()).await;
     written.map_err(Refusal::Failed)
 }
 
