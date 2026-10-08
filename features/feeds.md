@@ -1,5 +1,5 @@
 ---
-status: design-review
+status: test-cases
 impact: cross-cutting
 depends-on: [ui-blocks, attendee-sign-in, conference-space, space-sync]
 branch:
@@ -508,9 +508,11 @@ ingest for direct writes):
     - it must pass the ui-blocks validator;
     - no middleware, actions, wasm or sources other than `#inlineSource`;
     - buttons may only open links.
-  - **Images.** Remote image URLs are refused, since loading them would
-    give the provider every viewer's IP address. Cards draw glyphs with a
-    new `icon` block instead, from a fixed set that includes weather
+  - **Images.** Viewers never load a provider's image URLs directly,
+    which would give it every viewer's IP address. Eventside rewrites
+    them to its own image proxy, which fetches each image once and caches
+    it. A Bluesky post card's avatar and photos come through the proxy.
+    Glyphs use a new `icon` block, from a fixed set that includes weather
     glyphs.
   - **Caching.** Eventside caches each answer until `expiresAt`, shared by
     every viewer when there's no `sub`. One forecast call then serves the
@@ -529,16 +531,16 @@ ingest for direct writes):
     the DID is on the organizer's allow-list. The stream:
     - replays from the cursor, or from the start for backfill;
     - sends `#post{uri, cid, author, record, acceptedAt}`, where `record`
-      is the full post minus `feeds`, so nothing says where else it was
-      posted;
+      is the full post minus `feeds` and `audience`. Nothing says where
+      else it was posted, or who may see it;
     - sends `#remove{uri}` when a post is deleted or hidden from this
       feed.
-  - **Restricted posts are streamed too.** A post that narrows its own
-    audience ("only my friends") reaches the generator with its
-    audience, and the generator can rank it. Eventside strips it from
-    the feed for every viewer outside that audience. Posts in other
-    feeds, poll votes, RSVPs and every other record in the space are
-    never streamed.
+  - **Restricted posts are streamed too, without their restriction.** A
+    post that narrows its own audience ("only my friends") reaches the
+    generator like any other, and the generator can rank it. Eventside
+    strips it from the feed for every viewer outside that audience. Posts
+    in other feeds, poll votes, RSVPs and every other record in the space
+    are never streamed.
   - **Card data.** A post's card arrives as its template, with no data
     filled in.
   - **Per viewer.** A feed record with `sendViewer` puts the viewer's DID
@@ -549,20 +551,22 @@ ingest for direct writes):
     limit?}` (modeled on `app.bsky.feed.getFeedSkeleton`) returns
     `{entries, cursor?}`. Entries can be anything:
     - post URIs, from this feed or elsewhere;
-    - card entries naming allow-listed providers.
-
-    - public Bluesky posts (`app.bsky.feed.post`), which eventside
-      fetches and renders as a Bluesky post card.
+    - card entries naming allow-listed providers. A public Bluesky post
+      is one of these: a card entry whose provider renders it as a card,
+      the same way weather does. Eventside has no Bluesky-specific
+      renderer.
 
     Eventside filters them like any skeleton: a viewer sees only what
-    the visibility rules allow. Public posts are visible to everyone who
-    can see the feed. Record types eventside can't render are dropped.
+    the visibility rules allow. Anything else is dropped.
   - **Failures.** A slow or failing generator is cut off at a timeout,
     and the feed falls back to newest first with a quiet note.
 - **Bsky Buzz**, the example generator for Nov 1 (`crates/bsky-buzz`):
   - it mixes the conference's public Bluesky conversation (posts with
     its hashtag, and posts by speakers) with the posts streamed from its
     feed;
+  - it is also a card provider: each Bluesky post becomes a card entry
+    naming Bsky Buzz, and its `getCardData` returns the post as a card
+    template plus data;
   - it ranks them by recent activity;
   - it runs as a separate service on its own `did:web`.
 
@@ -632,7 +636,8 @@ ingest for direct writes):
   - Proposed demo slice: the main feed, chat feeds, posting with
     decisions, pins and hides, built-in algorithms, a weather card on the
     main feed, a weather feed from the outside provider, and one feed
-    driven by the Bsky Buzz generator, with Bluesky post cards. Feeds
+    driven by the Bsky Buzz generator, whose Bluesky posts arrive as
+    cards. Weather and Bsky Buzz each run as their own service. Feeds
     refresh on open, and records are indexed as eventside writes them.
   - Proposed to defer: live sockets, Web Push and the offline cache.
 - **Web Push** works on iOS only for an installed PWA, and needs VAPID
@@ -748,7 +753,27 @@ The draft was critiqued before being presented. Folded in:
 - **Bsky Buzz** is the reference generator. It mixes the conference's
   Bluesky conversation with the feed's own posts.
 
-Awaiting the user's review.
+**The user's feedback:**
+
+- A Bluesky post is a custom card, the same as weather.
+- The feed generator shouldn't get post restrictions.
+- The weather card is a service.
+- "I think we're good": approved, with these changes.
+
+### Round 5 (approved)
+
+- **Bluesky posts are card entries** that Bsky Buzz serves through
+  `getCardData`. Eventside renders nothing Bluesky-specific.
+- **Images in outside cards** go through eventside's image proxy, instead
+  of being refused, so Bluesky avatars and photos can show without
+  exposing viewers.
+- **The stream leaves out `audience`** as well as `feeds`. Restricted
+  posts are still streamed, and filtered per viewer.
+- **Weather** is the outside `weather-cards` service.
+- **Taken as agreed** (the round 2 questions, settled by the approval):
+  - the `#cardBody`, `#inlineSource` and `icon` additions to
+    [`ui-blocks`](ui-blocks.md) are built as part of feeds;
+  - the Nov 1 slice defers live updates, push and the offline cache.
 
 ## Test cases
 
