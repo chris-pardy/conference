@@ -1,5 +1,5 @@
 ---
-status: blocked
+status: design-review
 impact: cross-cutting
 depends-on: [attendee-sign-in]
 branch: feature/conference-space
@@ -422,7 +422,9 @@ host) could rebuild them. Our database is only an index of those records.
     admin. Codes are hashed, and
     emails are HMAC'd with a server key, so neither is readable even inside
     the admin space.
-- **Precedence, so no tiebreak is needed:**
+- **Precedence, so no tiebreak is needed** (superseded in round 5: see
+  "Signed decisions" below, which checks precedence when a decision is
+  signed, not when it is read):
   - Admins write only to their own repos, so nobody can edit anyone else's
     records.
   - **The super admin's records always win.** No other admin's record can
@@ -473,7 +475,8 @@ us:
   person's own repo in the intake space. The code is in plain text, which
   only our host and the admins can read. **Leaving** writes
   `app.eventside.intake.leave {}`.
-- **Automatic admissions are derived, not written.** The indexer admits
+- **Automatic admissions are derived, not written** (round 5: joins are
+  signed when written; see "Signed decisions"). The indexer admits
   someone whose join record (judged by its commit `repoRev`) matches a rule
   in the admin space: a valid `code` record (with expiry and uses counted
   in commit order), a `listEntry` by DID, or the space being open.
@@ -693,6 +696,182 @@ conference. That's how an invite-only conference's link works. The link is
 **Deferred:** whether a public `community.lexicon.calendar.rsvp` of
 "going" to the conference's event should count as a way to join. RSVPs
 from other apps are ignored for now.
+
+#### Signed decisions (round 5)
+
+Round 5 replaces how readers decide which permission records count. Up to
+round 4 (and the 2026-10-07 simplification), a reader replayed history: a
+record counted only while its author held the right role, and a decision
+was weighed by its author's role *now*. So changing an admin's role quietly
+changed other people's memberships, which is what rounds 11 to 15 kept
+finding. The new rule:
+
+> **A decision or action is checked when it's taken, and once valid, it
+> stays valid.**
+
+**Check, then sign.** Every permission record and every join is written
+through our server: the CLI acts through the admin's session, and the PWA
+through the attendee's. Before writing, the server checks the action
+against the state at that moment: is the author an admin, may their rank do
+this, does it contradict a standing decision of a higher rank, is the code
+still valid and not used up. If it passes, the server signs the record and
+writes it with the signature inside. If it fails, nothing is written and the
+command says why.
+
+- **The key:** a dedicated verification method, `#eventside_attest`, in the
+  authority's DID document. Its private half is held by our server and kept
+  separate from `#atproto_space` (credentials), so a leaked credential key
+  can't forge decisions and the other way round. Whoever manages the DID
+  document is in charge: any app they give the private key to can attest,
+  and they take that power away by rotating the key out.
+- **The signature,** a field on the record:
+  `sig: {key: "did:…#eventside_attest", signedAt, role, sig}`. `sig` is a
+  low-S ECDSA P-256 signature over the DAG-CBOR of
+  `{$type: "app.eventside.attestation", cid, repo, space, collection, rkey,
+  signedAt, role}`, where `cid` is the record's CID computed without its
+  `sig` field. Binding the repo, space and record key means a signed record
+  copied into another repo, space or key doesn't verify.
+- **`role`** is the author's role when the server signed: `superAdmin`,
+  `owner`, `staff`, or `self` for a person's own join or leave.
+- **`signedAt`** comes from our server's clock, strictly increasing per
+  authority (signing is serialized per authority). It is the record's time
+  for every rule below. Commit `repoRev`, first-seen times and the 60-second
+  slack are no longer used for permission records.
+
+**What readers do:** our indexer, an admin's app, and any app checking our
+host API.
+
+1. Find the records: the admin space's writers, and the intake space's.
+2. Verify each signature against the authority's DID document. A record
+   without a valid signature doesn't count.
+3. For each person in each space, the **latest signed decision stands**:
+   an admission, removal, ban, deny, or their own signed join or leave.
+
+There's no precedence at read time. Precedence was enforced when signing:
+the server refused to sign a staff admission that contradicts an owner's
+ban. The ranking the server applies is round 3's, but against the **role
+recorded in the standing decision's signature**, not the author's role now:
+
+- A decision may contradict the standing decision only if the actor's rank
+  now is at least the rank recorded on it. Ranks: super admin, then owners,
+  then staff.
+- The person themselves may always leave. Their own join is signed only if
+  they aren't banned and a rule admits them (see joining), and it then
+  stands over an earlier removal or denial, as before.
+- Owners and the super admin ban. Staff admit, approve requests, deny,
+  remove, and **issue codes** (the user's "staff can invite people with full
+  rights"). The people they admit are full members.
+
+**Consequences:**
+
+- **Removing or demoting an admin changes nothing already decided.** Their
+  admissions, removals, bans, codes and list rows keep standing. From then
+  on the server won't sign for them, or signs at their new rank. TC-53
+  flips.
+- **Undoing a former admin's admissions** is an explicit action:
+  `org admin undo <handle> --admissions [--conference <space>]` writes a
+  signed removal, by the acting owner or super admin, for everyone whose
+  standing decision is that admin's admission. People with another standing
+  way in (their own signed join by code, say) aren't touched. It replaces
+  `--keep-admissions`.
+- **Codes and list rows outlive their author too.** A code is valid until
+  it expires, is used up, or an admin revokes it with a signed `codeRevoke`
+  (at the code author's rank or higher).
+- **Admin records are never deleted.** Removing an admin writes a signed
+  `admin {subject, role: "none"}`, so the crawl still finds the former
+  admin's repo, whose decisions still stand.
+- **Unsigned records don't count.** An admin record written from another
+  app, or by hand, has no effect. Our server could only have signed it after
+  checking it.
+
+**Joins are signed too.** When the PWA joins, our server checks the join
+(code valid and not used up, DID on the list, conference open, verified
+email matched) and writes `app.eventside.intake.join {code?, via, role?,
+sig}` into the person's intake repo, signed with `role: "self"`. `via` is
+`code`, `list`, `email`, `open` or `request`, and only `request` leaves
+them pending. So:
+
+- Code uses are counted when signing, not by replaying commits. Expiry is
+  checked against `signedAt`.
+- **Email matches no longer need the super admin's PDS.** Round 4's
+  `member` record written as the super admin becomes a signed join with
+  `via: "email"`. Joining never touches an admin's PDS (TC-54).
+- A join written by another app without our signature is a request at most:
+  it's pending until an admin decides.
+- **Leaving** is a signed `leave`. An unsigned leave from another app still
+  counts, from when our host first indexed it, since a person may always
+  leave.
+
+**Deleting a signed record doesn't withdraw it.** Otherwise a removed admin
+could delete their bans and let people back in. Our host keeps a copy of
+every signed decision and join it has verified (the **decision log**), and
+publishes it through the host API. A deleted record keeps standing from that
+copy, and a new decision changes it. This is kept state, alongside the
+writer set and the keys. `reindex` rebuilds the index from the records it
+crawls plus the decision log, and a signed record is its own proof, so
+another host could import the log and check every entry.
+
+**Roles and rules** in the conference space (`role`, `rules`, the
+conference sidecar) are signed the same way. Readers trust a signature by
+the authority, not "written by the super admin's DID". They're still written
+to the conference's super admin's repo, so TC-35 keeps its meaning.
+
+**Key rotation.** A signature names its key by fragment.
+
+- **Ordinary rotation:** add a new key (`#eventside_attest_2`) and sign with
+  it, leaving the old one listed, so earlier signatures keep verifying in
+  `did:plc` and `did:web` alike.
+- **A compromised key:** remove it. Every signature it made stops verifying.
+  `org resign` re-signs every standing entry in the decision log with the
+  new key, and the host API serves the re-signed copies. Records still in
+  admins' repos are re-signed when the admin is connected. Those of former
+  admins rely on the log.
+
+**Content records aren't signed.** Plans, chat, RSVPs and other members'
+records are still judged by their commit `repoRev` against membership
+periods (see "Which records count"). The periods now come from signed
+decisions.
+
+#### Hosting from a person's own account (round 5)
+
+A small event (Sanne & Joost's wedding) can use a person's own DID as its
+authority instead of a minted organization. The person is its super admin.
+
+**"Host events from your account":** `eventside admin org host
+<handle>` (the CLI for the MVP, a PWA screen later):
+
+1. An OAuth sign-in with purpose `host`, asking for `identity:*` besides
+   `ADMIN_SCOPES`. It's a separate grant, not in `LOGIN_SCOPES`.
+2. `com.atproto.identity.requestPlcOperationSignature`, so their PDS emails
+   them a code.
+3. They enter the code. `com.atproto.identity.signPlcOperation` produces
+   one update that keeps their document as it is and adds:
+   - the service `#atproto_space_host` → our `PUBLIC_URL`
+   - the verification methods `#atproto_space` (credentials) and
+     `#eventside_attest` (signing), keys our server generates and holds
+   Their own `#atproto` signing key and their rotation keys are untouched.
+4. We submit it with `com.atproto.identity.submitPlcOperation`, check the
+   resolved document, and record the authority with them as super admin
+   (the same as `org adopt`).
+
+- **Leaving us:** `org unhost`, the same email-confirmed update, removing
+  the three entries. Signatures made before stay checkable only while the
+  key is listed, so unhosting first exports the decision log.
+- **`did:web`:** the CLI prints the three entries to add to `did.json`, then
+  `org adopt` checks them.
+- **A key published as a record in their repo** was considered and left
+  out: it doesn't make us the space host, and deleting it would break every
+  signature.
+
+**What vivarium needs** (we add it, as with 0.0.3):
+
+- **Deferring to a declared host:** a vivarium account whose DID document
+  names another `#atproto_space_host` must not host spaces under that DID
+  itself. Round 3 already noted it refuses writes then.
+- **`identity:*` over OAuth:** vivarium's `identity` endpoints take session
+  ("access") auth. They need to accept an OAuth session that holds
+  `identity:*`. Its signature token check accepts any token, which is fine
+  for tests.
 
 #### Components
 
@@ -1050,6 +1229,90 @@ description and round 2 design), now repaired, and these problems:
   `LOGIN_SCOPES`.
 
 **Round 4 approved** by the user on 2026-10-06.
+
+### Round 5
+
+Opened 2026-10-07, during the build, after review round 15 came back with
+the same class of finding as rounds 11 to 14: changing an admin's role
+quietly changed other people's memberships.
+
+**Feedback:**
+
+- "A decision or action taken by anyone should be verified as valid at the
+  time it was taken and should stay valid." Could signed records do it?
+- A space can't hold a key, so the signing key goes in the authority's DID
+  document. That's acceptable: "any app with the private key part can
+  attest records. Whomever is managing the org DID document is in charge."
+- Small events that use a person's own DID, not an organization's, need a
+  way to publish a signing key too.
+
+**Changes** (see "Signed decisions" and "Hosting from a person's own
+account" above):
+
+- Every permission record, join and leave is checked by our server when
+  it's taken, then signed with the authority's `#eventside_attest` key.
+  Readers verify signatures, and for each person the latest signed
+  decision stands. Ranking is applied at signing, against the rank
+  recorded on the standing decision.
+- Role periods, read-time precedence, first-seen clamping, the 60-second
+  slack, `--keep-admissions`, and the "who a role change affected" reports
+  all go.
+- A former admin's decisions keep standing. `org admin undo --admissions`
+  undoes their admissions explicitly.
+- Unsigned admin records don't count. An unsigned join is a request at
+  most.
+- Email matches become signed joins, so the super admin's PDS is out of
+  the join path entirely.
+- Staff can issue codes.
+- Admin records are never deleted. Our host keeps a decision log of
+  verified signed records, so deleting one doesn't withdraw it.
+- A person's own DID can be an authority: one email-confirmed PLC update
+  adds our space host and our two keys (`org host`, `org unhost`).
+  Vivarium needs two additions for it.
+- **Alternatives considered:**
+  - a key published as a record in the admin space or the person's repo:
+    rejected, it doesn't make us the host and is fragile on deletion
+  - receipts in a repo the authority owns: deferred until we run the
+    reference PDS; same rule for readers
+
+**Test-case changes proposed** (to be approved after the design):
+
+- **TC-53**, reworded: *A former admin's decisions keep standing.* Given Pim,
+  staff, admitted Bram. When Olga removes Pim as an admin, Bram is still a
+  member, and the CLI refuses any further decision as Pim. (Amends a frozen
+  test.)
+- **TC-58**, reworded: *An owner can undo a former admin's admissions.*
+  Given Pim admitted Bram, Ana joined with a code, and Pim was removed. When
+  Olga undoes Pim's admissions, Bram is no longer a member, and Ana still
+  is.
+- **TC-59 (new):** *An admin record without our signature doesn't count.*
+  Pim writes a `member` record admitting Mallory from another app. Mallory
+  isn't a member, and our host API doesn't list her.
+- **TC-60 (new):** *A decision keeps its rank after its author is demoted.*
+  Kees, an owner, banned Bram, then was made staff. Pim, staff, can't admit
+  Bram.
+- **TC-61 (new):** *Another app can check a decision for itself.* An app
+  reading the admin space verifies Olga's admission of Bram against
+  Atmosphere's DID document. The same record copied into Mallory's repo
+  fails.
+- **TC-62 (new):** *Deleting a decision doesn't undo it.* Kees banned Bram,
+  then deletes the ban record from his repo. Bram is still banned, also
+  after `reindex`.
+- **TC-63 (new):** *Rotating the signing key keeps earlier decisions.*
+  After the operator adds a new signing key, Bram (admitted before) is still
+  a member, and a new admission is signed with the new key.
+- **TC-64 (new):** *Sanne hosts her wedding from her own account.* After
+  `org host` and the emailed code, her DID document names our server as
+  host with our two keys, and her own signing key is unchanged. She creates
+  the wedding as its super admin, and Ana joins with the invite link.
+- **TC-65 (new):** *A join written by another app is a request.* Ana writes
+  a join with a valid code from another app, without our signature. With
+  requests on she's pending; otherwise she isn't a member.
+- **TC-66 (new):** *Staff can issue codes.* Pim issues a shared code, and
+  Bram joins with it.
+- Unchanged in meaning: TC-13, TC-14, TC-18, TC-50, TC-51, TC-52 and TC-54.
+  Their checks move to signing time. The frozen tests may need no change,
+  since they act through the CLI and the PWA, which sign.
 
 ### Build notes
 
@@ -3075,3 +3338,8 @@ vivarium 0.0.3 for attendee-sign-in's e2e TC-8.
 - **(c) Narrow the feature:** only the super admin and owners decide
   memberships (staff only invite by approving requests), and changing an
   admin's role takes effect only for new records.
+
+**Decision (the user, 2026-10-07):** revisit the approach instead. A
+decision or action is checked when it's taken and stays valid, using signed
+records. The feature goes back to design review (round 5, above). The build
+resumes after the user approves the design and the test-case changes.
