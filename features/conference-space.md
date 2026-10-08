@@ -1,5 +1,5 @@
 ---
-status: implementing
+status: blocked
 impact: cross-cutting
 depends-on: [attendee-sign-in]
 branch: feature/conference-space
@@ -3873,3 +3873,24 @@ freezes report only the approved changes.
    round 19)".
 5. **[nit] `reindex`'s withdrawal pass read every record of the
    organization.** **Fixed:** it selects only signed collections in SQL.
+
+### Back to the drawing board (2026-10-08)
+
+The round 20 review was stopped. After round 19 the user judged the
+access model a rabbit hole. Several alternatives were discussed:
+- the authority's own repo as the single source of truth
+- a delegate's repo
+- a managed policy (`com.atproto.simplespace.defs#managingAppPolicy`)
+- a per-event policy DID that moves in one PLC update
+
+That discussion also showed that creating every dynamic space on an
+organizer's PDS isn't workable.
+
+The user then asked to go back to the drawing board. The data model should
+lean into **nested events**: an event can be private within a private
+event, within a private event. Whoever creates something owns its space.
+For example, the person who posts a poll owns its response space, not the
+owner of the chat it's posted into.
+
+The build is paused (`status: blocked`) until that model is brainstormed and
+designed. The branch stays at b796db6 plus this note.
