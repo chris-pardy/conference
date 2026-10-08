@@ -3484,3 +3484,20 @@ approved test-case changes are TC-53 (frozen, amended), TC-58 (reworded,
 not frozen) and the new TC-59 to TC-65 (TC-62 dropped). Review rounds 16
 and 17 follow, as proposed to the user in round 5. If round 17 isn't clean,
 set `status: blocked`.
+
+**Round 5 red tests approved** by the user on 2026-10-07 ("approve, let's
+build"):
+- `27c3ec4` amends frozen TC-53.
+- `acdcbc5` adds TC-58 to TC-65.
+
+The freeze can't be re-pointed, so `acdcbc5` is a second freeze, enforced
+by hand: implementation and review also run
+`scripts/check-tests-unchanged.sh acdcbc5`, and any change it reports is
+blocking.
+
+The non-frozen review tests "TC-53: a role a former admin gave stops
+admitting (review round 1)" and "TC-32: demoting an owner hands their list
+roles on, or they stop counting (review round 15)" contradict round 5. The
+implementation deletes or rewrites them.
+
+Then implementation, with review rounds 16 and 17.
