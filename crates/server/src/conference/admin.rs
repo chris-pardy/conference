@@ -146,6 +146,7 @@ impl Acting {
                     Signer::Admin(by),
                     &signing.claim,
                     signing.check,
+                    space.map(|space| (space, self.did.as_str())),
                 )
                 .await?;
                 if let Err(why) = ticket.sign(&mut record, attest_space, &self.did) {

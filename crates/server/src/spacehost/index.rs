@@ -836,6 +836,19 @@ pub async fn records(state: &AppState, org: &str) -> Result<Vec<Rec>, String> {
         .collect())
 }
 
+/// The records less those carrying a withdrawn decision's `seq`: a decision
+/// withdrawn by deleting its record doesn't come back when the same signed
+/// bytes are put back, since later decisions were checked without it.
+pub fn without_withdrawn(mut recs: Vec<Rec>, org: &str, withdrawn: &BTreeSet<u64>) -> Vec<Rec> {
+    if !withdrawn.is_empty() {
+        recs.retain(|rec| {
+            attest::claimed_seq(&rec.value, org, &rec.space)
+                .is_none_or(|seq| !withdrawn.contains(&seq))
+        });
+    }
+    recs
+}
+
 /// How many times an organization's index has changed. Every write of a
 /// record its view is derived from ([`derives_from`]) bumps it, from the
 /// server or the admin CLI (another process), and so does a change to its
@@ -875,7 +888,8 @@ pub async fn load(state: &AppState, org: &str) -> Result<Option<Arc<Org>>, Strin
         return Ok(Some(cached));
     }
     let Some(authority) = super::authority::get(&state.db, org).await? else { return Ok(None) };
-    let recs = records(state, org).await?;
+    let withdrawn = attest::withdrawn(&state.db, org).await?;
+    let recs = without_withdrawn(records(state, org).await?, org, &withdrawn);
     let keys = attest::keys(&state.db, org).await?;
     let eventside = state.oauth.client_id_for("atproto");
     let derived = Arc::new(derive(
@@ -1870,6 +1884,31 @@ mod tests {
         assert!(!conference.is_member(ANA));
         let periods = &conference.members[ANA];
         assert!(periods.iter().all(|p| p.until.is_some_and(|until| until >= p.since)));
+    }
+
+    #[test]
+    fn a_withdrawn_decision_put_back_doesnt_count() {
+        let mut world = World::new(&["open"]);
+        world.decide(KEES, Rank::Owner, BAN, BRAM, json!({}));
+        let ban = world.recs.pop().unwrap();
+        let ban_seq = world.seq;
+        world.join(BRAM, json!({ "via": "open" }));
+        assert!(world.conference().is_member(BRAM));
+        // The same signed ban, put back after it was withdrawn.
+        world.recs.push(ban);
+        assert!(!world.conference().is_member(BRAM), "it verifies, so only the tombstone stops it");
+        let recs = without_withdrawn(world.recs.clone(), ORG, &BTreeSet::from([ban_seq]));
+        let org = derive(
+            ORG,
+            OLGA,
+            T0,
+            &recs,
+            &Secrets::for_tests(),
+            "https://app.example/client.json",
+            &world.keys,
+            T0 + 1_000_000_000,
+        );
+        assert!(org.conference(&space(CONFERENCE_TYPE)).unwrap().is_member(BRAM));
     }
 
     #[test]

@@ -496,18 +496,18 @@ pub async fn join(
         // A code that doesn't admit is refused, whatever else is on, unless
         // the person is let in by their role or the list anyway. A valid
         // code issued below the rank of a removal or denial that stands
-        // about them is refused as such, not as an invalid code.
-        _ if code.is_some()
-            && !matches!(conference.admits(did, None, now, &none), Some(Via::Role | Via::List)) =>
-        {
+        // about them isn't an invalid code: another rule that admits them
+        // (an open conference) still does, and otherwise they're refused.
+        other if code.is_some() && !matches!(other, Some(Via::Role | Via::List)) => {
             let valid = code_hash.as_deref().is_some_and(|h| {
                 conference.settings.has("code") && conference.code_admits(h, did, now, &none)
             });
-            return match (hidden, valid) {
-                (true, _) => not_found(),
-                (false, true) => Json(answer("refused")).into_response(),
-                (false, false) => invalid_code(),
-            };
+            match (other, hidden, valid) {
+                (Some(other), _, true) => Some(other),
+                (_, true, _) => return not_found(),
+                (_, false, true) => return Json(answer("refused")).into_response(),
+                (_, false, false) => return invalid_code(),
+            }
         }
         other => other,
     };
@@ -664,9 +664,16 @@ async fn write_intake(
     let authority = SpaceUri::parse(intake).map(|s| s.authority).unwrap_or_default();
     value["$type"] = json!(collection);
     value["createdAt"] = json!(index::iso(now_ms() as u64 * 1000));
-    let ticket = attest::reserve(state, &authority, Signer::Person(did), claim, Some(check))
-        .await
-        .map_err(Refusal::Check)?;
+    let ticket = attest::reserve(
+        state,
+        &authority,
+        Signer::Person(did),
+        claim,
+        Some(check),
+        Some((intake, did)),
+    )
+    .await
+    .map_err(Refusal::Check)?;
     if let Err(why) = ticket.sign(&mut value, intake, did) {
         attest::finish(state, &ticket, false).await;
         return Err(Refusal::Failed(failed(why)));

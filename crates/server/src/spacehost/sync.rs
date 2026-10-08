@@ -311,6 +311,25 @@ async fn apply(
         return Ok(false);
     }
     let code_hmac = code_hmac_of(space, collection, version.value.as_deref());
+    // The version this replaces, if it's a signed record: a decision it
+    // carried and this one doesn't is withdrawn for good.
+    let signed = super::attest::signed_in(space, collection);
+    let old = match signed {
+        true => sqlx::query_scalar::<_, Option<String>>(
+            "SELECT value FROM space_records WHERE space = $1 AND repo = $2 AND collection = $3 \
+             AND rkey = $4 AND rev <= $5",
+        )
+        .bind(space)
+        .bind(repo)
+        .bind(collection)
+        .bind(rkey)
+        .bind(&version.rev)
+        .fetch_optional(&mut *db)
+        .await
+        .map_err(|e| e.to_string())?
+        .flatten(),
+        false => None,
+    };
     let written = sqlx::query(
         "INSERT INTO space_records (space, repo, collection, rkey, rev, cid, value, code_hmac) \
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
@@ -332,6 +351,10 @@ async fn apply(
         > 0;
     if !written {
         return Ok(false);
+    }
+    if let Some(old) = old.and_then(|old| serde_json::from_str::<Value>(&old).ok()) {
+        let new = version.value.as_deref().and_then(|v| serde_json::from_str::<Value>(v).ok());
+        super::attest::withdraw_superseded(db, space, repo, collection, &old, new.as_ref()).await?;
     }
     if let Some(room) = room {
         room.0.insert((collection.to_owned(), rkey.to_owned()));
@@ -484,12 +507,13 @@ pub async fn reindex(state: &AppState, org: &str) -> Result<Reindexed, String> {
         Err(why) => eprintln!("reindex: couldn't check {org}'s attestation keys: {why}"),
     }
     let keys = super::attest::keys(&state.db, org).await?;
+    let withdrawn = super::attest::withdrawn(&state.db, org).await?;
     let derive = |read: &BTreeMap<(String, String), Repo>| {
         index::derive(
             org,
             &authority.super_admin,
             authority.created_at as u64 * 1000,
-            &recs_of(org, read),
+            &index::without_withdrawn(recs_of(org, read), org, &withdrawn),
             &state.secrets,
             &eventside,
             &keys,
@@ -533,6 +557,34 @@ pub async fn reindex(state: &AppState, org: &str) -> Result<Reindexed, String> {
     // records first seen since this started, and how far it read.
     let mut tx = state.db.begin().await.map_err(|e| e.to_string())?;
     let keeps = |space: &str, repo: &str| unread.contains(&(space.to_owned(), repo.to_owned()));
+    // A signed record the index had that a repo read in full no longer has
+    // (or has with another `seq`) was withdrawn while no notification
+    // reached us: withdrawn for good, as if a sync had seen it go.
+    let old_signed = sqlx::query_as::<_, (String, String, String, String, String)>(
+        "SELECT space, repo, collection, rkey, value FROM space_records \
+         WHERE space LIKE $1 AND value IS NOT NULL",
+    )
+    .bind(&pattern)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
+    for (space, repo, collection, rkey, value) in old_signed {
+        let key = (space.clone(), repo.clone());
+        let Some(records) = read.get(&key) else { continue };
+        if keeps(&space, &repo)
+            || cut.contains_key(&key)
+            || !super::attest::signed_in(&space, &collection)
+        {
+            continue;
+        }
+        let new = records
+            .get(&(collection.clone(), rkey))
+            .and_then(|v| v.value.as_deref())
+            .and_then(|v| serde_json::from_str::<Value>(v).ok());
+        let Ok(old) = serde_json::from_str::<Value>(&value) else { continue };
+        super::attest::withdraw_superseded(&mut tx, &space, &repo, &collection, &old, new.as_ref())
+            .await?;
+    }
     let old_repos = sqlx::query_as::<_, (String, String)>(
         "SELECT DISTINCT space, repo FROM space_records WHERE space LIKE $1",
     )

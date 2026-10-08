@@ -3783,3 +3783,52 @@ the plan proposed after round 17:
   (approved)`.
 - **Review rounds 18 to 20.** If round 20 isn't clean, set
   `status: blocked`.
+
+### Round 18
+
+Reviewer: a fresh subagent following `adversarial-review`. Verdict: not
+clean (0 blocking, 1 major, 3 minor, 1 nit). `pnpm check` green; `c6e7d41`
+reports only the approved `conference-admins.test.ts`; `acdcbc5` reports
+`conference-review.test.ts` (the two recorded rewrites) and
+`conference-signed.test.ts` (exactly the approved TC-63 fix).
+
+1. **[major] An admin (or former admin) can void a later join by deleting
+   his signed ban and putting the same bytes back.** Kees bans Bram,
+   deletes the ban, Bram joins (checked and signed); Kees puts the ban back
+   unchanged: it still verifies, replays before the join by `seq`, and
+   Bram is out, his period gone. Live since round 17 #1. **Fixed:** a
+   signed decision withdrawn by deleting its record (or replacing it with a
+   version without its `seq`) is withdrawn for good: our host keeps its
+   `seq` (`withdrawn_seqs`, operational state like the journal, kept across
+   reindexes) and a record carrying it doesn't count again. Only a version
+   that verified withdraws anything, so a junk record claiming another's
+   `seq` can't. `reindex` also withdraws what a repo read in full no longer
+   has. Withdrawing is still done by deleting; re-deciding is done through
+   eventside, as a new decision. Integration "TC-28: a withdrawn ban put
+   back doesn't undo a later join (review round 18)"; Rust
+   `a_withdrawn_decision_put_back_doesnt_count`.
+2. **[minor] A pending entry still stopped blocking after two minutes
+   though its record was never indexed**, so a conflicting decision could
+   be signed against the stale index. **Fixed:** the journal records where
+   each record is written; before a signing about someone, an entry about
+   them that lapsed unindexed has its repo read again, and is committed if
+   the record is there or voided if the repo was read and it isn't. One
+   whose repo can't be read keeps blocking ("try again"), for a day at
+   most. (The reviewer's example, a join by staff's code, is moot: with the
+   removal missing from the index she's still a member; a staff `member
+   add` is the real case.) Integration "TC-52: an owner's removal not yet
+   read back still can't be overridden by staff (review round 18)".
+3. **[minor] In a `code,open` conference, a valid but outranked code made
+   the join `refused`**, though the same person joins without it.
+   **Fixed:** another rule that admits (open) still does. Integration
+   "TC-22: an outranked code doesn't keep someone out of an open conference
+   (review round 18)".
+4. **[minor] The second freeze (`acdcbc5`) isn't checked by `pnpm check`
+   or CI**: `frozen-tests.sh` reads only `tests-commit`. **Declined here,
+   for the user:** it's a pipeline change (the script and the feature file
+   format), outside this feature; each round runs
+   `check-tests-unchanged.sh acdcbc5` by hand meanwhile. Open for the user.
+5. **[nit] `last_signed_at` was dead state, and its test set it
+   directly.** **Fixed:** the column is dropped (`0004`), and the test now
+   checks the reader-visible property: a decision's `signedAt` is the
+   clock when it was signed.

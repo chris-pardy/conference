@@ -26,7 +26,7 @@ use serde_json::{Value, json};
 use super::index::{self, Org, Role};
 use crate::AppState;
 use crate::crypto::{self, PublicKey};
-use crate::db::{Backend, Db, now_ms};
+use crate::db::{Backend, now_ms};
 use crate::keys::EcKey;
 
 /// A `signatures` entry's `$type`.
@@ -134,7 +134,10 @@ impl Keys {
 
 /// An authority's current attestation keys, from our copy of what its DID
 /// document publishes (we write every operation that changes them).
-pub async fn keys(db: &Db, authority: &str) -> Result<Keys, String> {
+pub async fn keys<'e, E>(db: E, authority: &str) -> Result<Keys, String>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Any>,
+{
     let rows = sqlx::query_as::<_, (String, String)>(
         "SELECT fragment, public_key FROM attest_keys WHERE authority = $1 AND removed_at IS NULL",
     )
@@ -143,6 +146,59 @@ pub async fn keys(db: &Db, authority: &str) -> Result<Keys, String> {
     .await
     .map_err(|e| format!("could not read {authority}'s attestation keys: {e}"))?;
     Ok(Keys::new(authority, &rows))
+}
+
+/// The `seq`s of an authority's decisions withdrawn by deleting (or
+/// replacing) their record: a copy put back doesn't count again.
+pub async fn withdrawn<'e, E>(db: E, authority: &str) -> Result<BTreeSet<u64>, String>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Any>,
+{
+    let seqs = sqlx::query_scalar::<_, i64>("SELECT seq FROM withdrawn_seqs WHERE authority = $1")
+        .bind(authority)
+        .fetch_all(db)
+        .await
+        .map_err(|e| format!("could not read {authority}'s withdrawn decisions: {e}"))?;
+    Ok(seqs.into_iter().map(|seq| seq as u64).collect())
+}
+
+/// Records that a version of a record, read from `repo` in `space`, was
+/// deleted or replaced by `new` (`None` when deleted): if it counted, and
+/// `new` doesn't carry its `seq`, that decision is withdrawn for good.
+/// Returns whether it was. Only a version that verifies withdraws anything,
+/// so a junk record claiming someone else's `seq` can't.
+pub async fn withdraw_superseded(
+    conn: &mut sqlx::AnyConnection,
+    space: &str,
+    repo: &str,
+    collection: &str,
+    old: &Value,
+    new: Option<&Value>,
+) -> Result<bool, String> {
+    let Some(authority) = super::SpaceUri::parse(space).map(|s| s.authority) else {
+        return Ok(false);
+    };
+    let Some(seq) = claimed_seq(old, &authority, space) else { return Ok(false) };
+    if new.and_then(|new| claimed_seq(new, &authority, space)) == Some(seq)
+        || old.get("$type").and_then(Value::as_str) != Some(collection)
+    {
+        return Ok(false);
+    }
+    let keys = keys(&mut *conn, &authority).await?;
+    if verify(old, repo, space, &keys, u64::MAX - FUTURE_US).is_none_or(|sig| sig.seq != seq) {
+        return Ok(false);
+    }
+    sqlx::query(
+        "INSERT INTO withdrawn_seqs (authority, seq, withdrawn_at) VALUES ($1, $2, $3) \
+         ON CONFLICT (authority, seq) DO NOTHING",
+    )
+    .bind(&authority)
+    .bind(seq as i64)
+    .bind(now_ms())
+    .execute(&mut *conn)
+    .await
+    .map_err(|e| format!("could not record a withdrawn decision: {e}"))?;
+    Ok(true)
 }
 
 /// The key new records are signed with: the authority's newest.
@@ -419,15 +475,18 @@ impl Ticket {
 /// Checks an action and reserves its signing: in one transaction, runs
 /// `check` against the index, takes the authority's next `seq`, and logs a
 /// pending journal entry. Refuses when another signing about the same
-/// person is pending.
+/// person is pending. `written` is where the record will be written (its
+/// space and repo), so it can be read again if reading it back fails.
 pub async fn reserve(
     state: &AppState,
     authority: &str,
     signer: Signer<'_>,
     claim: &Claim,
     check: Option<Check<'_>>,
+    written: Option<(&str, &str)>,
 ) -> Result<Ticket, String> {
     let (key_id, key) = signing_key(state, authority).await?;
+    settle(state, authority, claim).await;
     let backend = Backend::of(&state.config.database_url)?;
     let mut conn = state.db.acquire().await.map_err(|e| e.to_string())?;
     let begin = match backend {
@@ -438,7 +497,8 @@ pub async fn reserve(
         .execute(&mut *conn)
         .await
         .map_err(|e| format!("could not start signing: {e}"))?;
-    let reserved = reserve_in(state, &mut conn, backend, authority, signer, claim, check).await;
+    let reserved =
+        reserve_in(state, &mut conn, backend, authority, signer, claim, check, written).await;
     let end = if reserved.is_ok() { "COMMIT" } else { "ROLLBACK" };
     let ended = sqlx::query(end).execute(&mut *conn).await;
     let (seq, rank, signed_ms) = reserved?;
@@ -453,6 +513,51 @@ pub async fn reserve(
     })
 }
 
+/// Settles the pending entries about the claim's person whose record wasn't
+/// read back in time: their repo is read again, and each is committed if its
+/// record is now in the index, or voided if the repo was read and it isn't
+/// there. One whose repo can't be read stays pending, and keeps blocking
+/// (see [`reserve_in`]), so nothing is decided against an index that may be
+/// missing it.
+async fn settle(state: &AppState, authority: &str, claim: &Claim) {
+    let (Some(conference), Some(subject)) = (&claim.conference, &claim.subject) else { return };
+    let now = now_ms();
+    let lapsed = sqlx::query_as::<_, (i64, String, String)>(
+        "SELECT seq, written_in, written_by FROM signing_journal WHERE authority = $1 \
+         AND state = 'pending' AND space = $2 AND subject = $3 AND created_at <= $4 \
+         AND created_at > $5 AND written_in IS NOT NULL AND written_by IS NOT NULL",
+    )
+    .bind(authority)
+    .bind(conference)
+    .bind(subject)
+    .bind(now - PENDING_MS)
+    .bind(now - PRUNE_MS)
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
+    for (seq, space, repo) in lapsed {
+        if let Err(why) = super::sync::sync_repo(state, &space, &repo).await {
+            eprintln!("signing: couldn't read {repo} in {space} to settle signing {seq}: {why}");
+            continue;
+        }
+        let Ok(Some(org)) = index::load(state, authority).await else { continue };
+        let outcome = if org.seqs.contains(&(seq as u64)) { "committed" } else { "void" };
+        let settled = sqlx::query(
+            "UPDATE signing_journal SET state = $3 WHERE authority = $1 AND seq = $2 \
+             AND state = 'pending'",
+        )
+        .bind(authority)
+        .bind(seq)
+        .bind(outcome)
+        .execute(&state.db)
+        .await;
+        if let Err(why) = settled {
+            eprintln!("signing: couldn't settle signing {seq} of {authority}: {why}");
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn reserve_in(
     state: &AppState,
     conn: &mut sqlx::AnyConnection,
@@ -461,10 +566,11 @@ async fn reserve_in(
     signer: Signer<'_>,
     claim: &Claim,
     check: Option<Check<'_>>,
+    written: Option<(&str, &str)>,
 ) -> Result<(u64, Rank, i64), String> {
     let db = |e: sqlx::Error| format!("could not sign: {e}");
     sqlx::query(
-        "INSERT INTO signing_counters (authority, next_seq, last_signed_at) VALUES ($1, 1, 0) \
+        "INSERT INTO signing_counters (authority, next_seq) VALUES ($1, 1) \
          ON CONFLICT (authority) DO NOTHING",
     )
     .bind(authority)
@@ -517,14 +623,19 @@ async fn reserve_in(
     .await
     .map_err(db)?;
     if let (Some(conference), Some(subject)) = (&claim.conference, &claim.subject) {
+        // A pending entry blocks while it's being written; one whose record
+        // was written but couldn't be read back or settled (see [`settle`])
+        // blocks until it is, for a day at most.
         let pending = sqlx::query_scalar::<_, i64>(
             "SELECT COUNT(*) FROM signing_journal WHERE authority = $1 AND state = 'pending' \
-             AND created_at > $2 AND space = $3 AND subject = $4",
+             AND (created_at > $2 OR (written_in IS NOT NULL AND created_at > $5)) \
+             AND space = $3 AND subject = $4",
         )
         .bind(authority)
         .bind(live)
         .bind(conference)
         .bind(subject)
+        .bind(now - PRUNE_MS)
         .fetch_one(&mut *conn)
         .await
         .map_err(db)?;
@@ -566,18 +677,15 @@ async fn reserve_in(
     // date every later one ahead (past what readers accept) once it's put
     // right.
     let signed_ms = now;
+    sqlx::query("UPDATE signing_counters SET next_seq = $2 WHERE authority = $1")
+        .bind(authority)
+        .bind((seq + 1) as i64)
+        .execute(&mut *conn)
+        .await
+        .map_err(db)?;
     sqlx::query(
-        "UPDATE signing_counters SET next_seq = $2, last_signed_at = $3 WHERE authority = $1",
-    )
-    .bind(authority)
-    .bind((seq + 1) as i64)
-    .bind(signed_ms)
-    .execute(&mut *conn)
-    .await
-    .map_err(db)?;
-    sqlx::query(
-        "INSERT INTO signing_journal (authority, seq, space, subject, code_hash, state, created_at) \
-         VALUES ($1, $2, $3, $4, $5, 'pending', $6)",
+        "INSERT INTO signing_journal (authority, seq, space, subject, code_hash, state, created_at, \
+         written_in, written_by) VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7, $8)",
     )
     .bind(authority)
     .bind(seq as i64)
@@ -585,6 +693,8 @@ async fn reserve_in(
     .bind(&claim.subject)
     .bind(&claim.code_hash)
     .bind(now)
+    .bind(written.map(|(space, _)| space))
+    .bind(written.map(|(_, repo)| repo))
     .execute(&mut *conn)
     .await
     .map_err(db)?;

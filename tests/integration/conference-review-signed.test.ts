@@ -152,14 +152,19 @@ test('TC-55: a decision written but not read back doesn’t block the next one o
   expect(await ana.isMember(conference.space)).toBe(false)
 })
 
-test('TC-55: one signing with a fast clock doesn’t date later ones ahead (review round 17)', async ({ viv }) => {
-  const { org, conference } = await seedConference(dep, accountsIn(viv), { methods: ['code'] })
+test('TC-55: a decision is dated by the clock when it’s signed (review rounds 17 and 18)', async ({ viv }) => {
+  const { conference, org, superAdmin } = await seedConference(dep, accountsIn(viv), { methods: ['code'] })
   const bram = await Attendee.signIn(dep, await viv.createAccount(viv.handle('bram')))
-  // The last signing was dated an hour ahead, by a clock since put right.
-  sql('UPDATE signing_counters SET last_signed_at = ? WHERE authority = ?', Date.now() + 3_600_000, org.did)
+  const before = Date.now()
   const added = await memberAction(dep, conference, ['member', 'add'], bram.person)
   expect(added.code, added.stderr).toBe(0)
-  expect(await bram.isMember(conference.space), 'his admission counts now').toBe(true)
+  const records = await ownSpaceRecords(viv.url, superAdmin, org.adminSpace, 'app.eventside.admin.member')
+  const admission = records.find((r) => r.value.subject === bram.did)
+  const signedAt = Date.parse(admission?.value.signatures[0].signedAt)
+  // Not carried forward from an earlier signing: within the readers' five minutes, and then some.
+  expect(signedAt).toBeGreaterThanOrEqual(before - 1_000)
+  expect(signedAt).toBeLessThanOrEqual(Date.now() + 1_000)
+  expect(await bram.isMember(conference.space)).toBe(true)
 })
 
 test('TC-65: one code can be revoked, at its issuer’s rank (review round 17)', async ({ viv }) => {
@@ -175,4 +180,94 @@ test('TC-65: one code can be revoked, at its issuer’s rank (review round 17)',
   expect((await ana.join({ conference: conference.space, code: other })).body.status, 'the others still work').toBe(
     'joined',
   )
+})
+
+test('TC-28: a withdrawn ban put back doesn’t undo a later join (review round 18)', async ({ viv }) => {
+  const { org, conference } = await seedConference(dep, accountsIn(viv), { methods: ['code'] })
+  const kees = await viv.createAccount(viv.handle('kees'))
+  await addAdmin(dep, org, kees, 'owner')
+  const code = await sharedCode(dep, conference, uniqueCode('atmosphere27'))
+  const bram = await Attendee.signIn(dep, await viv.createAccount(viv.handle('bram')))
+  expect((await memberAction(dep, conference, ['member', 'ban'], bram.person, { as: kees })).code).toBe(0)
+
+  // Kees withdraws his ban by deleting it, and Bram joins.
+  const ban = 'app.eventside.admin.ban'
+  const [record] = await ownSpaceRecords(viv.url, kees, org.adminSpace, ban)
+  const pds = await pdsOf(viv.url, kees.did)
+  const at = { space: org.adminSpace, repo: kees.did, collection: ban, rkey: record.rkey }
+  await xrpcOk(pds, 'com.atproto.space.deleteRecord', { token: kees.accessJwt, body: at })
+  await eventually(
+    async () => (await bram.getConference(conference.space)).body.viewer,
+    (viewer) => viewer?.request === undefined,
+    'the deletion reaches the index',
+  )
+  expect((await bram.join({ conference: conference.space, code })).body.status).toBe('joined')
+
+  // Kees, no longer an admin, puts the same signed ban back.
+  await cliOk(dep, ['org', 'admin', 'remove', kees.handle, '--org', org.did])
+  await xrpcOk(pds, 'com.atproto.space.putRecord', { token: kees.accessJwt, body: { ...at, record: record.value } })
+  await cliOk(dep, ['reindex', '--org', org.did])
+  expect(await bram.isMember(conference.space), 'his join was checked without it').toBe(true)
+})
+
+test('TC-52: an owner’s removal not yet read back still can’t be overridden by staff (review round 18)', async ({
+  viv,
+}) => {
+  const { org, conference, admins } = await seedConference(dep, accountsIn(viv), { staff: ['pim'], methods: ['code'] })
+  const kees = await viv.createAccount(viv.handle('kees'))
+  await addAdmin(dep, org, kees, 'owner')
+  const code = await sharedCode(dep, conference, uniqueCode('atmosphere27'))
+  const ana = await Attendee.signIn(dep, await viv.createAccount(viv.handle('ana')))
+  expect((await ana.join({ conference: conference.space, code })).body.status).toBe('joined')
+  expect((await memberAction(dep, conference, ['member', 'remove'], ana.person, { as: kees })).code).toBe(0)
+
+  // As if reading Kees's removal back had failed, and its notification was
+  // lost: the index doesn't have it, and its entry lapsed pending.
+  sql(
+    'DELETE FROM space_records WHERE space = ? AND repo = ? AND collection = ?',
+    org.adminSpace,
+    kees.did,
+    'app.eventside.admin.member',
+  )
+  sql('DELETE FROM space_repos WHERE space = ? AND repo = ?', org.adminSpace, kees.did)
+  sql(
+    "UPDATE signing_journal SET state = 'pending', created_at = ? WHERE authority = ? AND subject = ? AND written_by = ?",
+    Date.now() - 3 * 60_000,
+    org.did,
+    ana.did,
+    kees.did,
+  )
+  sql('UPDATE index_generations SET generation = generation + 1 WHERE org = ?', org.did)
+
+  // Pim, staff, would re-admit her over the owner's removal the index is missing.
+  const added = await memberAction(dep, conference, ['member', 'add'], ana.person, { as: admins.pim })
+  expect(added.code, 'checked against the removal, read again first').not.toBe(0)
+  await cliOk(dep, ['reindex', '--org', org.did])
+  expect(await ana.isMember(conference.space)).toBe(false)
+})
+
+test('TC-22: an outranked code doesn’t keep someone out of an open conference (review round 18)', async ({ viv }) => {
+  const { org, conference, admins } = await seedConference(dep, accountsIn(viv), {
+    staff: ['pim'],
+    methods: ['code', 'open'],
+  })
+  const kees = await viv.createAccount(viv.handle('kees'))
+  await addAdmin(dep, org, kees, 'owner')
+  const staffCode = cliJson(
+    await cli(dep, [
+      'codes',
+      'issue',
+      '--conference',
+      conference.space,
+      '--shared',
+      uniqueCode('crew'),
+      '--as',
+      admins.pim.handle,
+      '--json',
+    ]),
+  ).codes[0]
+  const ana = await Attendee.signIn(dep, await viv.createAccount(viv.handle('ana')))
+  expect((await ana.join({ conference: conference.space })).body.status).toBe('joined')
+  expect((await memberAction(dep, conference, ['member', 'remove'], ana.person, { as: kees })).code).toBe(0)
+  expect((await ana.join({ conference: conference.space, code: staffCode })).body.status).toBe('joined')
 })
