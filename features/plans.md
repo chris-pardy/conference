@@ -1,7 +1,7 @@
 ---
 status: design-review
 impact: cross-cutting
-depends-on: [conference-space, space-sync, block-actions, conference-feed, groups, places]
+depends-on: [conference-space, space-sync, block-actions, feeds, groups, places]
 branch:
 tests-commit:
 ---
@@ -315,8 +315,8 @@ Plans you went to stay in your history, with their page and chat.
 - `conference-space` (not specced): plans hang off its conference node with
   `childOf`, and featuring needs its notion of who counts as an organizer
   (co-owners).
-- `conference-feed` (not specced): it has to carry plan items with the
-  reasons "changed", "invited you" and "featured", pins for featured
+- [`feeds`](feeds.md) (being specced; it replaced `conference-feed`): it
+  has to carry plan items with the reasons "changed", "invited you" and "featured", pins for featured
   whole-conference plans, and the rule that past plans drop out.
 - [`groups`](groups.md) and [`places`](places.md) (not specced): plans
   defines how it references them (a group URI in an audience, a place URI
