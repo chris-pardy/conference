@@ -1,5 +1,5 @@
 ---
-status: design-review
+status: implementing
 impact: cross-cutting
 depends-on: [attendee-sign-in]
 branch: feature/conference-space
@@ -1385,6 +1385,10 @@ quietly changed other people's memberships.
   Their checks move to signing time. The frozen tests may need no change,
   since they act through the CLI and the PWA, which sign.
 
+**Round 5 approved** by the user on 2026-10-07 ("approved, let's
+build"), including the test-case changes it proposed, written out under
+"Test cases".
+
 ### Build notes
 
 Written at the start of the build (2026-10-06). Nothing landed on `main`
@@ -2497,11 +2501,16 @@ Dropped in design review round 3: joining no longer writes to the organization's
 - **When** Lotte removes Joost and Pim then admits him again
 - **Then** he's a member: between staff, the latest decision stands
 
-### TC-53: A former admin's decisions stop counting
+### TC-53: A former admin's decisions keep standing
 
-- **Given** Pim admitted Bram while he was staff
+(Reworded in design review round 5, approved 2026-10-07. Before: "A former
+admin's decisions stop counting".)
+
+- **Given** Pim, a staff admin, admitted Bram, and Ana joined with a code
+  and was also admitted by Pim
 - **When** Olga removes Pim as an admin
-- **Then** Bram is no longer a member, unless another rule admits him
+- **Then** Bram and Ana are still members
+- **And** the CLI refuses any further decision made as Pim
 
 ### TC-54: Joining doesn't depend on the super admin's PDS
 
@@ -2533,14 +2542,69 @@ Dropped in design review round 3: joining no longer writes to the organization's
 - **Then** his new request is pending
 - **And** if he had been banned instead, it would be refused
 
-### TC-58: An owner can keep the people a departing admin let in
+### TC-58: An owner can undo a former admin's admissions
 
-(Added 2026-10-07 with the user's approval.)
+(Reworded in design review round 5, approved 2026-10-07. Before: "An owner
+can keep the people a departing admin let in".)
 
-- **Given** Pim, a staff admin, admitted Bram
-- **When** Olga removes Pim as an admin and keeps Pim's admissions
-- **Then** Bram is still a member, now on Olga's say-so
-- **And** without that choice, TC-53 applies
+- **Given** Pim, a staff admin, admitted Bram and Ana, Ana had also joined
+  with a code, and Olga then removed Pim as an admin
+- **When** Olga undoes Pim's admissions
+- **Then** Bram is no longer a member
+- **And** Ana still is, through her code
+
+### Signed decisions
+
+### TC-59: An admin record without our signature doesn't count
+
+- **Given** Pim is a staff admin
+- **When** Pim writes a record admitting Mallory into the admin space from
+  another app
+- **Then** Mallory isn't a member, and our host doesn't list her
+
+### TC-60: A decision keeps its rank after its author is demoted
+
+- **Given** Kees, an owner, banned Bram, and Kees was then made staff
+- **When** Pim, a staff admin, admits Bram
+- **Then** it's refused, and Bram is still banned
+- **And** Kees, now staff, can't lift the ban either
+
+### TC-61: Another app can check a decision for itself
+
+- **Given** Olga admitted Bram
+- **When** another app reads Olga's admission from the admin space
+- **Then** its signature verifies against Atmosphere's DID document
+- **And** the same record copied into Mallory's repository doesn't verify
+
+### ~~TC-62: Deleting a decision doesn't undo it~~
+
+Dropped in design review round 5: records are the source of truth, so
+deleting a decision withdraws it.
+
+### TC-63: Rotating the signing key keeps earlier decisions
+
+- **Given** Olga admitted Bram
+- **When** the operator adds a new signing key and re-signs the standing
+  records
+- **Then** Bram is still a member, and a new admission is signed with the
+  new key
+- **When** the operator then removes the old key
+- **Then** Bram is still a member
+- **And** a record signed only with the old key no longer counts
+
+### TC-64: A join written by another app is only a request
+
+- **Given** AtmosphereConf has the shared code "atmosphere27" and requests
+  turned on
+- **When** Ana writes a join record with that code from another app,
+  without our signature
+- **Then** her request is pending, and she isn't a member
+- **And** if requests were off, she'd simply not be a member
+
+### TC-65: Staff can issue codes
+
+- **When** Pim, a staff admin, issues a shared code
+- **Then** Bram joins AtmosphereConf with it
 
 ### Regressions
 
@@ -3414,3 +3478,9 @@ vivarium 0.0.3 for attendee-sign-in's e2e TC-8.
 decision or action is checked when it's taken and stays valid, using signed
 records. The feature goes back to design review (round 5, above). The build
 resumes after the user approves the design and the test-case changes.
+
+**Build resumes after design review round 5** (approved 2026-10-07). The
+approved test-case changes are TC-53 (frozen, amended), TC-58 (reworded,
+not frozen) and the new TC-59 to TC-65 (TC-62 dropped). Review rounds 16
+and 17 follow, as proposed to the user in round 5. If round 17 isn't clean,
+set `status: blocked`.
