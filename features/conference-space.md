@@ -249,7 +249,7 @@ None. Each one was settled in the design review:
   conference" means the space's members.
 - Not yet specced: `program-import` (sessions and speakers, which sets the
   speaker role), `event-branding` (the theme on the sidecar),
-  `conference-feed`, `groups`, `places`, `chat`, `connections` and
+  `feeds`, `groups`, `places`, `chat`, `connections` and
   `event-profile`. All of them read membership and roles from here, and
   scope their records to the conference's space.
 
