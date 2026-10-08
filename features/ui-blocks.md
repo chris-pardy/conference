@@ -43,7 +43,7 @@ family.
 | [`block-offline`](block-offline.md) | Offline queue, optimistic overlay, replay and reconciliation | block-actions |
 | [`block-sandbox`](block-sandbox.md) | Custom JS blocks and computed bindings | block-actions |
 | `conference-space` | A conference as a permissioned space: the organizer owns it and attendees are members | (not specced yet) |
-| `conference-feed` | The main timeline and scoped sub-feeds (per session or room), ordering, pinning | (not specced yet) |
+| [`feeds`](feeds.md) | Every screen as a per-viewer feed: feeds, posts, algorithms, visibility, pinning (replaced `conference-feed`) | ui-blocks, space-sync, attendee-sign-in |
 | `feed-templates`, `block-editor`, `feed-apps` | The three authoring modes | (not specced yet) |
 | `announcements`, `wifi-info`, `polls`, `qa`, `session-chat`, `toys` | The experiences | (not specced yet) |
 
@@ -148,7 +148,7 @@ info/warning/success tones.
 - Offered separately: templates only (recommended at the time), organizer
   block editor only, or third-party apps only.
 
-### Feed shape (for `conference-feed`)
+### Feed shape (for `conference-feed`, now [`feeds`](feeds.md))
 
 - **One conference timeline with scoped sub-feeds** (chosen), with pinning
   as a feature: either explicit pins, or items kept at the top of the feed.
@@ -294,7 +294,7 @@ info/warning/success tones.
 - Custom JS blocks and computed bindings
   ([`block-sandbox`](block-sandbox.md)).
 - Sign-in, and the appview's access to spaces.
-- The feed: timeline, sub-feeds, ordering, pinning (`conference-feed`).
+- The feed: timeline, sub-feeds, ordering, pinning ([`feeds`](feeds.md)).
 - Creating and administering conference spaces (`conference-space`).
 - Organizer block editing, templates, and third-party apps.
 - Any specific experience.
@@ -338,7 +338,7 @@ built):
   - **Integration tests need an authenticated attendee** writing to a
     space. That's the first use of vivarium OAuth and permissioned spaces,
     through `viv`.
-- **Planned features** (`conference-space`, `conference-feed`,
+- **Planned features** (`conference-space`, `feeds`,
   `feed-templates`, `block-editor`, `feed-apps` and the experiences) aren't
   specced yet. Every one of them consumes the surfaces below, so changing
   them later ripples into all of them.
