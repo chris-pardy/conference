@@ -3832,3 +3832,44 @@ reports only the approved `conference-admins.test.ts`; `acdcbc5` reports
    directly.** **Fixed:** the column is dropped (`0004`), and the test now
    checks the reader-visible property: a decision's `signedAt` is the
    clock when it was signed.
+
+### Round 19
+
+Reviewer: a fresh subagent following `adversarial-review`. Verdict: not
+clean (0 blocking, 2 major, 2 minor, 1 nit). `pnpm check` green; both
+freezes report only the approved changes.
+
+1. **[major] The round 18 withdrawal could be bypassed**, because it went
+   by the `seq` a record *claims* first, while what counts went by the
+   signature that verifies and by "the latest version of a `seq` in a repo
+   stands": (a) a junk copy hid a ban without withdrawing it, so deleting
+   the copy revived it after a join; (b) an edit putting a fake claim
+   first kept the ban counting, and deleting then re-putting it slipped
+   past the withdrawal. **Fixed:** a record counts by itself, by its
+   verifying signature's `seq`; one that doesn't verify hides nothing (the
+   "latest version stands" rule only existed for TC-63's test as it was
+   before its approved fix). A version that verified and is deleted, or
+   replaced by one that doesn't verify with the same `seq`, withdraws that
+   `seq`. Rust `only_a_version_that_verified_withdraws_and_only_from_its_repo`
+   and `tc_63_a_record_counts_by_itself_and_a_copy_that_doesnt_verify_hides_nothing`.
+2. **[major] A member whose PDS takes writes but won't serve reads could
+   block every decision about them for a day** (round 18 #2's long block
+   applied to their own pending leave). **Fixed:** only an admin's
+   pending decision (written to a repo not the subject's) blocks past the
+   two minutes, and only those are settled by reading their repo; a
+   person's own join or leave blocks no longer than it takes to write.
+3. **[minor] Withdrawals were keyed by `(authority, seq)`**, so a record
+   signed with a leaked key in another repo could withdraw a real
+   decision for good. **Fixed:** they're per `(space, repo, seq)` and only
+   affect that repo (migration `0005`). Rust
+   `a_withdrawn_decision_put_back_doesnt_count_where_it_was_withdrawn`.
+   Declined: a command to list or clear withdrawals; they only ever record
+   a deletion or edit of the repo owner's own record, and re-deciding goes
+   through eventside.
+4. **[minor] Round 18's settle regression passed without `settle`.**
+   **Fixed:** it now asserts the refusal names the standing removal, not
+   "try again", and a new test covers the void path: "TC-55: a decision
+   whose record never landed stops blocking once its repo is read (review
+   round 19)".
+5. **[nit] `reindex`'s withdrawal pass read every record of the
+   organization.** **Fixed:** it selects only signed collections in SQL.

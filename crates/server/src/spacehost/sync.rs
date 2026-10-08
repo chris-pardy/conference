@@ -513,10 +513,11 @@ pub async fn reindex(state: &AppState, org: &str) -> Result<Reindexed, String> {
             org,
             &authority.super_admin,
             authority.created_at as u64 * 1000,
-            &index::without_withdrawn(recs_of(org, read), org, &withdrawn),
+            &recs_of(org, read),
             &state.secrets,
             &eventside,
             &keys,
+            &withdrawn,
             now_ms() as u64 * 1000,
         )
     };
@@ -562,9 +563,16 @@ pub async fn reindex(state: &AppState, org: &str) -> Result<Reindexed, String> {
     // reached us: withdrawn for good, as if a sync had seen it go.
     let old_signed = sqlx::query_as::<_, (String, String, String, String, String)>(
         "SELECT space, repo, collection, rkey, value FROM space_records \
-         WHERE space LIKE $1 AND value IS NOT NULL",
+         WHERE space LIKE $1 AND value IS NOT NULL \
+         AND (space = $2 OR collection IN ($3, $4, $5, $6, $7))",
     )
     .bind(&pattern)
+    .bind(&admin_space)
+    .bind(index::ROLE)
+    .bind(index::RULES)
+    .bind(crate::conference::SIDECAR)
+    .bind(index::JOIN)
+    .bind(index::LEAVE)
     .fetch_all(&mut *tx)
     .await
     .map_err(|e| e.to_string())?;

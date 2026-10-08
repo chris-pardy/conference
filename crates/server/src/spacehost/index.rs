@@ -836,19 +836,6 @@ pub async fn records(state: &AppState, org: &str) -> Result<Vec<Rec>, String> {
         .collect())
 }
 
-/// The records less those carrying a withdrawn decision's `seq`: a decision
-/// withdrawn by deleting its record doesn't come back when the same signed
-/// bytes are put back, since later decisions were checked without it.
-pub fn without_withdrawn(mut recs: Vec<Rec>, org: &str, withdrawn: &BTreeSet<u64>) -> Vec<Rec> {
-    if !withdrawn.is_empty() {
-        recs.retain(|rec| {
-            attest::claimed_seq(&rec.value, org, &rec.space)
-                .is_none_or(|seq| !withdrawn.contains(&seq))
-        });
-    }
-    recs
-}
-
 /// How many times an organization's index has changed. Every write of a
 /// record its view is derived from ([`derives_from`]) bumps it, from the
 /// server or the admin CLI (another process), and so does a change to its
@@ -889,7 +876,7 @@ pub async fn load(state: &AppState, org: &str) -> Result<Option<Arc<Org>>, Strin
     }
     let Some(authority) = super::authority::get(&state.db, org).await? else { return Ok(None) };
     let withdrawn = attest::withdrawn(&state.db, org).await?;
-    let recs = without_withdrawn(records(state, org).await?, org, &withdrawn);
+    let recs = records(state, org).await?;
     let keys = attest::keys(&state.db, org).await?;
     let eventside = state.oauth.client_id_for("atproto");
     let derived = Arc::new(derive(
@@ -900,6 +887,7 @@ pub async fn load(state: &AppState, org: &str) -> Result<Option<Arc<Org>>, Strin
         &state.secrets,
         &eventside,
         &keys,
+        &withdrawn,
         crate::db::now_ms() as u64 * 1000,
     ));
     state.host.cache_org(org, generation, derived.clone());
@@ -915,7 +903,8 @@ pub async fn load_for_space(
 }
 
 /// Derives an organization's permissions from its records: those whose
-/// signature verifies against `keys` (at `now_us`), each `seq` once.
+/// signature verifies against `keys` (at `now_us`) and that weren't
+/// withdrawn from where they are, each `seq` once.
 #[allow(clippy::too_many_arguments)]
 pub fn derive(
     org: &str,
@@ -925,31 +914,20 @@ pub fn derive(
     secrets: &Secrets,
     eventside_client: &str,
     keys: &Keys,
+    withdrawn: &attest::Withdrawn,
     now_us: u64,
 ) -> Org {
     let admin_space = SpaceUri::admin(org).to_string();
 
-    // Each `seq` counts once. Within a repo and space, the records that
-    // claim the same `seq` are versions of one decision (a copy, or an old
-    // version put back): the latest written is the one that stands, and it
-    // counts only if it verifies. Across repos or spaces a signature can't be
-    // copied (`repository` and `space` are signed), so a valid duplicate
-    // there means a leaked key; the first, in a fixed order, counts.
-    let mut latest: BTreeMap<(&str, &str, u64), &Rec> = BTreeMap::new();
-    let mut unclaimed: Vec<&Rec> = Vec::new();
-    for rec in recs {
-        match attest::claimed_seq(&rec.value, org, &rec.space) {
-            Some(seq) => {
-                let slot =
-                    latest.entry((rec.space.as_str(), rec.repo.as_str(), seq)).or_insert(rec);
-                if (&rec.rev, &rec.rkey) > (&slot.rev, &slot.rkey) {
-                    *slot = rec;
-                }
-            }
-            None => unclaimed.push(rec),
-        }
-    }
-    let mut ordered: Vec<&Rec> = latest.into_values().chain(unclaimed).collect();
+    // Each record counts by itself, by the `seq` of its verifying signature,
+    // unless that decision was withdrawn from its repo (deleted, or edited
+    // so it no longer verifies with that `seq`): put back, it doesn't count
+    // again, since later decisions were checked without it. A record that
+    // doesn't verify hides nothing. Each `seq` counts once: a signature
+    // can't be copied into another repo or space (`repository` and `space`
+    // are signed), so a valid duplicate there means a leaked key; the first,
+    // in a fixed order, counts.
+    let mut ordered: Vec<&Rec> = recs.iter().collect();
     ordered.sort_by(|a, b| {
         (&a.space, &a.repo, &a.collection, &a.rkey).cmp(&(
             &b.space,
@@ -967,7 +945,11 @@ pub fn derive(
         // record counts only in the collection its signed `$type` names, so
         // one moved into another collection (a deny into bans) doesn't.
         let in_place = rec.str("$type") == Some(rec.collection.as_str());
-        match attest::verify(&rec.value, &rec.repo, &rec.space, keys, now_us).filter(|_| in_place) {
+        let verified =
+            attest::verify(&rec.value, &rec.repo, &rec.space, keys, now_us).filter(|sig| {
+                in_place && !withdrawn.contains(&(rec.space.clone(), rec.repo.clone(), sig.seq))
+            });
+        match verified {
             Some(sig) => {
                 max_seq = max_seq.max(sig.seq);
                 if seqs.insert(sig.seq) {
@@ -1488,6 +1470,7 @@ mod tests {
     const KEES: &str = "did:plc:keesaaaaaaaaaaaaaaaaaaaa";
     const ANA: &str = "did:plc:anaaaaaaaaaaaaaaaaaaaaaa";
     const BRAM: &str = "did:plc:bramaaaaaaaaaaaaaaaaaaaa";
+    const MALLORY: &str = "did:plc:malloryaaaaaaaaaaaaaaaaa";
     /// A time, in microseconds, all signings here are after.
     const T0: u64 = 1_800_000_000_000_000;
 
@@ -1501,6 +1484,7 @@ mod tests {
         keys: Keys,
         seq: u64,
         recs: Vec<Rec>,
+        withdrawn: attest::Withdrawn,
     }
 
     impl World {
@@ -1508,7 +1492,8 @@ mod tests {
         /// conference whose join methods are `methods`.
         fn new(methods: &[&str]) -> Self {
             let (key, keys) = test_keys(ORG);
-            let mut world = Self { key, keys, seq: 0, recs: Vec::new() };
+            let mut world =
+                Self { key, keys, seq: 0, recs: Vec::new(), withdrawn: attest::Withdrawn::new() };
             let admin = SpaceUri::admin(ORG).to_string();
             world.sign(
                 &admin,
@@ -1585,6 +1570,7 @@ mod tests {
                 &Secrets::for_tests(),
                 "https://app.example/client.json",
                 &self.keys,
+                &self.withdrawn,
                 T0 + 1_000_000_000,
             )
         }
@@ -1731,32 +1717,28 @@ mod tests {
     }
 
     #[test]
-    fn tc_63_the_latest_version_of_a_decision_in_its_repo_stands() {
+    fn tc_63_a_record_counts_by_itself_and_a_copy_that_doesnt_verify_hides_nothing() {
         let mut world = World::new(&["code"]);
         world.decide(OLGA, Rank::SuperAdmin, MEMBER, BRAM, json!({ "via": "admin" }));
         assert!(world.conference().is_member(BRAM));
-        // A later copy of it, in the same repo, whose signature no longer
-        // verifies (here: tampered), is the version that stands.
+        // A later copy of it, in the same repo, that doesn't verify (here:
+        // tampered) changes nothing: the original still stands.
         let mut copy = world.recs.last().unwrap().clone();
         copy.rkey = "copy".into();
         copy.rev = "3zzzzzzzzzzzz".into();
         copy.value["signatures"][0]["signature"]["$bytes"] =
             json!(crate::crypto::encode_b64(&[1; 64]));
         world.recs.push(copy.clone());
-        assert!(!world.conference().is_member(BRAM));
-        // Written earlier than the original, it's an old version: the original stands.
-        world.recs.last_mut().unwrap().rev = String::new();
-        world
+        assert!(world.conference().is_member(BRAM));
+        // Withdrawn from Olga's repo, it doesn't count there any more.
+        let seq = world
             .recs
-            .iter_mut()
-            .filter(|r| r.rkey != "copy")
-            .for_each(|r| r.rev = "3aaaaaaaaaaaa".into());
-        assert!(world.conference().is_member(BRAM));
-        // In another repo, a copy changes nothing.
-        let elsewhere = Rec { repo: PIM.into(), rev: "3zzzzzzzzzzzz".into(), ..copy };
-        world.recs.retain(|r| r.rkey != "copy");
-        world.recs.push(elsewhere);
-        assert!(world.conference().is_member(BRAM));
+            .iter()
+            .find(|r| r.rkey != "copy" && r.str("subject") == Some(BRAM))
+            .map(|r| r.value["signatures"][0]["seq"].as_u64().unwrap())
+            .unwrap();
+        world.withdrawn.insert((SpaceUri::admin(ORG).to_string(), OLGA.to_owned(), seq));
+        assert!(!world.conference().is_member(BRAM));
     }
 
     #[test]
@@ -1887,28 +1869,24 @@ mod tests {
     }
 
     #[test]
-    fn a_withdrawn_decision_put_back_doesnt_count() {
+    fn a_withdrawn_decision_put_back_doesnt_count_where_it_was_withdrawn() {
         let mut world = World::new(&["open"]);
         world.decide(KEES, Rank::Owner, BAN, BRAM, json!({}));
         let ban = world.recs.pop().unwrap();
         let ban_seq = world.seq;
         world.join(BRAM, json!({ "via": "open" }));
         assert!(world.conference().is_member(BRAM));
-        // The same signed ban, put back after it was withdrawn.
+        // The same signed ban, put back after it was withdrawn from Kees's repo.
         world.recs.push(ban);
-        assert!(!world.conference().is_member(BRAM), "it verifies, so only the tombstone stops it");
-        let recs = without_withdrawn(world.recs.clone(), ORG, &BTreeSet::from([ban_seq]));
-        let org = derive(
-            ORG,
-            OLGA,
-            T0,
-            &recs,
-            &Secrets::for_tests(),
-            "https://app.example/client.json",
-            &world.keys,
-            T0 + 1_000_000_000,
+        assert!(
+            !world.conference().is_member(BRAM),
+            "it verifies, so only the withdrawal stops it"
         );
-        assert!(org.conference(&space(CONFERENCE_TYPE)).unwrap().is_member(BRAM));
+        let admin = SpaceUri::admin(ORG).to_string();
+        world.withdrawn.insert((admin.clone(), MALLORY.to_owned(), ban_seq));
+        assert!(!world.conference().is_member(BRAM), "withdrawn elsewhere, it still counts");
+        world.withdrawn.insert((admin, KEES.to_owned(), ban_seq));
+        assert!(world.conference().is_member(BRAM));
     }
 
     #[test]

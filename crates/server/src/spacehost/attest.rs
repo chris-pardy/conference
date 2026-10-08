@@ -148,25 +148,32 @@ where
     Ok(Keys::new(authority, &rows))
 }
 
-/// The `seq`s of an authority's decisions withdrawn by deleting (or
-/// replacing) their record: a copy put back doesn't count again.
-pub async fn withdrawn<'e, E>(db: E, authority: &str) -> Result<BTreeSet<u64>, String>
+/// Decisions withdrawn from a repo in a space, by `seq`.
+pub type Withdrawn = BTreeSet<(String, String, u64)>;
+
+/// An authority's decisions withdrawn by deleting (or replacing) their
+/// record, as `(space, repo, seq)`: a copy put back there doesn't count
+/// again.
+pub async fn withdrawn<'e, E>(db: E, authority: &str) -> Result<Withdrawn, String>
 where
     E: sqlx::Executor<'e, Database = sqlx::Any>,
 {
-    let seqs = sqlx::query_scalar::<_, i64>("SELECT seq FROM withdrawn_seqs WHERE authority = $1")
-        .bind(authority)
-        .fetch_all(db)
-        .await
-        .map_err(|e| format!("could not read {authority}'s withdrawn decisions: {e}"))?;
-    Ok(seqs.into_iter().map(|seq| seq as u64).collect())
+    let rows = sqlx::query_as::<_, (String, String, i64)>(
+        "SELECT space, repo, seq FROM withdrawn_seqs WHERE authority = $1",
+    )
+    .bind(authority)
+    .fetch_all(db)
+    .await
+    .map_err(|e| format!("could not read {authority}'s withdrawn decisions: {e}"))?;
+    Ok(rows.into_iter().map(|(space, repo, seq)| (space, repo, seq as u64)).collect())
 }
 
 /// Records that a version of a record, read from `repo` in `space`, was
-/// deleted or replaced by `new` (`None` when deleted): if it counted, and
-/// `new` doesn't carry its `seq`, that decision is withdrawn for good.
-/// Returns whether it was. Only a version that verifies withdraws anything,
-/// so a junk record claiming someone else's `seq` can't.
+/// deleted or replaced by `new` (`None` when deleted): if it verified, and
+/// `new` doesn't verify with the same `seq`, that decision is withdrawn for
+/// good from that repo. Returns whether it was. What a version carries is
+/// the `seq` of its verifying signature, not the one it claims first, so
+/// a version that verified withdraws only itself, and a junk one nothing.
 pub async fn withdraw_superseded(
     conn: &mut sqlx::AnyConnection,
     space: &str,
@@ -178,22 +185,28 @@ pub async fn withdraw_superseded(
     let Some(authority) = super::SpaceUri::parse(space).map(|s| s.authority) else {
         return Ok(false);
     };
-    let Some(seq) = claimed_seq(old, &authority, space) else { return Ok(false) };
-    if new.and_then(|new| claimed_seq(new, &authority, space)) == Some(seq)
-        || old.get("$type").and_then(Value::as_str) != Some(collection)
-    {
+    let in_place = |v: &Value| v.get("$type").and_then(Value::as_str) == Some(collection);
+    if !in_place(old) || old.get("signatures").is_none() {
         return Ok(false);
     }
     let keys = keys(&mut *conn, &authority).await?;
-    if verify(old, repo, space, &keys, u64::MAX - FUTURE_US).is_none_or(|sig| sig.seq != seq) {
+    let any_time = u64::MAX - FUTURE_US;
+    let Some(sig) = verify(old, repo, space, &keys, any_time) else { return Ok(false) };
+    let kept = new
+        .filter(|new| in_place(new))
+        .and_then(|new| verify(new, repo, space, &keys, any_time))
+        .is_some_and(|new| new.seq == sig.seq);
+    if kept {
         return Ok(false);
     }
     sqlx::query(
-        "INSERT INTO withdrawn_seqs (authority, seq, withdrawn_at) VALUES ($1, $2, $3) \
-         ON CONFLICT (authority, seq) DO NOTHING",
+        "INSERT INTO withdrawn_seqs (authority, space, repo, seq, withdrawn_at) \
+         VALUES ($1, $2, $3, $4, $5) ON CONFLICT (authority, space, repo, seq) DO NOTHING",
     )
     .bind(&authority)
-    .bind(seq as i64)
+    .bind(space)
+    .bind(repo)
+    .bind(sig.seq as i64)
     .bind(now_ms())
     .execute(&mut *conn)
     .await
@@ -301,18 +314,6 @@ fn check_entry(
     }
     let cid = attestation_cid(record, entry, repository).ok()?;
     public.verify(&cid, &bytes).then_some(Sig { seq, rank, signed_us })
-}
-
-/// The `seq` a record claims for `authority` in `space`, whether or not its
-/// signature verifies: the first `signatures` entry by one of the
-/// authority's keys, for that space.
-pub fn claimed_seq(record: &Value, authority: &str, space: &str) -> Option<u64> {
-    record.get("signatures")?.as_array()?.iter().find_map(|entry| {
-        let (did, _) = entry.get("key")?.as_str()?.split_once('#')?;
-        (did == authority && entry.get("space")?.as_str()? == space)
-            .then(|| entry.get("seq")?.as_u64())
-            .flatten()
-    })
 }
 
 /// What verified, per record, by everything that decides it.
@@ -513,8 +514,8 @@ pub async fn reserve(
     })
 }
 
-/// Settles the pending entries about the claim's person whose record wasn't
-/// read back in time: their repo is read again, and each is committed if its
+/// Settles the pending admin decisions about the claim's person whose
+/// record wasn't read back in time: their repo is read again, and each is committed if its
 /// record is now in the index, or voided if the repo was read and it isn't
 /// there. One whose repo can't be read stays pending, and keeps blocking
 /// (see [`reserve_in`]), so nothing is decided against an index that may be
@@ -525,7 +526,7 @@ async fn settle(state: &AppState, authority: &str, claim: &Claim) {
     let lapsed = sqlx::query_as::<_, (i64, String, String)>(
         "SELECT seq, written_in, written_by FROM signing_journal WHERE authority = $1 \
          AND state = 'pending' AND space = $2 AND subject = $3 AND created_at <= $4 \
-         AND created_at > $5 AND written_in IS NOT NULL AND written_by IS NOT NULL",
+         AND created_at > $5 AND written_in IS NOT NULL AND written_by <> subject",
     )
     .bind(authority)
     .bind(conference)
@@ -623,13 +624,16 @@ async fn reserve_in(
     .await
     .map_err(db)?;
     if let (Some(conference), Some(subject)) = (&claim.conference, &claim.subject) {
-        // A pending entry blocks while it's being written; one whose record
-        // was written but couldn't be read back or settled (see [`settle`])
-        // blocks until it is, for a day at most.
+        // A pending entry blocks while it's being written. An admin's
+        // decision whose record was written but couldn't be read back or
+        // settled (see [`settle`]) blocks until it is, for a day at most. A
+        // person's own join or leave doesn't block for longer than it takes
+        // to write: its repo is theirs, and one that won't be read mustn't
+        // hold off a decision about them (`seq` orders the two anyway).
         let pending = sqlx::query_scalar::<_, i64>(
             "SELECT COUNT(*) FROM signing_journal WHERE authority = $1 AND state = 'pending' \
-             AND (created_at > $2 OR (written_in IS NOT NULL AND created_at > $5)) \
-             AND space = $3 AND subject = $4",
+             AND (created_at > $2 OR (written_in IS NOT NULL AND written_by <> subject \
+             AND created_at > $5)) AND space = $3 AND subject = $4",
         )
         .bind(authority)
         .bind(live)
@@ -805,6 +809,65 @@ pub mod tests {
             crypto::decode_b64(record["signatures"][0]["signature"]["$bytes"].as_str().unwrap())
                 .unwrap();
         assert_eq!(bytes.len(), 64);
+    }
+
+    #[tokio::test]
+    async fn only_a_version_that_verified_withdraws_and_only_from_its_repo() {
+        let dir = std::env::temp_dir()
+            .join(format!("eventside-withdraw-{}", crate::keys::random_token(8)));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db =
+            crate::db::connect(&format!("sqlite://{}/e.db?mode=rwc", dir.display())).await.unwrap();
+        let (key, _) = test_keys(ORG);
+        sqlx::query(
+            "INSERT INTO attest_keys (authority, fragment, public_key, created_at) VALUES ($1, $2, $3, 0)",
+        )
+        .bind(ORG)
+        .bind(KEY_PREFIX)
+        .bind(key.did_key())
+        .execute(&db)
+        .await
+        .unwrap();
+        let space = format!("at://{ORG}/space/app.eventside.admin/self");
+        let ban_type = "app.eventside.admin.ban";
+        let now = 1_800_000_000_000_000;
+        let ban = signed(
+            json!({ "$type": ban_type, "subject": MALLORY }),
+            &key,
+            ORG,
+            &space,
+            4,
+            Rank::Owner,
+            now,
+            OLGA,
+        );
+        let mut conn = db.acquire().await.unwrap();
+        let mut withdraw = async |repo: &str, old: &Value, new: Option<&Value>| {
+            withdraw_superseded(&mut conn, &space, repo, ban_type, old, new).await.unwrap()
+        };
+        // A junk version (it doesn't verify) withdraws nothing when it goes.
+        let mut junk = ban.clone();
+        junk["signatures"][0]["signature"]["$bytes"] = json!(crypto::encode_b64(&[1; 64]));
+        assert!(!withdraw(OLGA, &junk, None).await);
+        // Re-signed with the same `seq`, it's kept.
+        assert!(!withdraw(OLGA, &ban, Some(&ban)).await);
+        // One with a claim to another `seq` put first still verifies as 4,
+        // and withdraws 4 when it's deleted.
+        let mut prepended = ban.clone();
+        let mut fake = prepended["signatures"][0].clone();
+        fake["seq"] = json!(999_999);
+        prepended["signatures"].as_array_mut().unwrap().insert(0, fake);
+        assert!(!withdraw(OLGA, &ban, Some(&prepended)).await, "it still verifies as 4");
+        assert!(withdraw(OLGA, &prepended, None).await);
+        // Edited so it no longer verifies, it's withdrawn too.
+        assert!(withdraw(OLGA, &ban, Some(&junk)).await);
+        drop(conn);
+        assert_eq!(
+            withdrawn(&db, ORG).await.unwrap(),
+            BTreeSet::from([(space.clone(), OLGA.to_owned(), 4)]),
+            "from Olga's repo only"
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

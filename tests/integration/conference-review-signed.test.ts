@@ -242,6 +242,7 @@ test('TC-52: an owner’s removal not yet read back still can’t be overridden 
   // Pim, staff, would re-admit her over the owner's removal the index is missing.
   const added = await memberAction(dep, conference, ['member', 'add'], ana.person, { as: admins.pim })
   expect(added.code, 'checked against the removal, read again first').not.toBe(0)
+  expect(added.stderr, 'refused by the removal’s rank, not left waiting').toMatch(/stands, and .* can.t override it/)
   await cliOk(dep, ['reindex', '--org', org.did])
   expect(await ana.isMember(conference.space)).toBe(false)
 })
@@ -270,4 +271,29 @@ test('TC-22: an outranked code doesn’t keep someone out of an open conference 
   expect((await ana.join({ conference: conference.space })).body.status).toBe('joined')
   expect((await memberAction(dep, conference, ['member', 'remove'], ana.person, { as: kees })).code).toBe(0)
   expect((await ana.join({ conference: conference.space, code: staffCode })).body.status).toBe('joined')
+})
+
+test('TC-55: a decision whose record never landed stops blocking once its repo is read (review round 19)', async ({
+  viv,
+}) => {
+  const { org, conference, admins } = await seedConference(dep, accountsIn(viv), { staff: ['pim'], methods: ['code'] })
+  const kees = await viv.createAccount(viv.handle('kees'))
+  await addAdmin(dep, org, kees, 'owner')
+  const code = await sharedCode(dep, conference, uniqueCode('atmosphere27'))
+  const ana = await Attendee.signIn(dep, await viv.createAccount(viv.handle('ana')))
+  expect((await ana.join({ conference: conference.space, code })).body.status).toBe('joined')
+  // A decision by Kees about Ana, signed but never written, left pending.
+  sql(
+    'INSERT INTO signing_journal (authority, seq, space, subject, state, created_at, written_in, written_by) ' +
+      "VALUES (?, 999999, ?, ?, 'pending', ?, ?, ?)",
+    org.did,
+    conference.space,
+    ana.did,
+    Date.now() - 3 * 60_000,
+    org.adminSpace,
+    kees.did,
+  )
+  const removed = await memberAction(dep, conference, ['member', 'remove'], ana.person, { as: admins.pim })
+  expect(removed.code, removed.stderr).toBe(0)
+  expect(await ana.isMember(conference.space)).toBe(false)
 })
