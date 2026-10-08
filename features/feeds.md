@@ -1,5 +1,5 @@
 ---
-status: test-cases
+status: ready
 impact: cross-cutting
 depends-on: [ui-blocks, attendee-sign-in, conference-space, space-sync]
 branch:
@@ -205,6 +205,10 @@ algorithmic and need no hand pinning.
 - Unread counts and badges.
 - Declarative and wasm algorithms for the Nov 1 demo. The API allows
   them, but only built-in and outside-service algorithms are built now.
+- Live updates, Web Push and the offline cache (design review round 5:
+  deferred past the Nov 1 demo). This feature's feeds refresh when
+  opened. The design for the three stays in this file for a follow-up
+  feature to build.
 - How people join a conference, and the list of apps an organizer allows.
   These belong to the `conference-space` rewrite.
 - Named, long-lived groups (opensocial.group) and personal-account
@@ -214,13 +218,13 @@ algorithmic and need no hand pinning.
 
 ## Open questions
 
-- How an outside-service algorithm authenticates to eventside, and what
-  it may see. Its skeleton is filtered afterwards, but it still has to
-  read posts to rank them.
-- How much the [`space-sync`](space-sync.md) and
-  [`block-actions`](block-actions.md) specs change now that there's one
-  private space per conference, written by attendees and readable by
-  eventside. For the architecture analysis.
+None. The two raised in brainstorming were settled in the architecture
+analysis and the design review:
+
+- Outside generators authenticate with a service JWT, and see only the
+  stream of their feed's posts (rounds 3–5).
+- What changes in `space-sync` and `block-actions` is listed under
+  "Impact on existing features".
 
 ## Architecture analysis
 
@@ -776,5 +780,332 @@ The draft was critiqued before being presented. Folded in:
   - the Nov 1 slice defers live updates, push and the offline cache.
 
 ## Test cases
+
+The scenario is AtmosphereConf 2027 in Amsterdam:
+
+- **Olga** organizes the conference, and **Pim** is on the staff.
+- **Ana**, **Bram** and **Femke** are attendees, and **Mallory** isn't
+  one.
+- **Kees** moderates the "Grote Zaal" session chat, but isn't an
+  organizer.
+
+Each conference is set up by whatever the `conference-space` rewrite
+provides. These cases assume only that a conference has members and
+organizers, and an organizer's list of allowed apps.
+
+### Feeds
+
+#### TC-1: An attendee lands on the main feed
+
+- **Given** Olga has posted "Welcome to Amsterdam" and then "Doors open
+  09:00"
+- **When** Ana opens the conference
+- **Then** she sees its main feed, with "Doors open 09:00" above
+  "Welcome to Amsterdam"
+
+#### TC-2: Each session, room, plan and group gets its own feed
+
+- **Given** the conference has a main feed only
+- **When** the session "Lexicons in practice", the room "Zaal B", a plan
+  and a group are added
+- **Then** each of them has a feed of its own, scoped to it
+- **And** adding the same session again doesn't create a second feed
+
+#### TC-3: An organizer adds a named feed
+
+- **When** Olga adds a feed called "Announcements" that only organizers
+  may post to
+- **Then** members see "Announcements" among the conference's feeds
+
+#### TC-4: A feed only lists for the people who can see it
+
+- **Given** the "Speakers" feed's audience is a list of the speakers,
+  and Ana isn't one
+- **When** Ana lists the conference's feeds
+- **Then** "Speakers" isn't among them
+- **And** opening it directly answers "not found", the same as a feed
+  that doesn't exist
+
+#### TC-5: Someone who isn't a member can't read a feed
+
+- **When** Mallory, or a visitor who isn't signed in, opens the main feed
+- **Then** they get "not found", and no posts
+
+#### TC-6: An empty feed says so
+
+- **Given** nobody has posted in the "Zaal C" feed
+- **When** Ana opens it
+- **Then** she sees an empty state, not an error
+
+### Posting
+
+#### TC-7: An attendee posts in a session chat
+
+- **Given** Bram posted "Slides?" in the "Grote Zaal" chat
+- **When** Ana posts "Are the slides online?" there
+- **Then** both posts are in the chat, oldest first
+- **And** they show who posted them
+
+#### TC-8: One post goes to several feeds, and each feed decides
+
+- **When** Ana posts "Lost a blue scarf" to the "Grote Zaal" chat and to
+  "Announcements"
+- **Then** the composer tells her it was posted to "Grote Zaal" and
+  refused by "Announcements", which only organizers can post to
+- **And** the post appears in "Grote Zaal" only
+
+#### TC-9: An organizer's announcement reaches several feeds
+
+- **When** Olga posts "Keynote moved to Zaal B" to the main feed,
+  "Announcements" and the "Grote Zaal" chat
+- **Then** it appears in all three
+
+#### TC-10: A decision stands after a role change
+
+- **Given** Pim posted "Lunch is served" to "Announcements" while he was
+  staff
+- **When** Olga removes Pim from the staff
+- **Then** "Lunch is served" is still in "Announcements"
+- **And** Pim's next post to "Announcements" is refused
+
+#### TC-11: A post written behind eventside's back is checked the same way
+
+- **When** Ana writes posts straight into the space from another client,
+  one targeting "Announcements" and one targeting the "Grote Zaal" chat
+- **Then** the "Grote Zaal" post appears in that chat
+- **And** "Announcements" doesn't show hers
+
+#### TC-12: A post that arrives before its feed waits for it
+
+- **Given** a post targets the feed of a plan that eventside hasn't seen
+  yet
+- **When** the plan's feed arrives
+- **Then** the post is checked against it, and appears if it's accepted
+
+#### TC-13: Deleting a post removes it everywhere
+
+- **Given** Olga's "Keynote moved to Zaal B" is in three feeds
+- **When** she deletes it
+- **Then** it's gone from all three
+
+### Who sees what
+
+#### TC-14: A post can narrow its audience
+
+- **Given** the "Grote Zaal" chat is open to all members
+- **When** Ana posts "Meet at the garderobe?" there, visible only to
+  Bram and Femke
+- **Then** Bram and Femke see it in the chat
+- **And** nobody else does, organizers included
+
+#### TC-15: A post doesn't reveal where else it went, or who may see it
+
+- **Given** Ana posted to the "Grote Zaal" chat and to a private plan's
+  feed, visible only to Bram and Femke
+- **When** Bram reads the post in the "Grote Zaal" chat
+- **Then** nothing in what he's served names the plan's feed, or the
+  post's audience
+
+#### TC-16: A card can't show someone else's private data
+
+- **Given** Femke voted in a poll, and that vote is in her repo in the
+  space
+- **When** Ana posts a card whose source points at Femke's vote
+- **Then** everyone except Femke sees that part of the card as
+  "unavailable", and the rest of the card renders
+- **And** it looks the same as a source that doesn't exist
+
+#### TC-17: An attendee's card can't list a collection
+
+- **When** Ana posts a card with a source that lists a whole collection
+- **Then** that source is "unavailable" for every viewer
+
+#### TC-18: Card data for something you can't see looks missing
+
+- **When** Mallory asks for a card's data, with parameters that name a
+  post she can't see
+- **Then** she gets "unavailable", exactly as for a post that doesn't
+  exist
+
+### Ordering and moderation
+
+#### TC-19: Wifi information stays on top of the main feed
+
+- **Given** the main feed keeps `wifi` posts on top, and Olga posted the
+  wifi details ("Atmosphere-Gast") on day 1
+- **When** Ana opens the main feed on day 2, after many newer posts
+- **Then** the wifi post is first
+- **And** a post of Ana's marked as `wifi` isn't lifted
+
+#### TC-20: Past plans drop out
+
+- **Given** the main feed features "Bitterballen after the talks, 19:00"
+- **When** Ana opens the main feed after it's over
+- **Then** the plan is no longer in it
+
+#### TC-21: A moderator pins a post
+
+- **When** Kees pins Bram's "Slides are at lexicons.example" in the
+  "Grote Zaal" chat
+- **Then** it shows first in that chat, marked as pinned
+- **And** it appears only once as Ana scrolls through every page
+- **And** after Kees unpins it, it's back in its usual place
+
+#### TC-22: A pin from someone who isn't a moderator does nothing
+
+- **When** Ana pins her own post in the "Grote Zaal" chat
+- **Then** the post isn't lifted, for her or anyone else
+
+#### TC-23: A moderator hides a post from one feed
+
+- **Given** Bram posted to the "Grote Zaal" chat and the main feed
+- **When** Kees hides the post in the "Grote Zaal" chat
+- **Then** it's gone from that chat and still in the main feed
+- **And** after Kees undoes the hide, it's back in the chat
+
+#### TC-24: A moderator bars an author from a feed
+
+- **Given** Bram already has posts in the "Grote Zaal" chat
+- **When** Kees bars Bram from the chat
+- **Then** Bram's new posts there are refused, and his earlier ones stay
+- **And** after Kees lifts the bar, Bram can post there again
+
+#### TC-25: Only organizers and moderators can make a post urgent
+
+- **When** Ana posts to the "Grote Zaal" chat marked as urgent
+- **Then** the post appears there, but not as urgent
+- **And** the same post from Olga is urgent
+
+#### TC-26: Attendees can't define feeds or moderate
+
+- **When** Ana writes a feed record, a pin or a hide straight into the
+  space, for a feed she doesn't moderate
+- **Then** no feed changes, for anyone
+
+### Outside card providers
+
+#### TC-27: The weather card on the main feed
+
+- **Given** Olga has allowed the weather service, and the main feed
+  includes its card for the venue
+- **When** Ana opens the main feed
+- **Then** she sees the current weather in Amsterdam, with a weather icon
+  and the temperature, as a card
+
+#### TC-28: A weather feed
+
+- **Given** Olga has added a "Weather" feed made of weather cards
+- **When** Ana opens it
+- **Then** she sees cards for now, the next hours, the next days and any
+  alerts
+
+#### TC-29: One forecast serves everyone, and nobody is identified
+
+- **Given** the weather card is still fresh
+- **When** Ana, Bram and Femke each open the main feed
+- **Then** the weather service is asked once
+- **And** it isn't told who's looking
+
+#### TC-30: A failing provider doesn't break the feed
+
+- **Given** the weather service has answered before, and then goes down
+- **When** Ana opens the main feed
+- **Then** she sees the last weather card, marked as out of date, and the
+  rest of the feed
+- **And** if there was never an answer, the card is "unavailable"
+
+#### TC-31: Only providers the organizer allowed are called
+
+- **Given** a feed names a card provider that isn't on Olga's list of
+  allowed apps
+- **When** Ana opens the feed
+- **Then** the provider is never contacted, and the card is
+  "unavailable"
+
+#### TC-32: A provider's card can only show
+
+- **When** a provider answers with a card that has actions, middleware,
+  or sources other than its own data
+- **Then** the card is "unavailable"
+
+#### TC-33: Viewers never load images from a provider
+
+- **Given** a provider's card includes an image
+- **When** Ana opens the feed
+- **Then** the image shows
+- **And** her browser fetched it from eventside, not the provider
+
+### Outside feed generators
+
+#### TC-34: A generator receives its feed's posts and nothing else
+
+- **Given** the "Buzz" feed is driven by Bsky Buzz, which Olga allowed
+- **When** Ana posts to "Buzz" and the "Grote Zaal" chat, Femke posts
+  only in the "Grote Zaal" chat, and Femke votes in a poll
+- **Then** Bsky Buzz is sent Ana's post, without its list of feeds or
+  its audience
+- **And** it isn't sent Femke's post or her vote
+- **And** when Ana deletes her post, or a moderator hides it from
+  "Buzz", Bsky Buzz is told it's gone
+- **And** after reconnecting from where it left off, Bsky Buzz misses
+  nothing
+
+#### TC-35: Only the feed's own allowed generator can subscribe
+
+- **When** a service that "Buzz" doesn't name, or one that isn't on
+  Olga's list, asks for the posts of "Buzz"
+- **Then** it's refused
+
+#### TC-36: A restricted post a generator ranks is shown only to its audience
+
+- **Given** Ana posted to "Buzz", visible only to Bram
+- **When** Bsky Buzz puts that post in its feed
+- **Then** Bram sees it in "Buzz", and Femke doesn't
+
+#### TC-37: Whatever a generator returns is filtered per viewer
+
+- **When** Bsky Buzz returns a post from a private plan Femke isn't in,
+  a record eventside can't show, and a card from a provider Olga hasn't
+  allowed
+- **Then** Femke's "Buzz" shows none of them
+
+#### TC-38: A generator learns who's reading only if the feed allows it
+
+- **Given** one feed driven by Bsky Buzz sends the viewer, and another
+  doesn't
+- **When** Ana opens each
+- **Then** Bsky Buzz is told it's Ana only for the first
+- **And** it can give her a feed of her own there
+
+#### TC-39: A failing generator falls back to newest first
+
+- **Given** Bsky Buzz is down
+- **When** Ana opens "Buzz"
+- **Then** she sees the feed's posts newest first, with a note that the
+  usual ordering is unavailable
+
+#### TC-40: Bsky Buzz mixes in the public conversation
+
+- **Given** people on Bluesky are posting with the conference's hashtag
+- **When** Ana opens "Buzz"
+- **Then** she sees those Bluesky posts as cards, with their authors'
+  avatars, mixed with the posts made to "Buzz"
+
+### Regressions
+
+#### TC-41: Signing in still works, with the new permission
+
+- **When** Ana signs in
+- **Then** she's asked for permission to post to conferences, and the
+  sign-in cases of [`attendee-sign-in`](attendee-sign-in.md) still pass
+- **And** someone signed in before this change is asked to sign in again
+  before they can post
+
+#### TC-42: Existing cards render as before
+
+- **When** the [`ui-blocks`](ui-blocks.md) gallery and card tests run
+  after the card body is split out and the `icon` block and inline data
+  are added
+- **Then** they pass unchanged, and the gallery shows the `icon` block
 
 ## Review log
