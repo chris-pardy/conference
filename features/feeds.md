@@ -330,10 +330,10 @@ experience builds on, sets the app's navigation, changes the premise of
 - **`getFeed` builds one page of one feed for one viewer:**
   1. **Read the feed record.** If the viewer isn't in its audience, the
      answer is "not found", the same as for a feed that doesn't exist.
-  2. **Get a skeleton from the feed's algorithm.** Algorithms are
-     built in and run in-process. Outside services never see posts, so
-     they can't order them. They take part only by supplying cards (see
-     "Outside card providers").
+  2. **Get a skeleton from the feed's algorithm.** A built-in algorithm
+     runs in-process. An outside feed generator is called over XRPC,
+     and sees only that feed's own posts (see "Outside feed
+     generators").
   3. **Filter for the viewer.** A post stays if both hold:
      - it was accepted into at least one feed whose audience includes the
        viewer;
@@ -397,7 +397,8 @@ ingest for direct writes):
   - `acceptance`: decisions, and the ingest hook for direct writes.
   - `audience`: resolvers by kind. An unknown kind matches nobody.
   - `sources`: the read-only source resolver and its visibility rule.
-  - `algorithms`: the built-in algorithms.
+  - `algorithms`: the built-in algorithms, the outside-generator client,
+    and the per-feed post stream that feeds generators.
   - `assemble`: `getFeed`.
   - `cards`: built-in `getCardData` providers, plus the client for
     outside providers, with its cache.
@@ -451,9 +452,10 @@ ingest for direct writes):
   match nobody.
 - **`app.eventside.feed.feed`** (eventside's repo):
   - `name`, `kind` and `subject?`;
-  - `algorithm`: `#builtin{name, params}`, or the reserved
-    `#declarative`, `#wasm` and `#service`. A card entry's provider can
-    be outside, with `sendViewer` set per entry.
+  - `algorithm`: `#builtin{name, params}`, `#service{did,
+    sendViewer}`, or the reserved `#declarative` and `#wasm`. A card
+    entry's provider can be outside too, with `sendViewer` set per
+    entry.
   - `audience`, `posters` and `moderators`;
   - `freshness`: `live`, `refresh` or `push`.
 - **`app.eventside.feed.post`:**
@@ -518,7 +520,39 @@ ingest for direct writes):
     `unavailable`.
   - **Allow-list.** Eventside calls only providers on the organizer's
     allow-list.
-- **Outside skeleton sources** (deferred). A later version could let an
+- **Outside feed generators** (`#service`):
+  - **What they get.** A generator is given the posts accepted into the
+    feeds that name it, and nothing else. It gets them by opening
+    `app.eventside.feed.subscribePosts{feed, cursor?}`, a WebSocket
+    authenticated with its service JWT. Eventside accepts the
+    subscription only if the feed record's `#service` names that DID and
+    the DID is on the organizer's allow-list. The stream:
+    - replays from the cursor, or from the start for backfill;
+    - sends `#post{uri, cid, author, record, acceptedAt}`, where `record`
+      is the post with `feeds` cut down to this feed;
+    - sends `#remove{uri}` when a post is deleted or hidden from this
+      feed.
+  - **Restricted posts are never streamed.** A post that narrows its own
+    audience stays out of the stream. Posts in other feeds, poll votes,
+    RSVPs and every other record in the space stay out too.
+  - **Card data.** A post's card arrives as its template, with no data
+    filled in.
+  - **Per viewer.** A feed record with `sendViewer` puts the viewer's DID
+    in the `sub` of the `getSkeleton` call, so a generator can make each
+    viewer's feed different. That tells the generator who reads the feed
+    and when, so it's off unless the feed asks for it.
+  - **What it returns.** `app.eventside.feed.getSkeleton{feed, cursor?,
+    limit?}` (modeled on `app.bsky.feed.getFeedSkeleton`) returns
+    `{entries, cursor?}`. Entries can be anything:
+    - post URIs, from this feed or elsewhere;
+    - card entries naming allow-listed providers.
+
+    Eventside filters them like any skeleton: a viewer sees only what
+    the visibility rules allow. Record types eventside can't render are
+    dropped.
+  - **Failures.** A slow or failing generator is cut off at a timeout,
+    and the feed falls back to newest first with a quiet note.
+- **Outside public-record sources** (deferred). A later version could let an
   outside service add public records to a feed, e.g. Bluesky posts tagged
   for the conference. Eventside would fetch and render those records
   itself, and drop any URI that points into the private space.
@@ -566,9 +600,12 @@ ingest for direct writes):
   gives immediate feedback.
 - **Outside services reading the space themselves:** they'd see secret
   ballots and mark-safe responses, and they'd need space credentials.
-- **Outside services ordering a filtered candidate list** (round 1): it
-  still gave them the post's author, kind and time. The user ruled that
-  outside services consume no post data (round 2).
+- **Outside services ordering a filtered candidate list** (round 1):
+  candidates were sent with every request, and covered whatever the
+  viewer could see.
+- **Generators get no post data at all** (round 2): they could then only
+  supply cards. Round 3 settled on a stream of the feed's own
+  unrestricted posts instead.
 - **Providers returning finished blocks with values baked in:** simpler,
   but there'd be no template to reuse, and the card would have to be sent
   again whenever the data changed.
@@ -583,7 +620,8 @@ ingest for direct writes):
     tests and a build.
   - Proposed demo slice: the main feed, chat feeds, posting with
     decisions, pins and hides, built-in algorithms, a weather card on the
-    main feed, and a weather feed from the outside provider. Feeds
+    main feed, a weather feed from the outside provider, and one feed
+    driven by an outside generator. Tests use a fake generator. Feeds
     refresh on open, and records are indexed as eventside writes them.
   - Proposed to defer: live sockets, Web Push and the offline cache.
 - **Web Push** works on iOS only for an installed PWA, and needs VAPID
@@ -656,6 +694,28 @@ The draft was critiqued before being presented. Folded in:
   - a weather feed built with the `cards` built-in algorithm.
 - **Caching:** answers are cached until they expire, and shared when no
   viewer identity was sent.
+
+**The user's feedback:**
+
+- An outside feed generator can return any data. Eventside filters the
+  response by the visibility rules in the records it has access to.
+- A generator is given access to the records posted to its feed. Posts
+  with a restricted audience are filtered out.
+- A generator can be per user, and it should have the feed's posts
+  streamed to it.
+
+### Round 3
+
+- **The `#service` algorithm is back.** A generator gets a
+  `subscribePosts` stream of the posts accepted into its feed, minus any
+  post with its own audience. It can be per viewer with `sendViewer`,
+  which is off by default.
+- **Its skeleton can name anything:** posts from anywhere, or allow-listed
+  card providers. Eventside's per-viewer filter is the only guard on what
+  it returns.
+- **Outside card providers stay**, with weather as the Nov 1 example.
+- **The demo slice** adds one feed driven by an outside generator, with a
+  fake generator in tests.
 
 Awaiting the user's review.
 
