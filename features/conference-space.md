@@ -1,6 +1,6 @@
 ---
-status: analysis
-impact:
+status: design-review
+impact: cross-cutting
 depends-on: [attendee-sign-in]
 branch:
 tests-commit:
@@ -237,9 +237,8 @@ careless app; that's their decision.
 
 ## Open questions
 
-- Whether the demo organization's DID is a `did:plc` or a `did:web`. The
-  user is fine with either. The architecture analysis picks one, based on
-  what the old branch's space host and vivarium support.
+None. The organization's DID is a `did:plc`; see the architecture
+analysis.
 
 ## Previous design
 
@@ -270,6 +269,97 @@ What carries over to the new build, wherever it still fits:
 The build starts on a new branch with new tests.
 
 ## Architecture analysis
+
+**Existing code touched:**
+
+- **On `main`:** only `attendee-sign-in` exists: `crates/server/src/auth/`,
+  `oauth.rs`, `identity.rs` and `keys.rs`, plus the PWA shell. Joining
+  needs more sign-in scopes: `space:` writes on `app.eventside.*`, and
+  `transition:email` for list matching.
+- **On `archive/conference-space-v1`** (to salvage from, not merge):
+  - `crates/server/src/spacehost/`: about 6,100 lines.
+    - `authority.rs` mints an organization's `did:plc`, with our host as
+      `#atproto_space_host`, the operator's recovery key first among the
+      rotation keys, and rotation of the `#eventside_attest` keys. That
+      settles the open question: the demo DID is a **`did:plc`**, because
+      minting and key rotation are already written and tested against
+      vivarium.
+    - `credential.rs` handles space credentials (vivarium 0.0.2's wire
+      format).
+    - `notify.rs` handles the writer set and write notifications.
+    - `sync.rs` reads writers' ops from their PDSes.
+    - `index.rs` is the record index.
+    - `attest.rs` signs and verifies badge.blue attestations.
+  - `crates/server/src/conference/`: the conference model and XRPC, the
+    join flows, `admin.rs` (acting for admins) and the 2,150-line admin
+    CLI.
+  - `tests/support/` (`conference.ts`, `other-app.ts`, `attestation.ts`,
+    `server-setup.ts`) and five migrations.
+  - What gets dropped: the admin and intake spaces, crawling from the
+    super admin, per-admin repos for decisions, and the
+    withdrawn-decision tables (migrations 0004 and 0005).
+- **New work the old branch never had: the authority's own repo in the
+  space.**
+  - Membership, role, allowed-apps and feed records now live in the
+    authority's repo inside the space. A minted `did:plc` has no PDS, so
+    our host has to keep that repo itself and serve it through the space
+    read endpoints (`getRecord`, `listRecords`, `listRepoOps`,
+    `getLatestCommit`), as a writer in its own space. That's a small part
+    of a PDS, limited to one repo per space.
+  - The public calendar event can't live there, because it has to be
+    public. It stays in an owner's own repo, as in the first design.
+    Hosting a public repo for the organization would be the alternative.
+
+**Features affected:**
+
+- [`feeds`](feeds.md) (`ready`) depends on this feature for:
+  - the private space;
+  - the `#members` and `#organizers` audiences;
+  - the allowed-apps list, which covers outside providers and generators
+    too;
+  - the template that seeds the main feed;
+  - the authority's repo, where eventside writes feed records.
+- [`space-sync`](space-sync.md) (`analysis`):
+  - The old branch built most of space-sync inside its space host:
+    eventside's own credentials, write notifications, pulling ops from
+    writers' PDSes, and a per-repo index.
+  - Speccing space-sync separately would duplicate that, or split one
+    subsystem across two features.
+  - The design review should decide whether space-sync folds into this
+    feature or is cut down to what's left.
+- [`block-actions`](block-actions.md) (`analysis`):
+  - Its actions are written into this space.
+  - Its ingest rule ("does this record count") now comes from here: the
+    author was a member when they wrote it.
+- [`plans`](plans.md) (`design-review`): plans hung off a conference node
+  and the first design's notion of organizers. It now uses the
+  `#organizers` audience and the conference's feeds.
+- [`attendee-sign-in`](attendee-sign-in.md) (`complete`): gains scopes, and
+  existing sessions are asked to sign in again.
+- `event-branding`, `program-import`, `groups`, `connections`,
+  `event-profile` (not specced) read membership and roles from here, and
+  scope their records to this space.
+
+**New shared surfaces:**
+
+- Membership and role records, and their attestation format.
+- The membership check other features call: is this person a member, and
+  in which role, now and at a given time.
+- The allowed-apps record.
+- The authority's repo in the space, which our host writes on the
+  authority's behalf.
+- The conference's sidecar record (join methods, visibility, theme,
+  template).
+- The admin CLI.
+
+**Verdict:** cross-cutting.
+
+- It sets the space and identity model that every later feature stores
+  its data in.
+- It adds lexicons, a database schema and sign-in scopes.
+- It overlaps `space-sync`.
+
+It needs a design review.
 
 ## Design review
 
