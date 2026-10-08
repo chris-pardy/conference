@@ -798,18 +798,16 @@ them pending. So:
   `via: "email"`. Joining never touches an admin's PDS (TC-54).
 - A join written by another app without our signature is a request at most:
   it's pending until an admin decides.
-- **Leaving** is a signed `leave`. An unsigned leave from another app still
-  counts, from when our host first indexed it, since a person may always
-  leave.
+- **Leaving** is a signed `leave`, written when the person leaves through
+  eventside. An unsigned leave from another app doesn't count, like any
+  unsigned record.
 
-**Deleting a signed record doesn't withdraw it.** Otherwise a removed admin
-could delete their bans and let people back in. Our host keeps a copy of
-every signed decision and join it has verified (the **decision log**), and
-publishes it through the host API. A deleted record keeps standing from that
-copy, and a new decision changes it. This is kept state, alongside the
-writer set and the keys. `reindex` rebuilds the index from the records it
-crawls plus the decision log, and a signed record is its own proof, so
-another host could import the log and check every entry.
+**Records are the source of truth, signatures included** (the user's
+choice in round 5). A deleted record no longer counts. A record changed by
+editing counts as edited if its new version is signed. So withdrawing a
+decision, or re-signing one, is done by deleting or editing the record, and
+there's no separate log. `reindex` rebuilds everything from the records, as
+in round 4 (TC-50).
 
 **Roles and rules** in the conference space (`role`, `rules`, the
 conference sidecar) are signed the same way. Readers trust a signature by
@@ -822,10 +820,10 @@ to the conference's super admin's repo, so TC-35 keeps its meaning.
   it, leaving the old one listed, so earlier signatures keep verifying in
   `did:plc` and `did:web` alike.
 - **A compromised key:** remove it. Every signature it made stops verifying.
-  `org resign` re-signs every standing entry in the decision log with the
-  new key, and the host API serves the re-signed copies. Records still in
-  admins' repos are re-signed when the admin is connected. Those of former
-  admins rely on the log.
+  Decisions worth keeping are re-signed by editing their records, through
+  the admin's session, and a forged record is deleted. Records we can't
+  edit any more, such as a disconnected former admin's, stop counting,
+  which is accepted (the user, round 5).
 
 **Content records aren't signed.** Plans, chat, RSVPs and other members'
 records are still judged by their commit `repoRev` against membership
@@ -853,18 +851,10 @@ the text above they contradict):
   A pending entry blocks a conflicting signing (another decision about the
   same person, or a use of the same code) and counts for nothing until it's
   committed.
-- **The decision log is a table of its own,** append-only and never wiped
-  by `reindex`. It holds every entry we signed (committed or void), plus
-  every verified signed record we've seen.
-  - It's served by a host API method, `app.eventside.space.getDecisionLog`
-    (credential-authenticated, paged by `seq`).
-  - It's the source of truth for ordering and for deleted records. Repos
-    hold published copies, so an app reading the admin space directly sees
-    every decision except ones deleted since.
-  - It's added to Data, Components and Interfaces, with the per-authority
-    `seq` counter, `#eventside_attest` and the `sig` field.
-  - TC-50's "rebuilt from the super admin" becomes "rebuilt from the
-    records and the decision log".
+- **The signing journal** is operational state, not a log of record: the
+  per-authority `seq` counter and the pending entries. It's added to Data
+  and Components, with `#eventside_attest` and the `sig` field. If it's
+  lost, the counter restarts above the highest `seq` found in the records.
 - **Each person can have more than one way in.** Membership comes from
   replaying that person's committed entries in `seq` order, not from their
   latest entry alone. An admin's admission and the person's own signed join
@@ -873,14 +863,6 @@ the text above they contradict):
   when the departed admin's admission is their only remaining ground. Ana
   joined with a code before Pim admitted her, so she stays (as in TC-53's
   test).
-- **Unsigned leaves are countersigned by our host** when it first indexes
-  them. They're logged with a `seq` like any other entry, so `reindex`
-  reproduces them, and a stale leave can't eject someone who has rejoined
-  since: it's ordered where it was first seen.
-- **A compromised key:** re-sign only the entries the log says *we* issued.
-  Each is stored with a server-side MAC, so forgeries the attacker signed
-  are left out. The log lists the re-signed replacements. Former admins'
-  repo copies keep the dead signature, so readers use the log for them.
 - **Edges:**
   - **A super-admin handover** (`conference super-admin`): the new super
     admin has the `superAdmin` rank, so they can override decisions their
@@ -902,19 +884,11 @@ the text above they contradict):
   TC-28 regressions in `conference-review.test.ts`, and the TC-58 test in
   `conference-admins-keep.test.ts` (added after the freeze, not frozen),
   which TC-58's rewording replaces. TC-53's frozen test needs the approved
-  amendment. TC-50's frozen test should pass as it stands, since the log
-  isn't wiped.
-- **Open question for the user: where the signature lives.**
-  - **(A) Signed records in admins' repos, plus the log** (the draft
-    above).
-  - **(B) A host-signed, hash-chained log as the source of truth.** Admins'
-    repos keep plain records as a readable mirror. No `sig` fields, no CID
-    stripping, no re-signing other people's repos, and repos and the log
-    can't disagree.
-
-  The critique points out that under (A) readers need the log for deleted
-  and re-signed records anyway, so the signatures in repos mostly duplicate
-  it.
+  amendment. TC-50's frozen test should pass as it stands.
+- **Where the signature lives: (A), signed records in the admins' repos**
+  (the user's choice). A host-signed log as the source of truth, with
+  repos as a mirror, was considered and rejected. Deleting and editing
+  records is how decisions are withdrawn or re-signed.
 
 #### Hosting from a person's own account (deferred)
 
@@ -932,7 +906,8 @@ for now"). The sketch, for when it comes back:
   person publishes a record that delegates to our server, and our signatures
   point to that delegation. Two problems to solve then: the space host
   (without `#atproto_space_host`, spaces fall back to the person's PDS),
-  and deleting the delegation record, which the decision log could cover.
+  and what deleting the delegation record means for signatures that rely
+  on it.
 
 #### Components
 
@@ -1325,8 +1300,10 @@ quietly changed other people's memberships.
 - Email matches become signed joins, so the super admin's PDS is out of
   the join path entirely.
 - Staff can issue codes.
-- Admin records are never deleted. Our host keeps a decision log of
-  verified signed records, so deleting one doesn't withdraw it.
+- Removing an admin writes `admin {role: "none"}` rather than deleting
+  their record, so the crawl still reaches the decisions that stand.
+- Signed records in admins' repos are the source of truth. Deleting or
+  editing a record withdraws or changes it, and there's no decision log.
 - Hosting from a person's own DID is sketched and deferred.
 - **Alternatives considered:**
   - a key published as a record in the admin space or the person's repo:
@@ -1354,9 +1331,6 @@ quietly changed other people's memberships.
   reading the admin space verifies Olga's admission of Bram against
   Atmosphere's DID document. The same record copied into Mallory's repo
   fails.
-- **TC-62 (new):** *Deleting a decision doesn't undo it.* Kees banned Bram,
-  then deletes the ban record from his repo. Bram is still banned, also
-  after `reindex`.
 - **TC-63 (new):** *Rotating the signing key keeps earlier decisions.*
   After the operator adds a new signing key, Bram (admitted before) is still
   a member, and a new admission is signed with the new key.
