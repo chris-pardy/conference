@@ -23,7 +23,7 @@ to serve.
 
 Split out of [`ui-blocks`](ui-blocks.md) in design review round 1, where
 the critique found this subsystem hidden inside "resolve as the viewer".
-`conference-feed` needs it too.
+[`feeds`](feeds.md) needs it too.
 
 ## Experience
 
@@ -92,7 +92,7 @@ keeps its access alive from then on.
 - Creating spaces, managing members and setting policy
   (`conference-space`). Tests create spaces directly.
 - Any view or aggregate: those belong to the features that need them
-  (`block-actions`, `conference-feed`).
+  (`block-actions`, [`feeds`](feeds.md)).
 - Writing on a user's behalf: `attendee-sign-in` sessions do that.
 
 ## Open questions
