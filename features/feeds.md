@@ -330,9 +330,10 @@ experience builds on, sets the app's navigation, changes the premise of
 - **`getFeed` builds one page of one feed for one viewer:**
   1. **Read the feed record.** If the viewer isn't in its audience, the
      answer is "not found", the same as for a feed that doesn't exist.
-  2. **Get a skeleton from the feed's algorithm.** A built-in one runs
-     in-process. For an outside service, eventside sends a candidate
-     list and the service only orders it (see Interfaces).
+  2. **Get a skeleton from the feed's algorithm.** Algorithms are
+     built in and run in-process. Outside services never see posts, so
+     they can't order them. They take part only by supplying cards (see
+     "Outside card providers").
   3. **Filter for the viewer.** A post stays if both hold:
      - it was accepted into at least one feed whose audience includes the
        viewer;
@@ -396,9 +397,10 @@ ingest for direct writes):
   - `acceptance`: decisions, and the ingest hook for direct writes.
   - `audience`: resolvers by kind. An unknown kind matches nobody.
   - `sources`: the read-only source resolver and its visibility rule.
-  - `algorithms`: built-in algorithms, plus the outside-service client.
+  - `algorithms`: the built-in algorithms.
   - `assemble`: `getFeed`.
-  - `cards`: `getCardData` providers.
+  - `cards`: built-in `getCardData` providers, plus the client for
+    outside providers, with its cache.
   - `provision`: the automatic feed records.
   - `live`: change notices, and Web Push.
   - A migration for decisions, pins, labels and push subscriptions.
@@ -409,7 +411,15 @@ ingest for direct writes):
   - `main`:
     - pinned kinds first;
     - then organizer posts and featured plans, newest first;
-    - interleaved with computed cards such as "your next session".
+    - interleaved with computed cards such as "your next session" and
+      the weather.
+  - `cards`: a list of card entries, taken from the feed record's
+    parameters, e.g. the weather feed's "now", "next hours", "next days"
+    and "alerts" cards.
+- **A reference weather provider** (`crates/weather-cards`): a small
+  outside service. It implements `getCardData` from Open-Meteo, which is
+  free and needs no key, and runs on its own `did:web`. It proves the
+  outside path end to end, and tests run it against a fake forecast.
 - **PWA** (`web/src/feeds/`):
   - `FeedScreen`, which renders entries with `<BlockCard surface="feed">`;
   - feed navigation from `listFeeds`;
@@ -441,8 +451,9 @@ ingest for direct writes):
   match nobody.
 - **`app.eventside.feed.feed`** (eventside's repo):
   - `name`, `kind` and `subject?`;
-  - `algorithm`: `#builtin{name, params}`, `#service{did, sendViewer}`,
-    or the reserved `#declarative` and `#wasm`;
+  - `algorithm`: `#builtin{name, params}`, or the reserved
+    `#declarative`, `#wasm` and `#service`. A card entry's provider can
+    be outside, with `sendViewer` set per entry.
   - `audience`, `posters` and `moderators`;
   - `freshness`: `live`, `refresh` or `push`.
 - **`app.eventside.feed.post`:**
@@ -476,19 +487,41 @@ ingest for direct writes):
     entries `[{post, pinned?} | {card}]`.
   - `listFeeds{conference}`.
   - `getCardData{provider, params}`.
-- **`app.eventside.feed.getSkeleton`**, which outside services implement
-  (modeled on `app.bsky.feed.getFeedSkeleton`):
-  - Eventside POSTs `{feed, candidates: [{uri, kind, author,
-    createdAt}], cursor?}`. The candidates are already filtered to what
-    the viewer may see.
-  - The service returns `{entries: [{uri}], cursor?}`, an ordering.
-  - It gets no space access and learns nothing new.
-  - The viewer's DID goes in the service JWT's `sub` only if the feed
-    record says `sendViewer`.
-  - Eventside calls only services on the organizer's allow-list.
-  - Outside services can't add computed cards.
-  - A slow or failing service is cut off at a timeout, and the feed falls
-    back to newest first with a quiet note.
+- **Outside card providers** implement the same
+  `app.eventside.feed.getCardData`. A provider is named as `did#fragment`,
+  and its DID document lists an `#eventside_cards` service endpoint.
+  - **Request:** eventside calls `{provider, params}` with a service JWT.
+    The params come from the feed record, e.g. the venue's latitude and
+    longitude, and the units.
+  - **Response:** `{card, data, expiresAt}`.
+    - `card` is a `#cardBody`, a template built from the block vocabulary
+      (the "card kit").
+    - Its blocks bind to `data` through a new `#inlineSource`, so a
+      provider can send the same template every time and only the data
+      changes.
+  - **What a provider never gets:** no posts, no space access, and no
+    other attendees' data. The viewer's DID goes in the JWT's `sub` only
+    if the feed record says `sendViewer`. Weather doesn't need it.
+  - **What eventside checks on the card:**
+    - it must pass the ui-blocks validator;
+    - no middleware, actions, wasm or sources other than `#inlineSource`;
+    - buttons may only open links.
+  - **Images.** Remote image URLs are refused, since loading them would
+    give the provider every viewer's IP address. Cards draw glyphs with a
+    new `icon` block instead, from a fixed set that includes weather
+    glyphs.
+  - **Caching.** Eventside caches each answer until `expiresAt`, shared by
+    every viewer when there's no `sub`. One forecast call then serves the
+    whole conference.
+  - **Failures.** A slow or failing provider is cut off at a timeout.
+    Eventside serves the last cached answer, marked stale, or
+    `unavailable`.
+  - **Allow-list.** Eventside calls only providers on the organizer's
+    allow-list.
+- **Outside skeleton sources** (deferred). A later version could let an
+  outside service add public records to a feed, e.g. Bluesky posts tagged
+  for the conference. Eventside would fetch and render those records
+  itself, and drop any URI that points into the private space.
 - **Live:**
   - `subscribe` is a WebSocket saying "feed X changed".
   - `registerPush`.
@@ -533,7 +566,12 @@ ingest for direct writes):
   gives immediate feedback.
 - **Outside services reading the space themselves:** they'd see secret
   ballots and mark-safe responses, and they'd need space credentials.
-  Sending candidates is enough for ranking.
+- **Outside services ordering a filtered candidate list** (round 1): it
+  still gave them the post's author, kind and time. The user ruled that
+  outside services consume no post data (round 2).
+- **Providers returning finished blocks with values baked in:** simpler,
+  but there'd be no template to reuse, and the card would have to be sent
+  again whenever the data changed.
 - **Two record types for hides and bars:** the label shape covers both,
   plus undoing them.
 
@@ -544,9 +582,9 @@ ingest for direct writes):
     which isn't specced yet, and `space-sync` (in `analysis`). Both need
     tests and a build.
   - Proposed demo slice: the main feed, chat feeds, posting with
-    decisions, pins and hides, one computed card, built-in algorithms and
-    the candidate-ordering outside service, refreshed on open, with
-    indexing done as eventside writes.
+    decisions, pins and hides, built-in algorithms, a weather card on the
+    main feed, and a weather feed from the outside provider. Feeds
+    refresh on open, and records are indexed as eventside writes them.
   - Proposed to defer: live sockets, Web Push and the offline cache.
 - **Web Push** works on iOS only for an installed PWA, and needs VAPID
   keys and a service worker.
@@ -585,6 +623,39 @@ The draft was critiqued before being presented. Folded in:
 - **The demo slice** now keeps the outside-service algorithm, which was
   chosen for Nov 1. It defers live sockets, Web Push and the offline
   cache instead.
+
+**The user's feedback:**
+
+- Outside algorithms must not be able to consume post data. The use
+  cases for outside services should be thought through.
+- Add a weather card for November 1. It should use `getCardData` and a
+  structured card kit, so a weather feed can be built from it.
+
+### Round 2
+
+- **Outside services supply cards, not orderings.** An outside provider
+  implements `getCardData` and gets no posts or space access, nor the
+  viewer's identity unless the feed opts in. The `#service` algorithm is
+  reserved.
+- **Use cases considered:**
+  - the public Bluesky conversation (deferred, as outside skeleton
+    sources);
+  - recommendations from the service's own data (needs `sendViewer`);
+  - sponsor slots;
+  - live operations: weather, transit, room capacity;
+  - other events' listings.
+- **Card kit.**
+  - Providers return a `#cardBody` template plus `data`, bound through a
+    new `#inlineSource`.
+  - A new `icon` block replaces remote images, which would leak viewers'
+    IP addresses.
+  - Both are additions to [`ui-blocks`](ui-blocks.md).
+- **Weather for Nov 1:**
+  - a reference `weather-cards` provider, on Open-Meteo;
+  - a weather card on the main feed;
+  - a weather feed built with the `cards` built-in algorithm.
+- **Caching:** answers are cached until they expire, and shared when no
+  viewer identity was sent.
 
 Awaiting the user's review.
 
