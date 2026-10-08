@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, test, vi } from '@vivarium-dev/client/vitest'
-import { createAccountWithEmail, eventually, type Json } from '../support/atproto.ts'
+import { createAccountWithEmail, type Json } from '../support/atproto.ts'
 import {
   Attendee,
   accountsIn,
@@ -153,11 +153,12 @@ test('TC-52: Staff can’t override an owner’s decision', async ({ viv }) => {
   expect(await joost.isMember(conference.space), 'between staff, the latest decision stands').toBe(true)
 })
 
-test('TC-53: A former admin’s decisions stop counting', async ({ viv }) => {
+test('TC-53: A former admin’s decisions keep standing', async ({ viv }) => {
   const { org, conference, admins } = await seedConference(dep, accountsIn(viv), { staff: ['pim'], methods: ['code'] })
   const code = await sharedCode(dep, conference, uniqueCode('atmosphere27'))
   const bram = await Attendee.signIn(dep, await viv.createAccount(viv.handle('bram')))
   const ana = await Attendee.signIn(dep, await viv.createAccount(viv.handle('ana')))
+  const cas = await Attendee.signIn(dep, await viv.createAccount(viv.handle('cas')))
   // Pim admits Bram; Ana has her own way in as well as Pim's say-so.
   expect((await memberAction(dep, conference, ['member', 'add'], bram.person, { as: admins.pim })).code).toBe(0)
   expect((await ana.join({ conference: conference.space, code })).body.status).toBe('joined')
@@ -166,10 +167,13 @@ test('TC-53: A former admin’s decisions stop counting', async ({ viv }) => {
 
   await cliOk(dep, ['org', 'admin', 'remove', admins.pim.handle, '--org', org.did])
 
-  await eventually(
-    () => bram.isMember(conference.space),
-    (member) => !member,
-    'Bram stops being a member',
-  )
-  expect(await ana.isMember(conference.space), 'another rule still admits Ana').toBe(true)
+  expect(await bram.isMember(conference.space), 'Pim’s admission of Bram still stands').toBe(true)
+  expect(await ana.isMember(conference.space), 'Ana is still a member').toBe(true)
+  // Pim is no longer an admin: the CLI won't sign anything more for him.
+  const refused = await memberAction(dep, conference, ['member', 'add'], cas.person, { as: admins.pim })
+  expect(refused.code, 'a decision as a former admin is refused').not.toBe(0)
+  expect(await cas.isMember(conference.space)).toBe(false)
+  const removal = await memberAction(dep, conference, ['member', 'remove'], bram.person, { as: admins.pim })
+  expect(removal.code, 'so is a removal').not.toBe(0)
+  expect(await bram.isMember(conference.space)).toBe(true)
 })
