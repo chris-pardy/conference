@@ -832,6 +832,90 @@ records are still judged by their commit `repoRev` against membership
 periods (see "Which records count"). The periods now come from signed
 decisions.
 
+**Refinements after the critique of round 5** (these replace the parts of
+the text above they contradict):
+
+- **Order by a sequence number, not by time.** Every signed entry carries
+  a per-authority `seq` inside the signed payload. Readers order by `seq`.
+  `signedAt` is informational, and readers reject one more than five
+  minutes in the future. There is **one signer per authority**, our host,
+  for the MVP. "Any app with the key can attest" stays true of the key, but
+  a second signer would need its own sequence and a merge rule, which is
+  left for later.
+- **Sign, write, then commit,** so a failed write never stands (TC-55) and
+  two admins can't race:
+  1. In one database transaction (`BEGIN IMMEDIATE`, since the CLI is a
+     separate process): check, take the next `seq`, and log the entry as
+     *pending*.
+  2. Write the record without holding the lock.
+  3. Mark the entry *committed* on success, or *void* on failure.
+
+  A pending entry blocks a conflicting signing (another decision about the
+  same person, or a use of the same code) and counts for nothing until it's
+  committed.
+- **The decision log is a table of its own,** append-only and never wiped
+  by `reindex`. It holds every entry we signed (committed or void), plus
+  every verified signed record we've seen.
+  - It's served by a host API method, `app.eventside.space.getDecisionLog`
+    (credential-authenticated, paged by `seq`).
+  - It's the source of truth for ordering and for deleted records. Repos
+    hold published copies, so an app reading the admin space directly sees
+    every decision except ones deleted since.
+  - It's added to Data, Components and Interfaces, with the per-authority
+    `seq` counter, `#eventside_attest` and the `sig` field.
+  - TC-50's "rebuilt from the super admin" becomes "rebuilt from the
+    records and the decision log".
+- **Each person can have more than one way in.** Membership comes from
+  replaying that person's committed entries in `seq` order, not from their
+  latest entry alone. An admin's admission and the person's own signed join
+  are separate grounds, and a removal or ban ends every ground at or below
+  its rank. `org admin undo --admissions` therefore removes a person only
+  when the departed admin's admission is their only remaining ground. Ana
+  joined with a code before Pim admitted her, so she stays (as in TC-53's
+  test).
+- **Unsigned leaves are countersigned by our host** when it first indexes
+  them. They're logged with a `seq` like any other entry, so `reindex`
+  reproduces them, and a stale leave can't eject someone who has rejoined
+  since: it's ordered where it was first seen.
+- **A compromised key:** re-sign only the entries the log says *we* issued.
+  Each is stored with a server-side MAC, so forgeries the attacker signed
+  are left out. The log lists the re-signed replacements. Former admins'
+  repo copies keep the dead signature, so readers use the log for them.
+- **Edges:**
+  - **A super-admin handover** (`conference super-admin`): the new super
+    admin has the `superAdmin` rank, so they can override decisions their
+    predecessor recorded at that rank. For roles and rules, the latest
+    signed record (by `seq`) stands.
+  - **A demoted admin** can't lift their own earlier decisions above their
+    new rank (TC-60).
+  - **Revoking codes:** `codeRevoke` needs the code author's rank or
+    higher. Undoing an admin's admissions leaves their codes alone, and
+    `org admin undo --codes` revokes those.
+  - **Code use limits** count distinct DIDs. Rejoining with the same code
+    doesn't use it up again, and a personal code works again for the DID
+    it's bound to (TC-14).
+- **The signature covers the record without `sig`:** the SHA-256 of the
+  DAG-CBOR encoding of the record with `sig` removed, encoded as the
+  repository encodes it. The record key is fixed before writing (`putRecord`
+  with a TID we choose).
+- **Tests that go:** `--keep-admissions` and its tests, the round 13 and 14
+  TC-28 regressions in `conference-review.test.ts`, and the TC-58 test in
+  `conference-admins-keep.test.ts` (added after the freeze, not frozen),
+  which TC-58's rewording replaces. TC-53's frozen test needs the approved
+  amendment. TC-50's frozen test should pass as it stands, since the log
+  isn't wiped.
+- **Open question for the user: where the signature lives.**
+  - **(A) Signed records in admins' repos, plus the log** (the draft
+    above).
+  - **(B) A host-signed, hash-chained log as the source of truth.** Admins'
+    repos keep plain records as a readable mirror. No `sig` fields, no CID
+    stripping, no re-signing other people's repos, and repos and the log
+    can't disagree.
+
+  The critique points out that under (A) readers need the log for deleted
+  and re-signed records anyway, so the signatures in repos mostly duplicate
+  it.
+
 #### Hosting from a person's own account (deferred)
 
 Small events that use a person's own DID as their authority were raised in
