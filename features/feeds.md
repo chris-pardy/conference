@@ -529,12 +529,16 @@ ingest for direct writes):
     the DID is on the organizer's allow-list. The stream:
     - replays from the cursor, or from the start for backfill;
     - sends `#post{uri, cid, author, record, acceptedAt}`, where `record`
-      is the post with `feeds` cut down to this feed;
+      is the full post minus `feeds`, so nothing says where else it was
+      posted;
     - sends `#remove{uri}` when a post is deleted or hidden from this
       feed.
-  - **Restricted posts are never streamed.** A post that narrows its own
-    audience stays out of the stream. Posts in other feeds, poll votes,
-    RSVPs and every other record in the space stay out too.
+  - **Restricted posts are streamed too.** A post that narrows its own
+    audience ("only my friends") reaches the generator with its
+    audience, and the generator can rank it. Eventside strips it from
+    the feed for every viewer outside that audience. Posts in other
+    feeds, poll votes, RSVPs and every other record in the space are
+    never streamed.
   - **Card data.** A post's card arrives as its template, with no data
     filled in.
   - **Per viewer.** A feed record with `sendViewer` puts the viewer's DID
@@ -547,15 +551,22 @@ ingest for direct writes):
     - post URIs, from this feed or elsewhere;
     - card entries naming allow-listed providers.
 
+    - public Bluesky posts (`app.bsky.feed.post`), which eventside
+      fetches and renders as a Bluesky post card.
+
     Eventside filters them like any skeleton: a viewer sees only what
-    the visibility rules allow. Record types eventside can't render are
-    dropped.
+    the visibility rules allow. Public posts are visible to everyone who
+    can see the feed. Record types eventside can't render are dropped.
   - **Failures.** A slow or failing generator is cut off at a timeout,
     and the feed falls back to newest first with a quiet note.
-- **Outside public-record sources** (deferred). A later version could let an
-  outside service add public records to a feed, e.g. Bluesky posts tagged
-  for the conference. Eventside would fetch and render those records
-  itself, and drop any URI that points into the private space.
+- **Bsky Buzz**, the example generator for Nov 1 (`crates/bsky-buzz`):
+  - it mixes the conference's public Bluesky conversation (posts with
+    its hashtag, and posts by speakers) with the posts streamed from its
+    feed;
+  - it ranks them by recent activity;
+  - it runs as a separate service on its own `did:web`.
+
+  Tests run it against vivarium's Jetstream.
 - **Live:**
   - `subscribe` is a WebSocket saying "feed X changed".
   - `registerPush`.
@@ -621,7 +632,7 @@ ingest for direct writes):
   - Proposed demo slice: the main feed, chat feeds, posting with
     decisions, pins and hides, built-in algorithms, a weather card on the
     main feed, a weather feed from the outside provider, and one feed
-    driven by an outside generator. Tests use a fake generator. Feeds
+    driven by the Bsky Buzz generator, with Bluesky post cards. Feeds
     refresh on open, and records are indexed as eventside writes them.
   - Proposed to defer: live sockets, Web Push and the offline cache.
 - **Web Push** works on iOS only for an installed PWA, and needs VAPID
@@ -716,6 +727,26 @@ The draft was critiqued before being presented. Folded in:
 - **Outside card providers stay**, with weather as the Nov 1 example.
 - **The demo slice** adds one feed driven by an outside generator, with a
   fake generator in tests.
+
+**The user's feedback:**
+
+- The example outside generator is "Bsky Buzz".
+- A generator gets the full data of every post made to its feed, except
+  the cross-posting information, and generates a feed list from it.
+- If a post says "only my friends", it's still in the feed, but it's
+  stripped out for most people.
+
+### Round 4
+
+- **The stream carries every post accepted into the feed,** restricted
+  ones included, with each post's audience but without its `feeds`
+  field. The visibility filter strips restricted posts for viewers
+  outside their audience.
+- **Skeletons can name public Bluesky posts,** and eventside renders them
+  as Bluesky post cards. That moves public records from deferred into
+  Nov 1.
+- **Bsky Buzz** is the reference generator. It mixes the conference's
+  Bluesky conversation with the feed's own posts.
 
 Awaiting the user's review.
 
