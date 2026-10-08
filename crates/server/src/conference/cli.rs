@@ -4,6 +4,10 @@
 //! admin) into their own repo, under the session they connected with, and
 //! read back into the index before the command reports success.
 //!
+//! Permission records are checked and signed by our host as they're written
+//! (design review round 5): a decision is checked against the decisions
+//! that stand when it's taken, and stays valid after that.
+//!
 //! It exits non-zero with the reason on stderr when it refuses or fails. With
 //! `--json`, its last line of stdout is one JSON object.
 
@@ -14,13 +18,14 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 
-use super::admin::{Acting, connect_command};
+use super::admin::{Acting, Signing, connect_command};
 use super::{EVENT, Row, SIDECAR};
 use crate::AppState;
 use crate::config::Config;
 use crate::crypto::tid_now;
 use crate::db::now_ms;
 use crate::keys::random_token;
+use crate::spacehost::attest::{self, Check, Claim, Journal, Rank};
 use crate::spacehost::index::{self, Conference, Org, Role};
 use crate::spacehost::{CONFERENCE_TYPE, INTAKE_TYPE, SpaceUri, authority, sync};
 
@@ -28,8 +33,8 @@ const USAGE: &str = "usage: conference-server admin <command> [--json] [--as <ha
 
   org create --super-admin <handle> --recovery-key <did:key> [--name <name>]
   org show --org <did>
-  org admin add <handle> --org <did> [--role owner|staff] [--keep-admissions]
-  org admin remove <handle> --org <did> [--keep-admissions]
+  org admin add <handle> --org <did> [--role owner|staff]
+  org admin remove <handle> --org <did>
   org admin undo <handle> --org <did> (--admissions | --codes) [--conference <space>]
   org keys add --org <did>
   org keys resign --org <did>
@@ -54,8 +59,7 @@ const USAGE: &str = "usage: conference-server admin <command> [--json] [--as <ha
 const ROLES: &[&str] = &["owner", "staff", "speaker"];
 
 /// Flags that take no value.
-const SWITCHES: &[&str] =
-    &["json", "invite-only", "personal", "yes", "keep-admissions", "admissions", "codes"];
+const SWITCHES: &[&str] = &["json", "invite-only", "personal", "yes", "admissions", "codes"];
 
 struct Args {
     words: Vec<String>,
@@ -157,10 +161,10 @@ async fn run(state: &AppState, args: &Args) -> Result<Done, String> {
         ["org", "show", ..] => org_show(state, args).await,
         ["org", "admin", "add", ..] => org_admin(state, args, true).await,
         ["org", "admin", "remove", ..] => org_admin(state, args, false).await,
-        // Signed decisions (design review round 5): stubs until they're built.
-        ["org", "admin", "undo", ..] | ["org", "keys", "add" | "resign" | "remove", ..] => {
-            Err(format!("not implemented: {}", words.join(" ")))
-        }
+        ["org", "admin", "undo", ..] => org_admin_undo(state, args).await,
+        ["org", "keys", "add", ..] => org_keys_add(state, args).await,
+        ["org", "keys", "resign", ..] => org_keys_resign(state, args).await,
+        ["org", "keys", "remove", ..] => org_keys_remove(state, args).await,
         ["connect", ..] => connect(state, args).await,
         ["reindex", ..] => reindex(state, args).await,
         ["conference", "create", ..] => conference_create(state, args).await,
@@ -306,6 +310,12 @@ async fn connected(state: &AppState, did: &str) -> Result<bool, String> {
     Ok(live > 0)
 }
 
+/// Adds an admin, or changes their role, or removes them: the super
+/// admin's signed `admin` record (`role: "none"` once removed, so the crawl
+/// still finds their repo). Nothing they already decided changes: their
+/// admissions, removals, bans, codes and list rows keep standing, at the rank
+/// they were signed with. From now on we sign for them at their new rank, or
+/// not at all.
 async fn org_admin(state: &AppState, args: &Args, add: bool) -> Result<Done, String> {
     let who = args.word(3, "the admin's handle")?;
     let subject = did_of(state, who).await?;
@@ -313,6 +323,7 @@ async fn org_admin(state: &AppState, args: &Args, add: bool) -> Result<Done, Str
     let (acting, _) = acting(state, args, &org).await?;
     only_super_admin(&org, &acting, "add or remove admins")?;
     let admin_space = SpaceUri::admin(&org.did).to_string();
+    let now = now_ms() as u64 * 1000;
     if add {
         let role = args.flag("role").unwrap_or("staff");
         let role = Role::parse(role)
@@ -336,58 +347,27 @@ async fn org_admin(state: &AppState, args: &Args, add: bool) -> Result<Done, Str
                 conference.space()
             ));
         }
-        // Any change to someone's admin role (made owner or staff, or added
-        // again after a removal) changes which of their records count, and
-        // how their decisions rank: an owner's codes, list rows and bans
-        // count only while they're one, and a decision weighs by its author's
-        // role now. Whoever that takes out is kept with `--keep-admissions`,
-        // and reported otherwise; whoever it lets back in is reported.
-        let changed = index::with_admin_as(state, &org, &subject, Some(role)).await?;
-        let lost = index::would_lose(&org, &changed, &subject);
-        let back = index::would_let_in(&org, &changed, &subject);
         // Every conference's writer is found before anything is written.
         let mut writers = Vec::new();
         for conference in org.conferences.values() {
             writers.push((conference, conference_super_admin(state, conference).await?));
         }
-        let keep = args.flag("keep-admissions").is_some();
-        let kept = if keep {
-            keep_admissions(state, &acting, &org, &subject, &lost).await?
-        } else {
-            vec![]
-        };
-        // An owner made staff: the list roles they gave stop counting, so
-        // those another owner's list also gives are handed to that owner.
-        let demoted = role == Role::Staff && org.admin_role(&subject) == Some(Role::Owner);
-        let write = async {
-            if demoted {
-                for (conference, writer) in &writers {
-                    for (person, value) in list_role_handovers(conference, &subject, |_| true) {
-                        writer
-                            .put_in(state, conference.space(), index::ROLE, &person, value)
-                            .await?;
-                    }
-                }
-            }
-            acting
-                .put_in(
-                    state,
-                    &admin_space,
-                    index::ADMIN,
-                    &subject,
-                    json!({ "subject": subject, "role": role.as_str() }),
-                )
-                .await
-        };
-        if let Err(why) = write.await {
-            return Err(undo_kept(state, &acting, &org, &kept, why).await);
-        }
+        // An admin keeps the start of their time as one through a change of role.
+        let current = org.admins.get(&subject);
+        let since = current.map_or(now, |a| a.since_us);
+        acting
+            .put_in(
+                state,
+                &admin_space,
+                index::ADMIN,
+                &subject,
+                json!({ "subject": subject, "role": role.as_str(), "since": index::iso(since) }),
+            )
+            .await?;
         // Admins are members of every conference, with their role. A new
         // admin's period (and membership) starts with a `member` record of
-        // the super admin's, so it keeps its start through a change of role,
-        // and its end once they're removed.
-        let now = index::iso(now_ms() as u64 * 1000);
-        let new_admin = !org.admins.contains_key(&subject);
+        // the super admin's, and ends with another once they're removed.
+        let new_admin = current.is_none() && subject != org.super_admin;
         for (conference, writer) in writers {
             if new_admin {
                 acting
@@ -396,27 +376,25 @@ async fn org_admin(state: &AppState, args: &Args, add: bool) -> Result<Done, Str
                         &admin_space,
                         index::MEMBER,
                         None,
-                        json!({ "space": conference.space(), "subject": subject, "via": index::VIA_ADMIN, "since": now }),
+                        json!({ "space": conference.space(), "subject": subject, "via": index::VIA_ADMIN, "since": index::iso(now) }),
                     )
                     .await?;
             }
             writer
-                .put_in(
+                .put_signed(
                     state,
                     conference.space(),
                     index::ROLE,
                     &subject,
                     json!({ "subject": subject, "role": role.as_str() }),
+                    Signing { by: Some(&acting.did), ..Signing::default() },
                 )
                 .await?;
         }
         after_change(state, &org).await?;
-        let text = format!("{who} is now {} of {}.", role.as_str(), org.did)
-            + &lost_report(state, &acting, who, &lost, keep).await
-            + &back_report(state, who, &back).await;
         return done(
-            text,
-            json!({ "did": subject, "role": role.as_str(), "lost": lost_json(&lost, keep), "kept": lost_json(&lost, !keep), "letBackIn": back_json(&back) }),
+            format!("{who} is now {} of {}.", role.as_str(), org.did),
+            json!({ "did": subject, "role": role.as_str() }),
         );
     }
     // The super admin is always an owner, with or without an `admin` record.
@@ -433,18 +411,18 @@ async fn org_admin(state: &AppState, args: &Args, add: bool) -> Result<Done, Str
     if !org.admins.contains_key(&subject) {
         return Err(format!("{who} isn't an admin of {}", org.did));
     }
+    let none = json!({ "subject": subject, "role": "none" });
     // The super admin stays the super admin (and an owner, and a member of
     // every conference); only their place on the list of admins goes.
     if subject == org.super_admin {
-        acting.delete_in(state, &admin_space, index::ADMIN, &subject).await?;
+        acting.put_in(state, &admin_space, index::ADMIN, &subject, none).await?;
         after_change(state, &org).await?;
         return done(
             format!("{who} is off the list of admins, and still the super admin of {}.", org.did),
             json!({ "did": subject }),
         );
     }
-    // A conference's super admin writes its roles and rules, which count
-    // only while they're an admin.
+    // A conference's super admin writes its roles and rules.
     if let Some(conference) = org.conferences.values().find(|c| c.super_admin() == subject) {
         return Err(format!(
             "{who} is the super admin of the conference {}: give it another first, with \
@@ -453,272 +431,289 @@ async fn org_admin(state: &AppState, args: &Args, add: bool) -> Result<Done, Str
             conference.space()
         ));
     }
-    // Their own role in each conference goes below, and so do the roles
-    // they assigned (which stop counting anyway, now they're not an admin).
-    // The writers are resolved before anything is written.
-    // A list role they gave that another owner's list also gives (the same
-    // person and role) is handed to that owner instead, keeping its time.
-    let mut role_deletes = Vec::new();
+    // Their own role in each conference (as an admin) goes; the roles they
+    // gave others stand. The writers are found before anything is written.
     let mut writers = Vec::new();
-    for conference in org.conferences.values() {
-        let assigned = conference
-            .role_deciders
-            .iter()
-            .filter(|(_, decider)| **decider == subject)
-            .map(|(person, _)| person.clone());
-        let mut gone: BTreeSet<String> = assigned
-            .chain(conference.roles.contains_key(&subject).then(|| subject.clone()))
-            .collect();
-        if gone.is_empty() {
-            continue;
-        }
-        let writer = conference_super_admin(state, conference).await?;
-        let handed = list_role_handovers(conference, &subject, |_| true);
-        gone.retain(|person| !handed.iter().any(|(p, _)| p == person));
-        role_deletes.push((conference.space().to_owned(), gone, handed));
-        writers.push(writer);
-    }
-    let now = index::iso(now_ms() as u64 * 1000);
-    // Their decisions stop counting once they're not an admin, and so do the
-    // codes and list rows an owner wrote: whoever is a member now only on
-    // their say-so goes. With `--keep-admissions`, those people are admitted
-    // first by the remover's own decision, so they stay; otherwise they're
-    // reported.
-    let changed = index::with_admin_as(state, &org, &subject, None).await?;
-    let lost = index::would_lose(&org, &changed, &subject);
-    // Their bans and removals stop counting too, which can let people back
-    // in: named, not re-issued (TC-53: a former admin's decisions stop
-    // counting).
-    let back = index::would_let_in(&org, &changed, &subject);
-    let keep = args.flag("keep-admissions").is_some();
-    let kept =
-        if keep { keep_admissions(state, &acting, &org, &subject, &lost).await? } else { vec![] };
-    let removal = async {
-        for (writer, (space, _, handed)) in writers.iter().zip(&role_deletes) {
-            for (person, value) in handed {
-                writer.put_in(state, space, index::ROLE, person, value.clone()).await?;
-            }
-        }
-        // Their admin period and membership of each conference end now; what
-        // they wrote while they were one stays theirs.
-        for conference in org.conferences.values() {
-            acting
-                .create_in(
-                    state,
-                    &admin_space,
-                    index::MEMBER,
-                    None,
-                    json!({ "space": conference.space(), "subject": subject, "via": index::VIA_ADMIN_REMOVED, "until": now }),
-                )
-                .await?;
-        }
-        acting.delete_in(state, &admin_space, index::ADMIN, &subject).await?;
-        Ok::<(), String>(())
-    };
-    if let Err(why) = removal.await {
-        let why = format!("removing {who} failed partway ({why})");
-        return Err(undo_kept(state, &acting, &org, &kept, why).await);
-    }
-    // They're not an admin now, so the roles they gave count no more; deleting
-    // them only tidies up, and one that can't be deleted is reported.
-    let mut untidy = Vec::new();
-    for (writer, (space, gone, _)) in writers.iter().zip(&role_deletes) {
-        for person in gone {
-            if let Err(why) = writer.delete_in(state, space, index::ROLE, person).await {
-                untidy.push(format!("{person} in {space} ({why})"));
-            }
-        }
-    }
-    after_change(state, &org).await?;
-    let mut text = format!("{who} is no longer an admin of {}.", org.did)
-        + &lost_report(state, &acting, who, &lost, keep).await
-        + &back_report(state, who, &back).await;
-    if !untidy.is_empty() {
-        text.push_str(&format!(
-            "\nThese role records they gave don't count any more, but couldn't be deleted: {}",
-            untidy.join("; ")
+    for conference in org.conferences.values().filter(|c| c.roles.contains_key(&subject)) {
+        writers.push((
+            conference.space().to_owned(),
+            conference_super_admin(state, conference).await?,
         ));
     }
-    done(
-        text,
-        json!({ "did": subject, "lost": lost_json(&lost, keep), "kept": lost_json(&lost, !keep), "letBackIn": back_json(&back) }),
-    )
-}
-
-/// The list roles `admin` gave in a conference (those `which` picks) that
-/// another owner's list also gives, the same person and role: rewritten as
-/// that owner's, keeping the time they took effect, so they don't go with
-/// `admin`'s removal or demotion.
-fn list_role_handovers(
-    conference: &Conference,
-    admin: &str,
-    which: impl Fn(&str) -> bool,
-) -> Vec<(String, Value)> {
-    let mut handed = Vec::new();
-    for (person, decider) in &conference.role_deciders {
-        let Some(role) = conference.roles.get(person) else { continue };
-        if decider != admin || !conference.has_list_role(person) || !which(role) {
-            continue;
-        }
-        let other = conference.list.iter().find(|e| {
-            e.by != admin
-                && e.did.as_deref() == Some(person.as_str())
-                && e.role.as_ref() == Some(role)
-        });
-        if let Some(entry) = other {
-            let since = conference.role_since(person).unwrap_or(now_ms() as u64 * 1000);
-            handed.push((
-                person.clone(),
-                json!({ "subject": person, "role": role, "assignedBy": entry.by, "via": "list", "since": index::iso(since) }),
-            ));
-        }
-    }
-    handed
-}
-
-/// Admits, by `acting`'s own decision, everyone a change to an admin would
-/// otherwise take out (`org admin remove|add --keep-admissions`): a `member`
-/// record each, `via: "kept"`, dated from when the membership it keeps began
-/// so what they wrote in it still counts. The records' keys, for an undo.
-async fn keep_admissions(
-    state: &AppState,
-    acting: &Acting,
-    org: &Org,
-    subject: &str,
-    lost: &[(String, String, u64)],
-) -> Result<Vec<String>, String> {
-    let admin_space = SpaceUri::admin(&org.did).to_string();
-    let mut written = Vec::new();
-    for (space, did, since) in lost {
-        let made = acting
+    // Their admin period and membership of each conference end now; what
+    // they decided while they were one stands.
+    for conference in org.conferences.values() {
+        acting
             .create_in(
                 state,
                 &admin_space,
                 index::MEMBER,
                 None,
-                json!({ "space": space, "subject": did, "via": index::VIA_KEPT, "keptThrough": subject, "since": index::iso(*since) }),
+                json!({ "space": conference.space(), "subject": subject, "via": index::VIA_ADMIN_REMOVED, "until": index::iso(now) }),
             )
-            .await;
-        match made {
-            Ok(rkey) => written.push(rkey),
-            Err(why) => return Err(undo_kept(state, acting, org, &written, why).await),
+            .await?;
+    }
+    acting.put_in(state, &admin_space, index::ADMIN, &subject, none).await?;
+    let mut untidy = Vec::new();
+    for (space, writer) in &writers {
+        if let Err(why) = writer.delete_in(state, space, index::ROLE, &subject).await {
+            untidy.push(format!("{space} ({why})"));
         }
     }
-    Ok(written)
+    after_change(state, &org).await?;
+    let mut text = format!(
+        "{who} is no longer an admin of {}. Their decisions still stand; `org admin undo {who} \
+         --admissions` or `--codes` undoes them.",
+        org.did
+    );
+    if !untidy.is_empty() {
+        text.push_str(&format!(
+            "\nTheir own role couldn't be taken away in: {}. Run `member role {who} --role none` \
+             there once the conference's super admin's PDS is back.",
+            untidy.join("; ")
+        ));
+    }
+    done(text, json!({ "did": subject }))
 }
 
-/// Deletes the kept admissions a failed command wrote, and says what's left.
-async fn undo_kept(
-    state: &AppState,
-    acting: &Acting,
-    org: &Org,
-    kept: &[String],
-    why: String,
-) -> String {
-    let admin_space = SpaceUri::admin(&org.did).to_string();
-    let mut left = Vec::new();
-    for rkey in kept {
-        if acting.delete_in(state, &admin_space, index::MEMBER, rkey).await.is_err() {
-            left.push(rkey.as_str());
+/// Undoes a (former) admin's decisions, by the acting owner's or super
+/// admin's own signed decisions: `--admissions` removes everyone whose only
+/// remaining ground is that admin's admission (someone who also joined
+/// with a code, say, stays); `--codes` revokes the codes they issued.
+async fn org_admin_undo(state: &AppState, args: &Args) -> Result<Done, String> {
+    let who = args.word(3, "the admin's handle")?;
+    let subject = did_of(state, who).await?;
+    let org = org(state, args.need("org")?).await?;
+    let (acting, role) = acting(state, args, &org).await?;
+    only_owners(role, &acting, "undo an admin's decisions")?;
+    let (admissions, codes) = (args.flag("admissions").is_some(), args.flag("codes").is_some());
+    if admissions == codes {
+        return Err(format!("give one of --admissions or --codes\n\n{USAGE}"));
+    }
+    let conferences: Vec<&Conference> = match args.flag("conference") {
+        Some(space) => {
+            vec![
+                org.conference(space)
+                    .ok_or_else(|| format!("{space} isn't one of {}'s conferences", org.did))?,
+            ]
         }
-    }
-    if let Err(also) = after_change(state, org).await {
-        eprintln!("warning: {also}");
-    }
-    if left.is_empty() {
-        format!("{why}; the admissions it kept were taken back")
-    } else {
-        format!(
-            "{why}; these admissions it kept couldn't be taken back, and are still {}'s \
-             decisions ({}/{}): {}",
-            acting.handle,
-            admin_space,
-            index::MEMBER,
-            left.join(", ")
-        )
-    }
-}
-
-/// The people a change to an admin took out, or kept, by conference.
-async fn lost_report(
-    state: &AppState,
-    acting: &Acting,
-    who: &str,
-    lost: &[(String, String, u64)],
-    kept: bool,
-) -> String {
-    if lost.is_empty() {
-        return String::new();
-    }
-    let people: BTreeSet<&String> = lost.iter().map(|(_, did, _)| did).collect();
-    let mut text = if kept {
-        format!(
-            "\nKept {} people this change to {who} would have taken out, now on {}'s decision:",
-            people.len(),
-            acting.handle
-        )
-    } else {
-        format!(
-            "\n{} people aren't members any more after this change to {who} (an admission, code \
-             or list of theirs stopped counting, or a decision of theirs now outranks another); \
-             the super admin's `member add` can let them back in, and `--keep-admissions` keeps \
-             them next time:",
-            people.len()
-        )
+        None => org.conferences.values().collect(),
     };
-    let mut by_space: BTreeMap<&str, Vec<String>> = BTreeMap::new();
-    for (space, did, _) in lost {
-        by_space.entry(space).or_default().push(handle_of(state, did).await);
-    }
-    for (space, names) in by_space {
-        text.push_str(&format!("\n  {space}: {}", names.join(", ")));
-    }
-    text
-}
-
-/// The people a change to an admin let back in (their ban or removal no
-/// longer counting), by conference: members again now, and those only no
-/// longer banned (who can join again).
-async fn back_report(state: &AppState, who: &str, back: &[(String, String, bool)]) -> String {
-    let mut text = String::new();
-    for (again, heading) in [
-        (true, "are members again now".to_owned()),
-        (false, "aren't banned any more, and can join again".to_owned()),
-    ] {
-        let mut by_space: BTreeMap<&str, Vec<String>> = BTreeMap::new();
-        for (space, did, member) in back {
-            if *member == again {
-                by_space.entry(space).or_default().push(handle_of(state, did).await);
+    let admin_space = SpaceUri::admin(&org.did).to_string();
+    let now = index::iso(now_ms() as u64 * 1000);
+    let mut undone = Vec::new();
+    let mut left = Vec::new();
+    for conference in conferences {
+        let space = conference.space().to_owned();
+        if admissions {
+            for person in conference.only_admitted_by(&subject) {
+                let check: Check = Box::new(|org: &Org, _: &Journal| {
+                    let c = org.conference(&space).ok_or("the conference is gone")?;
+                    if !c.only_admitted_by(&subject).contains(&person) {
+                        return Err(format!("{person} has another way in now"));
+                    }
+                    decision_allowed(org, c, &person, &person, &acting, "remove")
+                });
+                let record = json!({ "space": space, "subject": person, "via": index::VIA_REMOVED, "until": now, "undoes": subject });
+                let signing = Signing {
+                    claim: Claim::about(&space, &person),
+                    check: Some(check),
+                    ..Signing::default()
+                };
+                match acting
+                    .create_signed(state, &admin_space, index::MEMBER, None, record, signing)
+                    .await
+                {
+                    Ok(_) => undone.push(json!({ "space": space, "did": person })),
+                    Err(why) => left.push(format!("{person} in {space}: {why}")),
+                }
+            }
+        } else {
+            for (hash, _) in conference.codes_by(&subject) {
+                let check: Check = Box::new(|org: &Org, _: &Journal| {
+                    let c = org.conference(&space).ok_or("the conference is gone")?;
+                    let code = c.codes.get(&hash).ok_or("the code is gone")?;
+                    let rank = Rank::of_admin(org, &acting.did).ok_or("not an admin now")?;
+                    if rank < code.rank {
+                        return Err(format!(
+                            "it was issued by {}, and {} can't revoke it",
+                            rank_name(code.rank),
+                            acting.handle
+                        ));
+                    }
+                    Ok(())
+                });
+                let record = json!({ "space": space, "codeHash": hash });
+                let signing = Signing { check: Some(check), ..Signing::default() };
+                match acting
+                    .create_signed(state, &admin_space, index::CODE_REVOKE, None, record, signing)
+                    .await
+                {
+                    Ok(_) => undone.push(json!({ "space": space, "codeHash": hash })),
+                    Err(why) => left.push(format!("a code in {space}: {why}")),
+                }
             }
         }
-        if by_space.is_empty() {
+    }
+    after_change(state, &org).await?;
+    let what = if admissions { "admissions" } else { "codes" };
+    let mut text = format!("Undid {} of {who}'s {what}.", undone.len());
+    if !left.is_empty() {
+        text.push_str(&format!("\nThese weren't undone:\n  {}", left.join("\n  ")));
+    }
+    let key = if admissions { "removed" } else { "revoked" };
+    let out = done(text.clone(), json!({ key: undone, "notUndone": left }));
+    if left.is_empty() { out } else { Err(text) }
+}
+
+/// Adds an attestation key to the organization's DID document: new records
+/// are signed with it from now on.
+async fn org_keys_add(state: &AppState, args: &Args) -> Result<Done, String> {
+    let did = args.need("org")?;
+    org(state, did).await?;
+    let key = authority::add_attest_key(state, did).await?;
+    index::bump(state, did).await?;
+    done(
+        format!(
+            "Added {key}; new records are signed with it. Next: `org keys resign --org {did}`."
+        ),
+        json!({ "key": key }),
+    )
+}
+
+/// Removes an attestation key from the organization's DID document. Records
+/// signed only by it stop counting.
+async fn org_keys_remove(state: &AppState, args: &Args) -> Result<Done, String> {
+    let fragment = args.word(3, "the key's fragment")?;
+    let did = args.need("org")?;
+    let before = org(state, did).await?;
+    authority::remove_attest_key(state, did, fragment).await?;
+    index::bump(state, did).await?;
+    after_change(state, &before).await?;
+    done(
+        format!("Removed #{fragment} from {did}."),
+        json!({ "removed": format!("{did}#{fragment}") }),
+    )
+}
+
+/// Re-signs the standing records with the newest key: each record whose
+/// signature verifies now but not by that key gets a second signature, with
+/// the same `seq`, rank and time, written back through its author's session.
+/// One whose author has no session can't be edited, and is listed: it stops
+/// counting once the keys it's signed with are removed.
+async fn org_keys_resign(state: &AppState, args: &Args) -> Result<Done, String> {
+    let did = args.need("org")?;
+    let org = org(state, did).await?;
+    let keys = attest::keys(&state.db, did).await?;
+    let (key_id, key) = attest::signing_key(state, did).await?;
+    let now = now_ms() as u64 * 1000;
+    // (repo, space or None for public, collection, rkey, the re-signed record)
+    let mut todo = Vec::new();
+    for rec in index::records(state, did).await? {
+        if let Some(record) =
+            attest::resign(&rec.value, &rec.repo, &rec.space, &keys, &key_id, &key, now)?
+        {
+            todo.push((rec.repo, Some(rec.space), rec.collection, rec.rkey, record));
+        }
+    }
+    // Public conferences' sidecars, beside their events.
+    for conference in org.conferences.values() {
+        let Some(event) = &conference.settings.event else { continue };
+        let parts: Vec<&str> = event.strip_prefix("at://").unwrap_or_default().split('/').collect();
+        let [repo, _, rkey] = parts.as_slice() else { continue };
+        let Ok(value) = super::public_record(state, &format!("at://{repo}/{SIDECAR}/{rkey}")).await
+        else {
             continue;
+        };
+        if let Some(record) =
+            attest::resign(&value, repo, conference.space(), &keys, &key_id, &key, now)?
+        {
+            todo.push(((*repo).to_owned(), None, SIDECAR.to_owned(), (*rkey).to_owned(), record));
         }
-        let people: usize = by_space.values().map(Vec::len).sum();
+    }
+    let mut resigned = 0;
+    let mut skipped = Vec::new();
+    for (repo, space, collection, rkey, record) in todo {
+        let at = format!("{repo} {collection}/{rkey}");
+        match put_through_session(state, &repo, space.as_deref(), &collection, &rkey, record).await
+        {
+            Ok(()) => resigned += 1,
+            Err(why) => skipped.push(format!("{at}: {why}")),
+        }
+    }
+    index::bump(state, did).await?;
+    let mut text = format!("Re-signed {resigned} records with {key_id}.");
+    if !skipped.is_empty() {
         text.push_str(&format!(
-            "\n{people} people {heading} after this change to {who}; the super admin's `member \
-             ban` or `member remove` keeps them out:"
+            "\nThese couldn't be re-signed, and stop counting once the keys they're signed with \
+             are removed:\n  {}",
+            skipped.join("\n  ")
         ));
-        for (space, names) in by_space {
-            text.push_str(&format!("\n  {space}: {}", names.join(", ")));
+    }
+    done(text, json!({ "key": key_id, "resigned": resigned, "skipped": skipped }))
+}
+
+/// Writes a record as it is into someone's repo, through their latest live
+/// session (an admin's first): in a space, or their public repo.
+async fn put_through_session(
+    state: &AppState,
+    did: &str,
+    space: Option<&str>,
+    collection: &str,
+    rkey: &str,
+    record: Value,
+) -> Result<(), String> {
+    let id_hash = sqlx::query_scalar::<_, String>(
+        "SELECT id_hash FROM sessions WHERE did = $1 AND ended_at IS NULL \
+         ORDER BY CASE WHEN kind = 'admin' THEN 0 ELSE 1 END, created_at DESC LIMIT 1",
+    )
+    .bind(did)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| e.to_string())?
+    .ok_or("they have no session with us")?;
+    let client = crate::auth::pds::PdsClient::for_session(state, &id_hash)
+        .await
+        .map_err(|e| format!("their session can't be used: {e:?}"))?;
+    // An attendee's session may create and delete in an intake space, not
+    // update: the re-signed record is written as a new one, the latest
+    // version of its `seq`, and the old one deleted.
+    let intake = space.and_then(SpaceUri::parse).is_some_and(|s| s.kind == INTAKE_TYPE);
+    let new_rkey = if intake { tid_now() } else { rkey.to_owned() };
+    let mut body =
+        json!({ "repo": did, "collection": collection, "rkey": new_rkey, "record": record });
+    let nsid = match space {
+        Some(_) if intake => "com.atproto.space.createRecord",
+        Some(_) => "com.atproto.space.putRecord",
+        None => "com.atproto.repo.putRecord",
+    };
+    if let Some(space) = space {
+        body["space"] = json!(space);
+    }
+    let send = async |nsid: &str, body: &Value| {
+        let res = client
+            .send(reqwest::Method::POST, &format!("/xrpc/{nsid}"), Some(body))
+            .await
+            .map_err(|e| format!("their PDS couldn't be reached: {e:?}"))?;
+        if res.status().is_success() {
+            Ok(())
+        } else {
+            Err(format!("their PDS refused {nsid} ({})", res.status()))
+        }
+    };
+    send(nsid, &body).await?;
+    if intake && let Some(space) = space {
+        let old = json!({ "space": space, "repo": did, "collection": collection, "rkey": rkey });
+        if let Err(why) = send("com.atproto.space.deleteRecord", &old).await {
+            eprintln!(
+                "note: the re-signed copy of {collection}/{rkey} is written, but the old one stays: {why}"
+            );
         }
     }
-    text
-}
-
-fn back_json(back: &[(String, String, bool)]) -> Vec<Value> {
-    back.iter()
-        .map(|(space, did, member)| json!({ "space": space, "did": did, "member": member }))
-        .collect()
-}
-
-/// The people a change to an admin took out (or kept), for `--json`; empty
-/// when `skip`.
-fn lost_json(lost: &[(String, String, u64)], skip: bool) -> Vec<Value> {
-    if skip {
-        return Vec::new();
+    if let Some(space) = space {
+        sync::sync_repo(state, space, did).await?;
     }
-    lost.iter().map(|(space, did, _)| json!({ "space": space, "did": did })).collect()
+    Ok(())
 }
 
 /// Connects an admin: prints a URL for them to open, waits while they sign
@@ -942,12 +937,9 @@ async fn conference_handover(state: &AppState, args: &Args) -> Result<Done, Stri
 
     if current != subject {
         // What the current super admin wrote into the space, re-issued by the new.
-        let rows = sqlx::query_as::<_, (String, String, String, String, Option<i64>)>(
-            "SELECT r.collection, r.rkey, r.rev, r.value, s.seen_at FROM space_records r \
-             LEFT JOIN space_record_seen s ON s.space = r.space AND s.repo = r.repo \
-             AND s.collection = r.collection AND s.rkey = r.rkey AND s.rev = r.rev \
-             WHERE r.space = $1 AND r.repo = $2 AND r.collection IN ($3, $4, $5, $6) \
-             AND r.value IS NOT NULL",
+        let rows = sqlx::query_as::<_, (String, String, String)>(
+            "SELECT collection, rkey, value FROM space_records WHERE space = $1 AND repo = $2 \
+             AND collection IN ($3, $4, $5, $6) AND value IS NOT NULL",
         )
         .bind(&space)
         .bind(&current)
@@ -959,7 +951,7 @@ async fn conference_handover(state: &AppState, args: &Args) -> Result<Done, Stri
         .await
         .map_err(|e| e.to_string())?;
         let mut copies = Vec::new();
-        for (collection, rkey, rev, value, seen_at) in rows {
+        for (collection, rkey, value) in rows {
             if !super_admins_record(&collection, &rkey, event_rkey.as_deref()) {
                 continue;
             }
@@ -968,10 +960,9 @@ async fn conference_handover(state: &AppState, args: &Args) -> Result<Done, Stri
                 index::ROLE => {
                     // A role keeps the time it took effect.
                     if value.get("since").is_none()
-                        && let Some(us) = crate::crypto::tid_micros(&rev)
+                        && let Some(us) = conference.role_since(&rkey)
                     {
-                        let seen_us = seen_at.map(|ms| ms.max(0) as u64 * 1000);
-                        value["since"] = json!(index::iso(index::conference_us(us, seen_us)));
+                        value["since"] = json!(index::iso(us));
                     }
                     index::ROLE
                 }
@@ -1452,8 +1443,8 @@ async fn join_set(state: &AppState, args: &Args) -> Result<Done, String> {
 
 async fn codes_issue(state: &AppState, args: &Args) -> Result<Done, String> {
     let (space, org) = conference(state, args).await?;
-    let (acting, role) = acting(state, args, &org).await?;
-    only_owners(role, &acting, "issue codes")?;
+    // Staff can issue codes too: the people they invite are full members.
+    let (acting, _) = acting(state, args, &org).await?;
     let (code, personal) = match (args.flag("shared"), args.flag("personal")) {
         (Some(code), None) => (code.trim().to_owned(), false),
         // At least 80 bits of randomness.
@@ -1634,12 +1625,13 @@ async fn list_import(state: &AppState, args: &Args) -> Result<Done, String> {
             .filter(|_| current == Some(&role))
             .unwrap_or(now_ms() as u64 * 1000);
         writer
-            .put_in(
+            .put_signed(
                 state,
                 &space.to_string(),
                 index::ROLE,
                 &did,
                 json!({ "subject": did, "role": role, "assignedBy": acting.did, "via": "list", "since": index::iso(since) }),
+                Signing { by: Some(&acting.did), ..Signing::default() },
             )
             .await?;
     }
@@ -1687,21 +1679,90 @@ async fn requests_list(state: &AppState, args: &Args) -> Result<Done, String> {
     done(text, json!({ "requests": requests }))
 }
 
+/// How a rank is named in a refusal.
+fn rank_name(rank: Rank) -> &'static str {
+    match rank {
+        Rank::SuperAdmin => "the super admin",
+        Rank::Owner => "an owner or the super admin",
+        Rank::Staff => "staff",
+        Rank::Person => "the person themselves",
+    }
+}
+
+/// Whether `acting` may make a decision (`approve`, `deny`, `add`, `remove`
+/// or `ban`) about `subject` in a conference now: within their role, and not
+/// contradicting a standing decision of a higher rank than theirs now, or a
+/// ban of a higher rank. Checked before the decision is signed, against the
+/// index then.
+fn decision_allowed(
+    org: &Org,
+    conference: &Conference,
+    subject: &str,
+    handle: &str,
+    acting: &Acting,
+    action: &str,
+) -> Result<(), String> {
+    let who = &acting.handle;
+    let rank = Rank::of_admin(org, &acting.did)
+        .ok_or_else(|| format!("{who} isn't an admin of {}", org.did))?;
+    if matches!(action, "approve" | "deny") && !conference.pending.contains_key(subject) {
+        return Err(format!("{handle} has no request waiting"));
+    }
+    if matches!(action, "remove" | "ban") && org.is_admin(subject) {
+        return Err(format!(
+            "{handle} is an admin of {}: remove them as an admin with `org admin remove` instead",
+            org.did
+        ));
+    }
+    if action == "ban" && rank < Rank::Owner {
+        return Err(format!("only owners can ban people; {who} is staff"));
+    }
+    if action == "remove"
+        && rank < Rank::Owner
+        && conference.roles.get(subject).is_some_and(|r| matches!(r.as_str(), "owner" | "staff"))
+    {
+        return Err(format!(
+            "only owners can remove someone with the owner or staff role; {who} is staff"
+        ));
+    }
+    let admits = matches!(action, "approve" | "add");
+    let standing = conference.standing(subject);
+    if admits
+        && let Some(ban) = standing.ban
+        && rank < ban
+    {
+        return Err(format!(
+            "{handle} is banned from this conference by {}; nothing was changed",
+            rank_name(ban)
+        ));
+    }
+    if let Some((above, says)) = standing.decision
+        && says != admits
+        && rank < above
+    {
+        return Err(format!(
+            "{handle}: a decision about them by {} stands, and {who} can't override it; nothing \
+             was changed",
+            rank_name(above)
+        ));
+    }
+    Ok(())
+}
+
 /// Approving, denying, admitting, removing and banning: an admin's decision,
-/// written to their own repo.
+/// checked against the decisions that stand and signed, then written to
+/// their own repo.
 async fn decide(state: &AppState, args: &Args, action: &str) -> Result<Done, String> {
     let who = args.word(2, "a handle")?;
     let subject = did_of(state, who).await?;
     let (space, org) = conference(state, args).await?;
-    let (acting, role) = acting(state, args, &org).await?;
-    let conference = org.conference(&space.to_string()).ok_or("no such conference")?;
+    let (acting, _) = acting(state, args, &org).await?;
+    let space_uri = space.to_string();
+    let conference = org.conference(&space_uri).ok_or("no such conference")?;
+    decision_allowed(&org, conference, &subject, who, &acting, action)?;
     let admin_space = SpaceUri::admin(&org.did).to_string();
     let now = index::iso(now_ms() as u64 * 1000);
-    let space_uri = space.to_string();
     let (collection, record, message) = match action {
-        "approve" | "deny" if !conference.pending.contains_key(&subject) => {
-            return Err(format!("{who} has no request waiting"));
-        }
         "approve" => (
             index::MEMBER,
             json!({ "space": space_uri, "subject": subject, "via": "request", "since": now }),
@@ -1717,40 +1778,19 @@ async fn decide(state: &AppState, args: &Args, action: &str) -> Result<Done, Str
             json!({ "space": space_uri, "subject": subject, "via": "admin", "since": now }),
             format!("{who} is in."),
         ),
-        "remove" | "ban" if org.is_admin(&subject) => {
-            return Err(format!(
-                "{who} is an admin of {}: remove them as an admin with `org admin remove` instead",
-                org.did
-            ));
-        }
-        "remove"
-            if role != Some(Role::Owner)
-                && conference
-                    .roles
-                    .get(&subject)
-                    .is_some_and(|r| matches!(r.as_str(), "owner" | "staff")) =>
-        {
-            return Err(format!(
-                "only owners can remove someone with the owner or staff role; {} is staff",
-                acting.handle
-            ));
-        }
         "remove" => (
             index::MEMBER,
-            json!({ "space": space_uri, "subject": subject, "via": "removed", "until": now }),
+            json!({ "space": space_uri, "subject": subject, "via": index::VIA_REMOVED, "until": now }),
             format!("{who} was removed."),
         ),
-        "ban" => {
-            only_owners(role, &acting, "ban people")?;
-            (
-                index::BAN,
-                json!({ "space": space_uri, "subject": subject }),
-                format!("{who} is banned."),
-            )
-        }
+        "ban" => (
+            index::BAN,
+            json!({ "space": space_uri, "subject": subject }),
+            format!("{who} is banned."),
+        ),
         _ => return Err(format!("unknown action {action}")),
     };
-    // A removal or ban may take their role away below, which needs the
+    // A removal or ban takes their role away below, which needs the
     // conference's super admin's session: found before anything is written.
     let role_writer =
         if matches!(action, "remove" | "ban") && conference.roles.contains_key(&subject) {
@@ -1758,75 +1798,84 @@ async fn decide(state: &AppState, args: &Args, action: &str) -> Result<Done, Str
         } else {
             None
         };
-    // Only the super admin's admission can lift a ban (another owner's), so
-    // anyone else's is refused before anything is written.
-    if matches!(action, "approve" | "add")
-        && acting.did != org.super_admin
-        && conference.banned.contains(&subject)
-    {
-        return Err(format!("{who} is banned from this conference; nothing was changed"));
-    }
-    let rkey = acting.create_in(state, &admin_space, collection, None, record).await?;
-    let mut after = after_change(state, &org).await?;
-    // A decision doesn't undo a higher-ranking admin's: staff can't override
-    // an owner or the super admin, nor owners the super admin.
-    let mut member = after.conference(&space_uri).is_some_and(|c| c.is_member(&subject));
-    // Out of the conference, out of their role: once they're out, so a
-    // removal a higher rank's decision overrides leaves the role be.
+    let check: Check = Box::new(|org: &Org, _: &Journal| {
+        let conference = org.conference(&space_uri).ok_or("the conference is gone")?;
+        decision_allowed(org, conference, &subject, who, &acting, action)
+    });
+    let signing = Signing {
+        claim: Claim::about(&space_uri, &subject),
+        check: Some(check),
+        ..Signing::default()
+    };
+    let rkey = acting.create_signed(state, &admin_space, collection, None, record, signing).await?;
+    let after = after_change(state, &org).await?;
+    let member = after.conference(&space_uri).is_some_and(|c| c.is_member(&subject));
+    // Out of the conference, out of their role, which could let them back in.
     if let Some(writer) = role_writer.filter(|_| !member) {
-        // The role could still let them back in, so a removal or ban that
-        // can't take it is taken back rather than left half done.
-        if let Err(why) = writer.delete_in(state, &space_uri, index::ROLE, &subject).await {
-            let undone = acting.delete_in(state, &admin_space, collection, &rkey).await;
+        let Err(why) = take_role(state, &writer, &space_uri, &subject, &acting).await else {
             after_change(state, &after).await?;
-            return Err(match undone {
-                Ok(()) => format!(
-                    "{who}'s role couldn't be taken away ({why}), so the {action} was undone; \
-                     nothing was changed"
-                ),
-                Err(also) => format!(
-                    "{who}'s role couldn't be taken away ({why}), and the {action} couldn't be \
-                     undone ({also}): they're out but still hold their role, which can let them \
-                     back in; run the command again once {}'s PDS is back",
-                    writer.handle
-                ),
-            });
-        }
-        after = after_change(state, &after).await?;
-        member = after.conference(&space_uri).is_some_and(|c| c.is_member(&subject));
-    }
-    let now_in = after.conference(&space_uri);
-    let banned = now_in.is_some_and(|c| c.banned.contains(&subject));
-    if (matches!(action, "approve" | "add") && !member) || (action == "remove" && member) {
-        // An overridden decision isn't left on record: decisions rank by
-        // their authors' roles now, so it would take effect, unannounced, if
-        // its author were promoted or the overriding admin demoted.
+            return done(message, json!({ "did": subject, "action": action }));
+        };
+        // A removal or ban that can't take the role is withdrawn (its
+        // record deleted) rather than left half done.
         let undone = acting.delete_in(state, &admin_space, collection, &rkey).await;
         after_change(state, &after).await?;
-        let why = if banned {
-            format!("{who} is banned from this conference")
-        } else {
-            let above = if role == Some(Role::Owner) {
-                "the super admin"
-            } else {
-                "an owner or the super admin"
-            };
-            format!(
-                "{who}: a decision about them by {above} stands, and {} can't override it",
-                acting.handle
-            )
-        };
         return Err(match undone {
-            Ok(()) => format!("{why}; nothing was changed"),
+            Ok(()) => format!(
+                "{who}'s role couldn't be taken away ({why}), so the {action} was undone; \
+                 nothing was changed"
+            ),
             Err(also) => format!(
-                "{why}, and the {action} couldn't be deleted again ({also}): delete the record \
-                 {collection}/{rkey} from {}'s repo in {admin_space} once their PDS is back, or \
-                 it counts if their rank changes",
-                acting.handle
+                "{who}'s role couldn't be taken away ({why}), and the {action} couldn't be \
+                 undone ({also}): they're out but still hold their role, which can let them \
+                 back in; run the command again once {}'s PDS is back",
+                writer.handle
             ),
         });
     }
     done(message, json!({ "did": subject, "action": action }))
+}
+
+/// Takes someone's role away: deletes the conference super admin's role
+/// record about them, or, for a role a join gave (an email match), writes
+/// one saying `none`.
+async fn take_role(
+    state: &AppState,
+    writer: &Acting,
+    space: &str,
+    subject: &str,
+    acting: &Acting,
+) -> Result<(), String> {
+    let recorded = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM space_records WHERE space = $1 AND repo = $2 AND collection = $3 \
+         AND rkey = $4 AND value IS NOT NULL",
+    )
+    .bind(space)
+    .bind(&writer.did)
+    .bind(index::ROLE)
+    .bind(subject)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| e.to_string())?;
+    if recorded > 0 {
+        writer.delete_in(state, space, index::ROLE, subject).await?;
+    }
+    let org = index::load(state, &SpaceUri::parse(space).map(|s| s.authority).unwrap_or_default())
+        .await?
+        .ok_or("the organization is gone")?;
+    if org.conference(space).is_some_and(|c| c.roles.contains_key(subject)) {
+        writer
+            .put_signed(
+                state,
+                space,
+                index::ROLE,
+                subject,
+                json!({ "subject": subject, "role": "none" }),
+                Signing { by: Some(&acting.did), ..Signing::default() },
+            )
+            .await?;
+    }
+    Ok(())
 }
 
 async fn member_role(state: &AppState, args: &Args) -> Result<Done, String> {
@@ -1850,21 +1899,22 @@ async fn member_role(state: &AppState, args: &Args) -> Result<Done, String> {
             acting.handle
         ));
     }
-    // Only the conference's super admin's role records count. Each names the
-    // admin who decided it, and counts only while they could.
+    // The conference's super admin's role records count, signed for the
+    // admin who decided each, at their rank.
     let writer = conference_super_admin(state, conference).await?;
     if role == "none" {
         if conference.roles.contains_key(&subject) {
-            writer.delete_in(state, &space.to_string(), index::ROLE, &subject).await?;
+            take_role(state, &writer, &space.to_string(), &subject, &acting).await?;
         }
     } else {
         writer
-            .put_in(
+            .put_signed(
                 state,
                 &space.to_string(),
                 index::ROLE,
                 &subject,
                 json!({ "subject": subject, "role": role, "assignedBy": acting.did, "since": index::iso(now_ms() as u64 * 1000) }),
+                Signing { by: Some(&acting.did), ..Signing::default() },
             )
             .await?;
     }
@@ -1968,7 +2018,14 @@ async fn rules_set(state: &AppState, args: &Args) -> Result<Done, String> {
     }
     let writer = conference_super_admin(state, conference).await?;
     writer
-        .put_in(state, &space.to_string(), index::RULES, "self", json!({ "rules": list }))
+        .put_signed(
+            state,
+            &space.to_string(),
+            index::RULES,
+            "self",
+            json!({ "rules": list }),
+            Signing { by: Some(&acting.did), ..Signing::default() },
+        )
         .await?;
     done("Rules set.", json!({ "space": space.to_string() }))
 }

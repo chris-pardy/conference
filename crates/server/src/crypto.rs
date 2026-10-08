@@ -330,6 +330,133 @@ pub fn sha256(bytes: &[u8]) -> [u8; 32] {
     Sha256::digest(bytes).into()
 }
 
+/// Canonical DAG-CBOR for a value in atproto's JSON form: `{"$bytes": …}`
+/// is a byte string and `{"$link": …}` a CID (tag 42). Map keys sort by
+/// length, then bytewise; integers take their shortest form; floats aren't
+/// allowed, as in atproto's data model.
+pub fn dag_cbor(value: &Value) -> Result<Vec<u8>, String> {
+    let mut out = Vec::new();
+    write_json(value, &mut out)?;
+    Ok(out)
+}
+
+fn write_json(value: &Value, out: &mut Vec<u8>) -> Result<(), String> {
+    match value {
+        Value::Null => out.push(0xf6),
+        Value::Bool(b) => out.push(if *b { 0xf5 } else { 0xf4 }),
+        Value::Number(n) => {
+            if let Some(u) = n.as_u64() {
+                head64(out, 0, u);
+            } else if let Some(i) = n.as_i64() {
+                head64(out, 1, (-1 - i) as u64);
+            } else {
+                return Err(format!("DAG-CBOR in atproto has no floats: {n}"));
+            }
+        }
+        Value::String(s) => {
+            head64(out, 3, s.len() as u64);
+            out.extend_from_slice(s.as_bytes());
+        }
+        Value::Array(items) => {
+            head64(out, 4, items.len() as u64);
+            for item in items {
+                write_json(item, out)?;
+            }
+        }
+        Value::Object(map) => {
+            if map.len() == 1 {
+                if let Some(Value::String(b64)) = map.get("$bytes") {
+                    let bytes = decode_b64(b64)?;
+                    head64(out, 2, bytes.len() as u64);
+                    out.extend_from_slice(&bytes);
+                    return Ok(());
+                }
+                if let Some(Value::String(link)) = map.get("$link") {
+                    let mut cid = vec![0x00];
+                    cid.extend(base32_lower_decode(
+                        link.strip_prefix('b')
+                            .ok_or_else(|| format!("not a base32 CID: {link}"))?,
+                    )?);
+                    out.extend([0xd8, 0x2a]);
+                    head64(out, 2, cid.len() as u64);
+                    out.extend_from_slice(&cid);
+                    return Ok(());
+                }
+            }
+            let mut keys: Vec<&String> = map.keys().collect();
+            keys.sort_by(|a, b| a.len().cmp(&b.len()).then_with(|| a.as_bytes().cmp(b.as_bytes())));
+            head64(out, 5, keys.len() as u64);
+            for key in keys {
+                head64(out, 3, key.len() as u64);
+                out.extend_from_slice(key.as_bytes());
+                write_json(&map[key], out)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn head64(out: &mut Vec<u8>, major: u8, n: u64) {
+    let major = major << 5;
+    if n < 24 {
+        out.push(major | n as u8);
+    } else if n < 0x100 {
+        out.extend([major | 24, n as u8]);
+    } else if n < 0x10000 {
+        out.push(major | 25);
+        out.extend((n as u16).to_be_bytes());
+    } else if n < 0x1_0000_0000 {
+        out.push(major | 26);
+        out.extend((n as u32).to_be_bytes());
+    } else {
+        out.push(major | 27);
+        out.extend(n.to_be_bytes());
+    }
+}
+
+/// Standard base64, padded or not, as atproto's `$bytes` may be.
+pub fn decode_b64(text: &str) -> Result<Vec<u8>, String> {
+    base64::engine::general_purpose::STANDARD_NO_PAD
+        .decode(text.trim_end_matches('='))
+        .map_err(|e| format!("not base64: {e}"))
+}
+
+/// Standard base64 without padding: how atproto writes `$bytes`.
+pub fn encode_b64(bytes: &[u8]) -> String {
+    base64::engine::general_purpose::STANDARD_NO_PAD.encode(bytes)
+}
+
+fn base32_lower_decode(text: &str) -> Result<Vec<u8>, String> {
+    const ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyz234567";
+    let mut out = Vec::new();
+    let mut buffer: u32 = 0;
+    let mut bits = 0;
+    for c in text.bytes() {
+        let digit =
+            ALPHABET.iter().position(|&a| a == c).ok_or_else(|| format!("not base32: {text}"))?;
+        buffer = (buffer << 5) | digit as u32;
+        bits += 5;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((buffer >> bits) as u8);
+        }
+    }
+    Ok(out)
+}
+
+/// The 36-byte CIDv1 (dag-cbor, sha2-256) of some DAG-CBOR.
+pub fn cid_bytes(dag_cbor: &[u8]) -> [u8; 36] {
+    let mut cid = [0u8; 36];
+    cid[..4].copy_from_slice(&[0x01, 0x71, 0x12, 0x20]);
+    cid[4..].copy_from_slice(&sha256(dag_cbor));
+    cid
+}
+
+/// A CID's string form: multibase base32, lowercase (`b…`).
+pub fn cid_string(cid: &[u8]) -> String {
+    format!("b{}", base32_lower(cid))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -397,5 +524,24 @@ mod tests {
             vec![0xa3, 0x61, b'a', 0x61, b'x', 0x62, b'a', b'b', 0x80, 0x62, b'b', b'b', 0xf6]
         );
         assert_eq!(base32_lower(b"foobar"), "mzxw6ytboi");
+        assert_eq!(base32_lower_decode("mzxw6ytboi").unwrap(), b"foobar");
+    }
+
+    #[test]
+    fn json_is_encoded_as_canonical_dag_cbor() {
+        let value = serde_json::json!({
+            "bb": null, "a": 1, "ab": [true, -2], "c": { "$bytes": "AQI" }, "zz": 300,
+        });
+        let map = [
+            vec![0xa5, 0x61, b'a', 0x01, 0x61, b'c', 0x42, 0x01, 0x02],
+            vec![0x62, b'a', b'b', 0x82, 0xf5, 0x21, 0x62, b'b', b'b', 0xf6],
+            vec![0x62, b'z', b'z', 0x19, 0x01, 0x2c],
+        ]
+        .concat();
+        assert_eq!(dag_cbor(&value).unwrap(), map);
+        assert!(dag_cbor(&serde_json::json!({ "f": 1.5 })).is_err());
+        let cid = cid_bytes(b"x");
+        assert_eq!(&cid[..4], &[0x01, 0x71, 0x12, 0x20]);
+        assert!(cid_string(&cid).starts_with("bafyrei"));
     }
 }

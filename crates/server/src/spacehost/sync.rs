@@ -408,7 +408,6 @@ fn recs_of(org: &str, read: &BTreeMap<(String, String), Repo>) -> Vec<Rec> {
                 rkey: rkey.clone(),
                 rev: version.rev.clone(),
                 us,
-                seen_us: None,
                 value,
             });
         }
@@ -425,8 +424,8 @@ pub struct Reindexed {
 
 /// Rebuilds an organization's index by crawling from its super admin: their
 /// repo in the admin space names the admins and the spaces; each admin's
-/// repo there, every repo in each space's writer set, and every repo read
-/// before, is read again from scratch.
+/// repo there (a former admin's too), every repo in each space's writer set,
+/// and every repo read before, is read again from scratch.
 ///
 /// Everything is read first, and the index is replaced in one transaction,
 /// so requests meanwhile see the old index, never a partial one. A repo that
@@ -476,6 +475,7 @@ pub async fn reindex(state: &AppState, org: &str) -> Result<Reindexed, String> {
         format!("couldn't read the super admin's repo, so nothing was changed: {why}")
     })?;
     let eventside = state.oauth.client_id_for("atproto");
+    let keys = super::attest::keys(&state.db, org).await?;
     let derive = |read: &BTreeMap<(String, String), Repo>| {
         index::derive(
             org,
@@ -484,6 +484,8 @@ pub async fn reindex(state: &AppState, org: &str) -> Result<Reindexed, String> {
             &recs_of(org, read),
             &state.secrets,
             &eventside,
+            &keys,
+            now_ms() as u64 * 1000,
         )
     };
     let mut done = BTreeSet::from([(admin_space.clone(), authority.super_admin.clone())]);
@@ -492,7 +494,8 @@ pub async fn reindex(state: &AppState, org: &str) -> Result<Reindexed, String> {
     for _ in 0..10 {
         let view = derive(&read);
         let mut todo = known.take().unwrap_or_default();
-        for admin in view.admins.keys() {
+        // Former admins too: their decisions still stand.
+        for admin in &view.named_admins {
             todo.push((admin_space.clone(), admin.clone()));
         }
         for space in view.spaces() {

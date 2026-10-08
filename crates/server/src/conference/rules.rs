@@ -1,11 +1,13 @@
 //! Which records in a conference space count: the one rule `listRecords`
 //! serves by, and later features (block actions, plans) judge ingest by.
 //!
-//! A record counts when its author was a member at its dated time, the
-//! conference's rules let them write its collection then, and, for role and
-//! rules records, when it's the conference's super admin's.
+//! A member's record counts when its author was a member at its dated time
+//! and the conference's rules let them write its collection then. Role and
+//! rules records are shown only from the conference's super admin; which
+//! of them count is the index's call, by their signatures.
 //!
-//! The dated time is the record's commit, but never more than
+//! The dated time of a member's record (not a permission record, which goes
+//! by its signature) is its commit, but never more than
 //! [`index::BACKDATE_SLACK_US`] before our host first saw it. That first-seen
 //! time is ours: another app judging by commit revisions alone agrees except
 //! for a record whose commit claims to be more than that much older than
@@ -42,11 +44,8 @@ pub fn record_counts(
     seen_us: Option<u64>,
 ) -> Option<u64> {
     let us = index::conference_us(rev_us, seen_us);
-    // Role and rules records count only from the conference's super admin,
-    // and only while they're an admin, as the index has it.
-    if matches!(collection, index::ROLE | index::RULES)
-        && (repo != conference.super_admin() || !org.is_admin(repo))
-    {
+    // Role and rules records are shown only from the conference's super admin.
+    if matches!(collection, index::ROLE | index::RULES) && repo != conference.super_admin() {
         return None;
     }
     may_write(org, conference, repo, collection, us).then_some(us)

@@ -29,6 +29,7 @@ use crate::auth::session::{self, Lookup};
 use crate::auth::{CurrentUser, xrpc_error};
 use crate::crypto::{tid_micros, tid_now};
 use crate::db::now_ms;
+use crate::spacehost::attest::{self, Check, Claim, Journal, Signer};
 use crate::spacehost::index::{self, AppAccess, Conference, JOIN, LEAVE, Org, Via};
 use crate::spacehost::{CONFERENCE_TYPE, ClientIp, SpaceUri, notify, sync};
 
@@ -421,8 +422,9 @@ fn answer(status: &str) -> Value {
 /// already in; a pre-assigned role or the attendee list (by DID) admits; a
 /// code admits, or is refused as invalid; an open conference admits; a list
 /// with emails asks for the email step; requests wait; anything else is
-/// refused. Admissions and requests are the person's own record in the
-/// intake space; nothing is written when they're refused.
+/// refused. Admissions and requests are the person's own join record in the
+/// intake space, which our host checks again and signs as it's written;
+/// nothing is written when they're refused.
 pub async fn join(
     State(state): State<AppState>,
     ClientIp(ip): ClientIp,
@@ -481,59 +483,133 @@ pub async fn join(
     if conference.banned.contains(did) {
         return Json(answer("refused")).into_response();
     }
-    let now = tid_micros(&tid_now()).unwrap_or_default();
-    let settings = &conference.settings;
     if conference.is_member(did) {
         return joined(&org, conference);
     }
     // Named by its address, an invite-only conference that wouldn't let this
     // person in answers as if it didn't exist, as its page does.
     let hidden = row.invite_only != 0 && input.conference.is_some();
-    let admission = match conference.would_admit(did, code_hash.as_deref(), now) {
+    let now = now_ms() as u64 * 1000;
+    let none = BTreeSet::new();
+    let admission = match conference.admits(did, code_hash.as_deref(), now, &none) {
         Some(Via::Code) => Some(Via::Code),
         // A code that doesn't admit is refused, whatever else is on, unless
         // the person is let in by their role or the list anyway.
         _ if code.is_some()
-            && !matches!(conference.would_admit(did, None, now), Some(Via::Role | Via::List)) =>
+            && !matches!(conference.admits(did, None, now, &none), Some(Via::Role | Via::List)) =>
         {
             return if hidden { not_found() } else { invalid_code() };
         }
         other => other,
     };
-    let write = match admission {
-        Some(_) => true,
-        None => {
-            if hidden {
-                return not_found();
-            }
-            if settings.has("list") && conference.has_email_rows() && !input.request {
-                let mut out = answer("emailNeeded");
-                out["canRequest"] = json!(settings.has("request"));
-                out["conference"] = json!(row.space);
-                out["verifyUrl"] = json!(format!(
-                    "/oauth/email?{}",
-                    url::form_urlencoded::Serializer::new(String::new())
-                        .append_pair("conference", &row.space)
-                        .finish()
-                ));
-                return Json(out).into_response();
-            }
-            settings.has("request")
+    if admission.is_none() {
+        if hidden {
+            return not_found();
         }
-    };
-    if !write {
-        return Json(answer("refused")).into_response();
+        let settings = &conference.settings;
+        if settings.has("list") && conference.has_email_rows() && !input.request {
+            let mut out = answer("emailNeeded");
+            out["canRequest"] = json!(settings.has("request"));
+            out["conference"] = json!(row.space);
+            out["verifyUrl"] = json!(format!(
+                "/oauth/email?{}",
+                url::form_urlencoded::Serializer::new(String::new())
+                    .append_pair("conference", &row.space)
+                    .finish()
+            ));
+            return Json(out).into_response();
+        }
+        if !settings.has("request") {
+            return Json(answer("refused")).into_response();
+        }
     }
-    let mut record = json!({});
-    if admission == Some(Via::Code)
+    let mut record = json!({ "via": admission.map_or("request", Via::as_str) });
+    let used = code_hash.clone().filter(|_| admission == Some(Via::Code));
+    if used.is_some()
         && let Some(code) = code
     {
         record["code"] = json!(code);
     }
-    if let Err(res) = write_intake(&state, &user, &row.intake, JOIN, record).await {
-        return res;
+    // Checked again as it's signed: a code may have been used up meanwhile.
+    let space = row.space.clone();
+    let user_did = user.did.clone();
+    let used_hash = used.clone();
+    let check: Check = Box::new(move |org: &Org, journal: &Journal| {
+        let conference = org.conference(&space).ok_or(REFUSED)?;
+        let now = now_ms() as u64 * 1000;
+        if conference.banned.contains(&user_did) {
+            return Err(REFUSED.into());
+        }
+        let still = match (admission, &used_hash) {
+            (Some(Via::Code), Some(hash)) => {
+                if !conference.settings.has("code")
+                    || !conference.code_admits(hash, &user_did, now, &journal.code_users)
+                {
+                    return Err(CODE_INVALID.into());
+                }
+                true
+            }
+            (Some(_), _) => conference.admits(&user_did, None, now, &BTreeSet::new()).is_some(),
+            (None, _) => conference.settings.has("request"),
+        };
+        if still { Ok(()) } else { Err(REFUSED.into()) }
+    });
+    let claim = Claim { code_hash: used, ..Claim::about(&row.space, did) };
+    let client = match user.pds_client(&state).await {
+        Ok(client) => client,
+        Err(e) => return pds_unreachable(e),
+    };
+    match write_intake(&state, &client, did, &row.intake, JOIN, record, &claim, check).await {
+        Ok(()) => reload_answer(&state, &row, did).await,
+        Err(Refusal::Check(why)) if why == CODE_INVALID => {
+            if hidden {
+                not_found()
+            } else {
+                invalid_code()
+            }
+        }
+        Err(Refusal::Check(why)) if why == REFUSED => {
+            if hidden {
+                not_found()
+            } else {
+                Json(answer("refused")).into_response()
+            }
+        }
+        Err(refusal) => refusal.into_response(),
     }
-    reload_answer(&state, &row, did).await
+}
+
+/// A join or leave the signing check refused: the person can't (now).
+const REFUSED: &str = "refused";
+/// A join whose code the signing check found invalid (used up meanwhile).
+const CODE_INVALID: &str = "invalid code";
+
+/// Why a join or leave record wasn't written.
+enum Refusal {
+    /// The check refused it, or another signing about them is under way.
+    Check(String),
+    /// Writing it failed.
+    Failed(Response),
+}
+
+impl Refusal {
+    fn into_response(self) -> Response {
+        match self {
+            Self::Check(why) if why.starts_with("another decision") => {
+                xrpc_error(StatusCode::CONFLICT, "TryAgain", &why)
+            }
+            Self::Check(why) => failed(why),
+            Self::Failed(res) => res,
+        }
+    }
+}
+
+fn pds_unreachable(e: crate::auth::pds::PdsError) -> Response {
+    xrpc_error(
+        StatusCode::BAD_GATEWAY,
+        "UpstreamFailure",
+        &format!("Your PDS couldn't be reached: {e:?}"),
+    )
 }
 
 /// The answer after a join was written: what the index now makes of it.
@@ -559,50 +635,63 @@ async fn reload_answer(state: &AppState, row: &Row, did: &str) -> Response {
     Json(out).into_response()
 }
 
-/// Writes the person's own join or leave record into the intake space, and
-/// reads it into the index.
+/// Writes a person's own join or leave record into the intake space, through
+/// their session: checked by `check` and signed (`role: "self"`) first, and
+/// read into the index once written.
+#[allow(clippy::too_many_arguments)]
 async fn write_intake(
     state: &AppState,
-    user: &CurrentUser,
+    client: &crate::auth::pds::PdsClient,
+    did: &str,
     intake: &str,
     collection: &str,
     mut value: Value,
-) -> Result<(), Response> {
-    let client = user.pds_client(state).await.map_err(|e| {
-        xrpc_error(
-            StatusCode::BAD_GATEWAY,
-            "UpstreamFailure",
-            &format!("Your PDS couldn't be reached: {e:?}"),
-        )
-    })?;
+    claim: &Claim,
+    check: Check<'_>,
+) -> Result<(), Refusal> {
+    let authority = SpaceUri::parse(intake).map(|s| s.authority).unwrap_or_default();
     value["$type"] = json!(collection);
     value["createdAt"] = json!(index::iso(now_ms() as u64 * 1000));
+    let ticket = attest::reserve(state, &authority, Signer::Person(did), claim, Some(check))
+        .await
+        .map_err(Refusal::Check)?;
+    if let Err(why) = ticket.sign(&mut value, intake, did) {
+        attest::finish(state, &ticket, false).await;
+        return Err(Refusal::Failed(failed(why)));
+    }
     let body = json!({
         "space": intake,
-        "repo": user.did,
+        "repo": did,
         "collection": collection,
         "rkey": tid_now(),
         "record": value,
     });
-    let res = client
+    let written = match client
         .send(Method::POST, "/xrpc/com.atproto.space.createRecord", Some(&body))
         .await
-        .map_err(|e| xrpc_error(StatusCode::BAD_GATEWAY, "UpstreamFailure", &format!("{e:?}")))?;
-    if !res.status().is_success() {
-        let status = res.status();
-        let text = res.text().await.unwrap_or_default();
-        eprintln!(
-            "conference: {}'s PDS refused their {collection} record ({status}): {text}",
-            user.did
-        );
-        return Err(xrpc_error(
-            StatusCode::BAD_GATEWAY,
-            "UpstreamFailure",
-            "Your PDS didn't take the record.",
-        ));
+    {
+        Ok(res) if res.status().is_success() => Ok(()),
+        Ok(res) => {
+            let status = res.status();
+            let text = res.text().await.unwrap_or_default();
+            eprintln!(
+                "conference: {did}'s PDS refused their {collection} record ({status}): {text}"
+            );
+            Err(xrpc_error(
+                StatusCode::BAD_GATEWAY,
+                "UpstreamFailure",
+                "Your PDS didn't take the record.",
+            ))
+        }
+        Err(e) => Err(xrpc_error(StatusCode::BAD_GATEWAY, "UpstreamFailure", &format!("{e:?}"))),
+    };
+    if written.is_ok()
+        && let Err(why) = sync::sync_repo(state, intake, did).await
+    {
+        eprintln!("conference: couldn't read {did}'s {collection} back yet: {why}");
     }
-    sync::sync_repo(state, intake, &user.did).await.map_err(failed)?;
-    Ok(())
+    attest::finish(state, &ticket, written.is_ok()).await;
+    written.map_err(Refusal::Failed)
 }
 
 /// The conference a code belongs to: only the organizations with a code
@@ -642,59 +731,8 @@ pub async fn code_conference(state: &AppState, code_hash: &str) -> Result<Option
     Ok(None)
 }
 
-/// The role a list row gives, for someone it matched only at join time (a
-/// verified email): a role record like an import's, written as the
-/// conference's super admin and assigned by the owner who imported the row,
-/// so it counts only while they're an owner and the list is on.
-async fn give_list_role(
-    state: &AppState,
-    conference: &Conference,
-    did: &str,
-    entry: &index::ListEntry,
-) -> Result<(), String> {
-    let Some(role) = &entry.role else { return Ok(()) };
-    if conference.roles.contains_key(did) {
-        return Ok(());
-    }
-    let value = json!({ "subject": did, "role": role, "assignedBy": entry.by, "via": "list",
-                        "since": index::iso(now_ms() as u64 * 1000) });
-    let writer = conference.super_admin();
-    let handle = match state.resolver.resolve_did(writer).await {
-        Ok(identity) => identity.handle,
-        Err(_) => writer.to_owned(),
-    };
-    let acting = admin::Acting::new(state, writer, &handle).await?;
-    acting.put_in(state, conference.space(), index::ROLE, did, value).await
-}
-
-/// Admits someone with a `member` record written as the super admin: for the
-/// one admission that can't be derived from records, a verified email.
-async fn admit_by_super_admin(
-    state: &AppState,
-    org: &Org,
-    space: &str,
-    did: &str,
-    via: &str,
-) -> Result<(), String> {
-    let handle = match state.resolver.resolve_did(&org.super_admin).await {
-        Ok(identity) => identity.handle,
-        Err(_) => org.super_admin.clone(),
-    };
-    let acting = admin::Acting::new(state, &org.super_admin, &handle).await?;
-    acting
-        .create_in(
-            state,
-            &SpaceUri::admin(&org.did).to_string(),
-            index::MEMBER,
-            None,
-            json!({ "space": space, "subject": did, "via": via, "since": index::iso(now_ms() as u64 * 1000) }),
-        )
-        .await?;
-    Ok(())
-}
-
-/// `app.eventside.conference.leave`: the person's own leave record. Their
-/// credentials for the space are revoked.
+/// `app.eventside.conference.leave`: the person's own signed leave record.
+/// Their credentials for the space are revoked.
 pub async fn leave(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -732,8 +770,28 @@ pub async fn leave(
             "Admins are members of every conference of theirs. To leave, stop being an admin.",
         );
     }
-    if let Err(res) = write_intake(&state, &user, &row.intake, LEAVE, json!({})).await {
-        return res;
+    let client = match user.pds_client(&state).await {
+        Ok(client) => client,
+        Err(e) => return pds_unreachable(e),
+    };
+    let (space, did) = (row.space.clone(), user.did.clone());
+    let check: Check = Box::new(move |org: &Org, _: &Journal| {
+        let member = org.conference(&space).is_some_and(|c| c.is_member(&did));
+        if member && !org.is_admin(&did) { Ok(()) } else { Err(REFUSED.into()) }
+    });
+    let claim = Claim::about(&row.space, &user.did);
+    match write_intake(&state, &client, &user.did, &row.intake, LEAVE, json!({}), &claim, check)
+        .await
+    {
+        Ok(()) => {}
+        Err(Refusal::Check(why)) if why == REFUSED => {
+            return xrpc_error(
+                StatusCode::BAD_REQUEST,
+                "NotAMember",
+                "You aren't a member of this conference.",
+            );
+        }
+        Err(refusal) => return refusal.into_response(),
     }
     let background = state.clone();
     let (space, did) = (row.space.clone(), user.did.clone());
@@ -747,7 +805,8 @@ pub async fn leave(
 
 /// The email step's end: the person's PDS says their verified email, which
 /// is matched (as an HMAC) against the conference's list. A match admits
-/// them, as a `member` record from the super admin. The email isn't kept.
+/// them with their own signed join, `via: "email"`, carrying the role its
+/// row gives. The email isn't kept, and no admin's PDS is involved.
 pub async fn email_step(state: &AppState, id_hash: &str, space: &str) {
     if let Err(why) = try_email_step(state, id_hash, space).await {
         eprintln!("email step: {why}");
@@ -784,11 +843,28 @@ async fn try_email_step(state: &AppState, id_hash: &str, space: &str) -> Result<
     if !conference.settings.has("list") || matched.is_empty() {
         return Ok(());
     }
-    // The role its row gives, before the admission, so they join with it.
-    if let Some(entry) = matched.iter().find(|e| e.role.is_some()) {
-        give_list_role(state, conference, &session.did, entry).await?;
+    let mut record = json!({ "via": Via::Email.as_str() });
+    if let Some(role) = matched.iter().find_map(|e| e.role.as_deref()) {
+        record["role"] = json!(role);
     }
-    admit_by_super_admin(state, &org, space, &session.did, "email").await
+    let (conference_space, did) = (space.to_owned(), session.did.clone());
+    let check: Check = Box::new(move |org: &Org, _: &Journal| {
+        let Some(conference) = org.conference(&conference_space) else {
+            return Err(REFUSED.into());
+        };
+        let listed = conference.list.iter().any(|e| e.email_hmac.as_deref() == Some(&hmac));
+        if conference.banned.contains(&did) || !conference.settings.has("list") || !listed {
+            return Err(REFUSED.into());
+        }
+        Ok(())
+    });
+    let claim = Claim::about(space, &session.did);
+    write_intake(state, &client, &session.did, &row.intake, JOIN, record, &claim, check)
+        .await
+        .map_err(|refusal| match refusal {
+            Refusal::Check(why) => why,
+            Refusal::Failed(res) => format!("the join wasn't written ({})", res.status()),
+        })
 }
 
 /// Who may read each of an organization's spaces now, and with which apps,

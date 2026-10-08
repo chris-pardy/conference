@@ -952,11 +952,19 @@ for now"). The sketch, for when it comes back:
   - `api.rs`: our host API (membership, admins, policies, for credential
     holders)
   - `index.rs`: the crawler and indexer. It follows the admin space from the
-    super admin, applies the precedence rules, and keeps the index up to date
-    from `notifyWrite` (our own admin space included). `reindex` rebuilds it
-    from scratch.
-  - `authority.rs`: minting the `did:plc` (genesis operation), adopting a
-    DID, key custody, DID-document checks
+    super admin (former admins' repos too), counts only records whose
+    signature verifies, replays each person's signed entries in `seq` order
+    (round 5), and keeps the index up to date from `notifyWrite` (our own
+    admin space included). `reindex` rebuilds it from scratch.
+  - `attest.rs` (round 5): the badge.blue inline attestations (signing,
+    verifying, re-signing with a new key), and check-then-sign: the
+    signing journal's `BEGIN IMMEDIATE` transaction that checks an action
+    against the index, takes the authority's next `seq` and logs a pending
+    entry, then commits or voids it once the record is written.
+  - `authority.rs`: minting the `did:plc` (genesis operation, with
+    `#eventside_attest`), adding and removing attestation keys with PLC
+    operations signed by our rotation key, adopting a DID, key custody,
+    DID-document checks
 - **`crates/server/src/conference/`** (new): the conference model, join
   (unchanged), membership and roles on top of the host, rules, and the admin
   CLI.
@@ -978,17 +986,31 @@ for now"). The sketch, for when it comes back:
 | Item | Where |
 |---|---|
 | Each authority's DID, its encrypted rotation and signing keys, and its super admin's DID | host DB |
+| Each authority's attestation keys (`attest_keys`): fragment, public key, the private key encrypted at rest; a removed key keeps its row, without its private half, so its fragment isn't reused | host DB |
 | The HMAC key for emails, and the server's encryption key | server config |
 
 **Records, the source of truth:**
 
 | Item | Where | Written by | Read by |
 |---|---|---|---|
-| Authority DID document (`#atproto_space_host`, `#atproto_space` key) | PLC, or the organization's `did.json` | our server (minted) or the organization (adopted) | everyone |
-| `app.eventside.admin.admin`, `.space`, `.member`, `.ban`, `.deny`, `.code`, `.listEntry` | admins' repos in the organization's admin space | the super admin and admins (our server, under their sessions) | admins' apps; our host (crawled) |
-| `app.eventside.intake.join {code?}`, `.leave` | each person's own repo in the conference's intake space | the person (through eventside) | our host and the admins |
-| `community.lexicon.calendar.event` + `app.eventside.conference` sidecar (space, visibility, join flags, app access mode, super admin, theme) | the super admin's public repo (public) or inside the conference space (invite-only) | our server as the super admin | anyone, or members |
-| `app.eventside.conference.role {subject, role}`, `app.eventside.conference.rules` | the super admin's repo inside the conference space | our server as the super admin | members' apps, trusted only from the super admin |
+| Authority DID document (`#atproto_space_host`, `#atproto_space` key, `#eventside_attest` and `#eventside_attest_2`… keys) | PLC, or the organization's `did.json` | our server (minted) or the organization (adopted) | everyone |
+| `app.eventside.admin.admin {subject, role: owner \| staff \| none, since}`, `.space`, `.member`, `.ban`, `.deny`, `.code`, `.codeRevoke {space, codeHash}`, `.listEntry`, each with `signatures` | admins' repos in the organization's admin space | the super admin and admins (our server, under their sessions, checked and signed) | admins' apps; our host (crawled) |
+| `app.eventside.intake.join {code?, via, role?, signatures}` (`via`: `code`, `list`, `role`, `email`, `open` or `request`), `.leave {signatures}` | each person's own repo in the conference's intake space | the person (through eventside, checked and signed with `role: "self"`) | our host and the admins |
+| `community.lexicon.calendar.event` + `app.eventside.conference` sidecar (space, visibility, join flags, app access mode, super admin, theme, `signatures`) | the super admin's public repo (public) or inside the conference space (invite-only) | our server as the super admin | anyone, or members |
+| `app.eventside.conference.role {subject, role, since?, assignedBy?, via?, signatures}`, `app.eventside.conference.rules {rules, signatures}` | the conference super admin's repo inside the conference space | our server as the conference super admin, signed for the deciding admin | members' apps, trusted only when signed, from the conference super admin's repo |
+
+**The `signatures` field** (round 5): an array of badge.blue inline
+attestations, `{$type: "app.eventside.attest.signature", key:
+"did:plc:…#eventside_attest…", space, seq, role, signedAt, signature:
+{$bytes}}`. What's signed is the record without `signatures`, plus `$sig`
+(the entry without `signature`, plus `repository`), as canonical DAG-CBOR,
+by its CIDv1 (dag-cbor, sha2-256): low-S P-256 over the 36 CID bytes. A
+record counts if any entry verifies against a key the DID document lists
+now, for the repo it's read from and the space it's in, with `signedAt` no
+more than five minutes ahead. Each `seq` counts once: within a repo and
+space, the latest-written record claiming a `seq` is that decision's version
+that stands. No lexicon JSON is published for the admin records yet, so
+none is added for `app.eventside.attest.signature`.
 
 **The index and operational state** (rebuildable or disposable):
 
@@ -998,6 +1020,7 @@ for now"). The sketch, for when it comes back:
 | `writers` (`repoRev`, `hash`, `spaceRev`), the space-wide `spaceRev` sequence | host DB | `notifyWrite` intake; `listRepos` |
 | rate-limit counters, delegation and attestation replay caches, `credentials_issued` | host DB | credential checks; revocation |
 | `sessions.kind`, `oauth_requests.purpose` | sign-in tables | sign-in, renewer |
+| the signing journal: `signing_counters` (each authority's next `seq` and last `signedAt`) and `signing_journal` (each signing's entry: `pending`, then `committed` or `void`, with the conference, person and code it's about) | host DB | check-then-sign. A pending entry blocks another decision about the same person for up to two minutes; a code's pending and committed uses count against its limits. Lost, the counter restarts above the highest `seq` in the records |
 
 #### Interfaces
 
@@ -1007,6 +1030,14 @@ for now"). The sketch, for when it comes back:
 - **The admin space's lexicons** (`app.eventside.admin.*`), published, so
   any app an organization allows into its admin space can read its
   permissions directly.
+- **Signatures** (round 5): the `signatures` field above, verifiable by any
+  app against the authority's DID document (`#eventside_attest*`
+  verification methods), with the badge.blue procedure.
+- **Admin CLI additions** (round 5): `org admin undo <handle> --org <did>
+  (--admissions | --codes) [--conference <space>]`, and `org keys add
+  --org <did>` (prints the new key's ID), `org keys resign --org <did>`
+  and `org keys remove <fragment> --org <did>`. `--keep-admissions` and the
+  "who a role change affected" reports are gone.
 - **Our host API** (credential-authenticated, `app.eventside.space.*`):
   `getSpace` (policies, app access, the authority's admins with periods)
   and `listMembers` (members with `read`, `write` and their periods). These
@@ -3501,3 +3532,69 @@ roles on, or they stop counting (review round 15)" contradict round 5. The
 implementation deletes or rewrites them.
 
 Then implementation, with review rounds 16 and 17.
+
+### Implementation of design round 5
+
+Signed decisions are built as the round 5 design and its refinements say.
+Choices the design left open, and what changed in the tests:
+
+- **Signing** is implemented in `spacehost/attest.rs` (DAG-CBOR in
+  `crypto.rs`) rather than with the `atproto-attestation` crate: the crate
+  brings its own atproto stack for what is a small encoder and one
+  signature, and this one is checked against `tests/support/attestation.ts`
+  by TC-61. A unit test checks the encoder makes the bytes the authority's
+  `did:plc` was made from.
+- **Readers verify against our copy of the DID document's keys**
+  (`attest_keys`), which we write with every PLC operation that changes
+  them, so a key's removal reaches the index (and its cache) at once.
+- **A code's pending uses count against its limits** instead of blocking:
+  in a registration rush, blocking every join on a shared code behind
+  another's pending one would refuse people for no reason. A pending
+  decision about the same person still blocks.
+- **Within a repo and space, the latest-written record claiming a `seq` is
+  the version that stands**, and counts only if it verifies. TC-63's
+  frozen test needs this as written: vivarium's space `listRecords`
+  returns `rkey`, not `uri`, so `dirkBefore.uri` is `undefined`, and the
+  test puts Dirk's old-key admission back as a copy at rkey `undefined`
+  beside the re-signed original rather than over it. Under this rule the
+  copy is the decision's latest version, so it no longer counts, which is
+  what the test expects. **Flagged for the user**: the test's intent
+  (replace the record) and what it does (add a copy) differ; both pass.
+- **Roles and rules** count only when signed *and* in the conference super
+  admin's repo, so a role deleted after a handover can't be revived by a
+  stale signed copy left in the previous super admin's repo.
+- **`via: "role"`** joins: someone with a pre-assigned role (TC-31) joins
+  with `via: "role"`, beside the design's `code`, `list`, `email`, `open`
+  and `request`.
+- **Ranks at signing**: a decision agreeing with the standing one keeps the
+  higher rank; a person's own join (not a request) stands over an earlier
+  removal or denial; a leave ends every ground but an admin's.
+- **Migration**: the round 5 tables are `0003_signed_decisions.sql`, so a
+  database made with the branch's earlier 0002 still migrates.
+
+Tests: the frozen tests are unchanged (the TC-52 and TC-53 amendments are
+the approved ones), and `acdcbc5` is unchanged. Non-frozen review tests
+that encoded removed behavior were rewritten:
+
+- "TC-53: a role a former admin gave stops admitting (review round 1)"
+  becomes "…keeps admitting (review round 1, rewritten for design round
+  5)".
+- "TC-32: demoting an owner hands their list roles on, or they stop
+  counting (review round 15)" becomes "demoting an owner leaves the list
+  roles they gave standing (…rewritten for design round 5)".
+- "TC-32: removing the owner whose list last gave a role hands it to
+  another owner… (review round 14)" is left as it is: the hand-over is
+  gone, but its assertion still holds, because the role stands.
+
+`conference-review.test.ts` is also in `acdcbc5` (which took out the round
+13 and 14 TC-28 regressions), so `scripts/check-tests-unchanged.sh acdcbc5`
+reports it. Its only changes are the two rewrites above, which the user's
+approval of the round 5 red tests records ("The implementation deletes or
+rewrites them"). The round 5 tests themselves (`conference-signed.test.ts`,
+`conference-admins-keep.test.ts`, `tests/support/attestation.ts`) are
+unchanged.
+- The Rust unit tests of the old precedence (role periods, first-seen
+  clamping, kept admissions, overridden bans) are replaced by tests of
+  signed records: unsigned records, grounds and ranks, a demoted author's
+  ban, unsigned joins as requests, copies and versions of a `seq`, code
+  limits by distinct DIDs, and signature checks.

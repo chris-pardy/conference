@@ -70,7 +70,9 @@ test('TC-51: staff can’t give the owner role (review round 1)', async ({ viv }
   expect((await asBram.join({ conference: conference.space })).body.status).not.toBe('joined')
 })
 
-test('TC-53: a role a former admin gave stops admitting (review round 1)', async ({ viv }) => {
+test('TC-53: a role a former admin gave keeps admitting (review round 1, rewritten for design round 5)', async ({
+  viv,
+}) => {
   const { org, conference, admins } = await seedConference(dep, accountsIn(viv), { staff: ['pim'], methods: ['code'] })
   const bram = await viv.createAccount(viv.handle('bram'))
   const given = await setRole(dep, conference, bram, 'speaker', { as: admins.pim })
@@ -80,11 +82,9 @@ test('TC-53: a role a former admin gave stops admitting (review round 1)', async
 
   await cliOk(dep, ['org', 'admin', 'remove', admins.pim.handle, '--org', org.did])
 
-  await eventually(
-    () => asBram.isMember(conference.space),
-    (member) => !member,
-    'Bram stops being a member',
-  )
+  // A decision keeps standing after its author stops being an admin.
+  const page = await asBram.getConference(conference.space)
+  expect(page.body.viewer).toEqual(expect.objectContaining({ member: true, role: 'speaker' }))
 })
 
 test('TC-36: taking an app off a space’s list revokes its access (review round 1)', async ({ viv }) => {
@@ -888,27 +888,29 @@ test('TC-32: removing the owner whose list last gave a role hands it to another 
 
 // Regressions from adversarial review round 15.
 
-test('TC-32: demoting an owner hands their list roles on, or they stop counting (review round 15)', async ({ viv }) => {
+test('TC-32: demoting an owner leaves the list roles they gave standing (review round 15, rewritten for design round 5)', async ({
+  viv,
+}) => {
   const { org, conference } = await seedConference(dep, accountsIn(viv), { methods: ['list'] })
   const kees = await viv.createAccount(viv.handle('kees'))
-  const sem = await viv.createAccount(viv.handle('sem'))
   await addAdmin(dep, org, kees, 'owner')
-  await addAdmin(dep, org, sem, 'owner')
-  const zoe = await viv.createAccount(viv.handle('zoe'))
   const joost = await viv.createAccount(viv.handle('joost'))
-  const importAs = (as: string, rows: string[]) =>
-    cliOk(dep, ['list', 'import', listFile(rows), '--conference', conference.space, '--as', as])
-  await importAs(sem.handle, [`${zoe.handle},,staff`])
-  await importAs(kees.handle, [`${zoe.handle},,staff`, `${joost.handle},,speaker`])
+  await cliOk(dep, [
+    'list',
+    'import',
+    listFile([`${joost.handle},,speaker`]),
+    '--conference',
+    conference.space,
+    '--as',
+    kees.handle,
+  ])
 
-  const demoted = await cliOk(dep, ['org', 'admin', 'add', kees.handle, '--org', org.did, '--role', 'staff'])
-  const asZoe = await Attendee.signIn(dep, zoe)
-  expect((await asZoe.join({ conference: conference.space })).body.status).toBe('joined')
-  expect((await asZoe.getConference(conference.space)).body.viewer?.role, 'by Sem’s list').toBe('staff')
-  // Joost was on Kees's list only: its speaker role doesn't let him in now.
-  expect(demoted.stdout).not.toContain(zoe.handle)
+  await cliOk(dep, ['org', 'admin', 'add', kees.handle, '--org', org.did, '--role', 'staff'])
+
+  // Checked when it was given, and valid since: Kees's list still lets Joost in, as a speaker.
   const answer = await (await Attendee.signIn(dep, joost)).join({ conference: conference.space })
-  expect(answer.body.status).not.toBe('joined')
+  expect(answer.body.status).toBe('joined')
+  expect(answer.body.role).toBe('speaker')
 })
 
 /** An attendee list file with the given `handle,email,role` rows. */

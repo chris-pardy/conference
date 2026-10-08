@@ -2,9 +2,11 @@
 //! organization's space authority (a DID whose document names us as its
 //! `#atproto_space_host`), the credentials apps trade delegation tokens for,
 //! write notifications from members' PDSes, the writer set, revocation, and
-//! the index of the records every permission is built from.
+//! the index of the records every permission is built from, which our host
+//! signs ([`attest`]).
 
 pub mod api;
+pub mod attest;
 pub mod authority;
 pub mod credential;
 pub mod index;

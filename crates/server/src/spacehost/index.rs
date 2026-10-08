@@ -6,28 +6,27 @@
 //! when, who's banned, which requests are waiting) is derived from them here,
 //! the same way any app that can read those spaces could.
 //!
-//! The precedence rules:
+//! Signed decisions (design review round 5): a permission record counts only
+//! if our host's signature on it verifies against a key the authority's DID
+//! document lists now ([`attest`]). Each decision was checked when it was
+//! signed, so readers apply no precedence of their own: they replay each
+//! person's signed entries in `seq` order.
 //! - The organization is crawled from its super admin. Only the super
-//!   admin's `admin` records name admins, and only their `space` records set
-//!   a space's policies, app access and join methods.
-//! - A record counts only while its author is an admin, and only within
-//!   their role: staff can admit, remove and deny; owners can also ban and
-//!   issue codes and lists.
-//! - Decisions about someone's membership rank by who made them: the super
-//!   admin, then owners, then staff. A decision stands against later ones
-//!   from lower ranks that contradict it, until someone of its rank or higher
-//!   decides again, or the person acts themselves. Within a rank, the latest
-//!   decision stands. A ban beats any admission but the super admin's.
-//! - Joining and leaving are the person's own records in the intake space.
-//!   A join counts as an admission if a rule in force at its commit admits
-//!   it (a pre-assigned role, the attendee list, a valid code, an open
-//!   conference); otherwise it's a request, if requests were on.
+//!   admin's signed `admin` records name admins (`role: "none"` for a
+//!   former one), and only their signed `space` records set a space's
+//!   policies, app access and join methods.
+//! - Each person in a conference has grounds for membership: an admin's
+//!   admission, their own signed join, or being an admin of the
+//!   organization. A removal or ban ends every ground at or below its rank;
+//!   their own leave ends all of them. They're a member while any remains.
+//! - An unsigned join is a request at most; an unsigned leave doesn't count.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use serde_json::{Value, json};
 
+use super::attest::{self, Keys, Rank, Sig};
 use super::authority::Secrets;
 use super::{ADMIN_TYPE, CONFERENCE_TYPE, INTAKE_TYPE, SpaceUri};
 use crate::AppState;
@@ -39,6 +38,7 @@ pub const MEMBER: &str = "app.eventside.admin.member";
 pub const BAN: &str = "app.eventside.admin.ban";
 pub const DENY: &str = "app.eventside.admin.deny";
 pub const CODE: &str = "app.eventside.admin.code";
+pub const CODE_REVOKE: &str = "app.eventside.admin.codeRevoke";
 pub const LIST_ENTRY: &str = "app.eventside.admin.listEntry";
 pub const JOIN: &str = "app.eventside.intake.join";
 pub const LEAVE: &str = "app.eventside.intake.leave";
@@ -51,10 +51,8 @@ pub const RULES: &str = "app.eventside.conference.rules";
 /// someone's attendance.
 pub const VIA_ADMIN: &str = "orgAdmin";
 pub const VIA_ADMIN_REMOVED: &str = "orgAdminRemoved";
-/// A `member` record's `via` when the super admin kept someone a departing
-/// admin had let in (`org admin remove --keep-admissions`). Its `since` is
-/// when the membership it keeps began.
-pub const VIA_KEPT: &str = "kept";
+/// A `member` record's `via` for a removal.
+pub const VIA_REMOVED: &str = "removed";
 
 /// A record from the index.
 #[derive(Debug, Clone)]
@@ -66,8 +64,6 @@ pub struct Rec {
     pub rev: String,
     /// When its commit was made, in microseconds (from `rev`).
     pub us: u64,
-    /// When our host first saw this version of it, in microseconds.
-    pub seen_us: Option<u64>,
     pub value: Value,
 }
 
@@ -75,24 +71,18 @@ impl Rec {
     fn str(&self, field: &str) -> Option<&str> {
         self.value.get(field).and_then(Value::as_str)
     }
-
-    /// When a record in an intake space counts from: its commit, but never
-    /// before our host first saw it. Anyone can write there, from any PDS,
-    /// and a PDS chooses its own revisions, so a backdated join can't jump
-    /// ahead of others, or back to before a code expired.
-    fn intake_us(&self) -> u64 {
-        self.seen_us.map_or(self.us, |seen| self.us.max(seen))
-    }
 }
 
 /// How far before our host first saw a record in a conference space its
 /// commit may be dated: enough for a write notification's ordinary delay.
+/// Members' own records (plans, chat) only: permission records go by their
+/// signatures.
 pub const BACKDATE_SLACK_US: u64 = 60_000_000;
 
-/// When a record in a conference space counts from: its commit, but never
-/// more than [`BACKDATE_SLACK_US`] before our host first saw it. A writer's
-/// PDS chooses its own revisions, so without this someone removed could date
-/// a record back into a period when they were a member.
+/// When a member's record in a conference space counts from: its commit, but
+/// never more than [`BACKDATE_SLACK_US`] before our host first saw it. A
+/// writer's PDS chooses its own revisions, so without this someone removed
+/// could date a record back into a period when they were a member.
 pub fn conference_us(us: u64, seen_us: Option<u64>) -> u64 {
     seen_us.map_or(us, |seen| us.max(seen.saturating_sub(BACKDATE_SLACK_US)))
 }
@@ -173,11 +163,12 @@ pub struct Settings {
     pub event: Option<String>,
     pub super_admin: Option<String>,
     pub invite_only: bool,
+    /// When it was signed; 0 for the defaults.
     pub us: u64,
 }
 
 impl Settings {
-    fn from_record(rec: &Rec) -> Option<Self> {
+    fn from_record(rec: &Rec, us: u64) -> Option<Self> {
         let space = rec.str("space")?.to_owned();
         let parsed = SpaceUri::parse(&space)?;
         let allowed: Vec<String> = rec
@@ -207,7 +198,7 @@ impl Settings {
             event: rec.str("event").map(str::to_owned),
             super_admin: rec.str("superAdmin").map(str::to_owned),
             invite_only: rec.str("visibility") == Some("inviteOnly"),
-            us: rec.us,
+            us,
         })
     }
 
@@ -278,18 +269,18 @@ pub fn iso(us: u64) -> String {
     )
 }
 
+/// An invite code, as its signed record made it.
 #[derive(Debug, Clone)]
-struct Code {
-    us: u64,
-    personal: bool,
-    expires_us: Option<u64>,
-    max_uses: Option<u64>,
-}
-
-#[derive(Debug, Clone, Default)]
-struct CodeUse {
-    count: u64,
-    bound: Option<String>,
+pub struct Code {
+    pub seq: u64,
+    /// The rank it was issued at: revoking it takes that rank or higher.
+    pub rank: Rank,
+    /// The admin who issued it.
+    pub author: String,
+    pub personal: bool,
+    pub expires_us: Option<u64>,
+    pub max_uses: Option<u64>,
+    pub revoked: bool,
 }
 
 /// A row of an attendee list: a DID (a handle row is resolved when it's
@@ -303,13 +294,78 @@ pub struct ListEntry {
     pub role: Option<String>,
 }
 
-/// How a join was admitted.
+/// How a join was admitted: the `via` of a signed join.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Via {
     Role,
     List,
     Code,
     Open,
+    Email,
+}
+
+impl Via {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Role => "role",
+            Self::List => "list",
+            Self::Code => "code",
+            Self::Open => "open",
+            Self::Email => "email",
+        }
+    }
+}
+
+/// A ground someone is a member on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Ground {
+    /// An admin's admission, at the rank it was signed with.
+    Admission { by: String, rank: Rank },
+    /// Their own signed join.
+    Own,
+    /// Being an admin of the organization: no removal or ban ends it.
+    OrgAdmin,
+}
+
+impl Ground {
+    fn rank(&self) -> Rank {
+        match self {
+            Self::Admission { rank, .. } => *rank,
+            Self::Own => Rank::Person,
+            Self::OrgAdmin => Rank::SuperAdmin,
+        }
+    }
+}
+
+/// Where someone stands in a conference, from replaying their entries.
+#[derive(Debug, Clone, Default)]
+pub struct Standing {
+    pub grounds: Vec<Ground>,
+    /// The rank of the ban in force, if any.
+    pub ban: Option<Rank>,
+    /// The decision that stands: its rank, and whether it admits. A
+    /// decision contradicting it is signed only for someone of that rank or
+    /// higher (or the person themselves joining or leaving).
+    pub decision: Option<(Rank, bool)>,
+}
+
+impl Standing {
+    fn member(&self) -> bool {
+        self.grounds.contains(&Ground::OrgAdmin) || (self.ban.is_none() && !self.grounds.is_empty())
+    }
+
+    /// Ends every ground at or below `rank`, but not an admin's.
+    fn end(&mut self, rank: Rank) {
+        self.grounds.retain(|g| *g == Ground::OrgAdmin || g.rank() > rank);
+    }
+
+    /// A new decision: agreeing with the standing one keeps the higher rank.
+    fn decide(&mut self, rank: Rank, admits: bool) {
+        self.decision = Some(match self.decision {
+            Some((above, says)) if says == admits => (above.max(rank), admits),
+            _ => (rank, admits),
+        });
+    }
 }
 
 /// A conference, as its records make it.
@@ -318,25 +374,26 @@ pub struct Conference {
     /// Its settings now.
     pub settings: Settings,
     history: Vec<Settings>,
-    codes: BTreeMap<String, Code>,
+    pub codes: BTreeMap<String, Code>,
+    /// Who used each code, by its HMAC: distinct DIDs, first first.
+    uses: BTreeMap<String, Vec<String>>,
     pub list: Vec<ListEntry>,
     /// The conference's super admin: who writes its roles and rules.
     pub super_admin_did: String,
-    /// Roles, from the conference super admin's role records, each counting
-    /// only while the admin who assigned it could.
+    /// Roles, from the latest signed role record (or join) for each person.
     pub roles: BTreeMap<String, String>,
-    /// Roles assigned by an attendee list import, which admit their subject
-    /// only while the list does.
+    /// Roles given by an attendee list, which admit their subject only while
+    /// the list does.
     list_roles: BTreeSet<String>,
-    /// Who assigned each role, when another admin did.
+    /// Who assigned each role, when its record says.
     pub role_deciders: BTreeMap<String, String>,
-    /// When each role took effect: its record's `since`, else when its
-    /// record was dated. A role counts for what its holder wrote from then.
+    /// When each role took effect: its record's `since`, else when it was
+    /// signed. A role counts for what its holder wrote from then.
     role_since: BTreeMap<String, u64>,
     /// When each person was an admin of the organization, from the super
     /// admin's `orgAdmin` and `orgAdminRemoved` member records.
     admin_periods: BTreeMap<String, Vec<Period>>,
-    /// The rules, from the conference super admin's rules record.
+    /// The rules, from the latest signed rules record.
     pub rules: Option<Value>,
     /// Membership periods by DID, past members included.
     pub members: BTreeMap<String, Vec<Period>>,
@@ -345,7 +402,8 @@ pub struct Conference {
     pub pending: BTreeMap<String, u64>,
     /// People whose latest request was denied.
     pub denied: BTreeSet<String>,
-    uses: HashMap<String, CodeUse>,
+    /// Where each person stands, for checking a decision before it's signed.
+    people: BTreeMap<String, Standing>,
 }
 
 impl Conference {
@@ -390,7 +448,7 @@ impl Conference {
         self.roles.contains_key(did).then(|| self.role_since.get(did).copied()).flatten()
     }
 
-    /// Whether `did`'s role came from an attendee list (a `via: list` role).
+    /// Whether `did`'s role came from an attendee list.
     pub fn has_list_role(&self, did: &str) -> bool {
         self.list_roles.contains(did)
     }
@@ -398,6 +456,36 @@ impl Conference {
     /// Whether a code (by its HMAC) is one of this conference's.
     pub fn has_code(&self, code_hmac: &str) -> bool {
         self.codes.contains_key(code_hmac)
+    }
+
+    /// The codes an admin issued that haven't been revoked, with the rank
+    /// each was issued at.
+    pub fn codes_by(&self, author: &str) -> Vec<(String, Rank)> {
+        self.codes
+            .iter()
+            .filter(|(_, c)| c.author == author && !c.revoked)
+            .map(|(hash, c)| (hash.clone(), c.rank))
+            .collect()
+    }
+
+    /// Everyone whose only grounds for membership are `admin`'s admissions:
+    /// who undoing them takes out.
+    pub fn only_admitted_by(&self, admin: &str) -> Vec<String> {
+        self.people
+            .iter()
+            .filter(|(_, s)| {
+                !s.grounds.is_empty()
+                    && s.grounds
+                        .iter()
+                        .all(|g| matches!(g, Ground::Admission { by, .. } if by == admin))
+            })
+            .map(|(did, _)| did.clone())
+            .collect()
+    }
+
+    /// Where `did` stands: their grounds, any ban, and the standing decision.
+    pub fn standing(&self, did: &str) -> Standing {
+        self.people.get(did).cloned().unwrap_or_default()
     }
 
     /// Who was the conference's super admin before the current one, by its
@@ -410,44 +498,42 @@ impl Conference {
             .collect()
     }
 
-    fn settings_at(&self, us: u64) -> &Settings {
-        self.history
-            .iter()
-            .rev()
-            .find(|s| s.us <= us)
-            .or(self.history.first())
-            .unwrap_or(&self.settings)
-    }
-
-    /// Whether a code admits `did` at `us`, counting the uses so far.
-    fn code_admits(&self, uses: &HashMap<String, CodeUse>, hash: &str, did: &str, us: u64) -> bool {
+    /// Whether a code admits `did` at `now_us`: it's valid, not revoked or
+    /// expired, and within its limits, counting distinct DIDs (the records'
+    /// uses, and `also`, the journal's). A personal code is bound to the
+    /// first DID that used it.
+    pub fn code_admits(&self, hash: &str, did: &str, now_us: u64, also: &BTreeSet<String>) -> bool {
         let Some(code) = self.codes.get(hash) else { return false };
-        let used = uses.get(hash).cloned().unwrap_or_default();
-        code.us <= us
-            && code.expires_us.is_none_or(|exp| us < exp)
-            && if code.personal {
-                used.bound.as_deref().is_none_or(|bound| bound == did)
-            } else {
-                code.max_uses.is_none_or(|max| used.count < max)
-            }
+        if code.revoked || code.expires_us.is_some_and(|exp| now_us >= exp) {
+            return false;
+        }
+        let mut users: BTreeSet<&str> =
+            self.uses.get(hash).into_iter().flatten().map(String::as_str).collect();
+        users.extend(also.iter().map(String::as_str));
+        if code.personal {
+            users.iter().all(|user| *user == did)
+        } else {
+            users.contains(did) || code.max_uses.is_none_or(|max| (users.len() as u64) < max)
+        }
     }
 
-    /// The rule in force at `us` that admits a join by `did`, if any.
-    fn admission(
+    /// The rule that admits a join by `did` now, if any: a pre-assigned
+    /// role, the attendee list by DID, a valid code, or an open conference.
+    pub fn admits(
         &self,
-        uses: &HashMap<String, CodeUse>,
         did: &str,
         code_hash: Option<&str>,
-        us: u64,
+        now_us: u64,
+        also: &BTreeSet<String>,
     ) -> Option<Via> {
-        let settings = self.settings_at(us);
+        let settings = &self.settings;
         if self.roles.contains_key(did) && (!self.list_roles.contains(did) || settings.has("list"))
         {
             Some(Via::Role)
         } else if settings.has("list") && self.on_list(did) {
             Some(Via::List)
         } else if settings.has("code")
-            && code_hash.is_some_and(|h| self.code_admits(uses, h, did, us))
+            && code_hash.is_some_and(|h| self.code_admits(h, did, now_us, also))
         {
             Some(Via::Code)
         } else if settings.has("open") {
@@ -457,19 +543,8 @@ impl Conference {
         }
     }
 
-    /// What a join by `did` now would come to: admitted (and how), or not.
-    /// Codes are checked against their uses so far.
-    pub fn would_admit(&self, did: &str, code_hash: Option<&str>, us: u64) -> Option<Via> {
-        self.admission(&self.uses, did, code_hash, us)
-    }
-
-    /// Whether a code admits `did` now.
-    pub fn code_valid(&self, code_hash: &str, did: &str, us: u64) -> bool {
-        self.settings.has("code") && self.code_admits(&self.uses, code_hash, did, us)
-    }
-
-    /// The role `did` has in the conference: the super admin's role record,
-    /// else their admin role.
+    /// The role `did` has in the conference: the role records', else their
+    /// admin role.
     pub fn role_of(&self, org: &Org, did: &str) -> Option<String> {
         self.roles.get(did).cloned().or_else(|| org.admin_role(did).map(|r| r.as_str().to_owned()))
     }
@@ -541,10 +616,15 @@ pub struct Org {
     pub did: String,
     pub super_admin: String,
     pub created_us: u64,
-    /// The admins the super admin's `admin` records name.
+    /// The admins the super admin's `admin` records name now.
     pub admins: BTreeMap<String, Admin>,
+    /// Everyone an `admin` record names, former admins included: their
+    /// decisions still stand, so the crawl still reads their repos.
+    pub named_admins: BTreeSet<String>,
     pub admin_settings: Settings,
     pub conferences: BTreeMap<String, Conference>,
+    /// The highest `seq` any record's signature carries.
+    pub max_seq: u64,
 }
 
 impl Org {
@@ -673,16 +753,13 @@ pub fn derives_from(space: &SpaceUri, collection: &str) -> bool {
     }
 }
 
-/// The index's records for an organization: those [`derives_from`] names,
-/// each with when our host first saw it.
+/// The index's records for an organization: those [`derives_from`] names.
 pub async fn records(state: &AppState, org: &str) -> Result<Vec<Rec>, String> {
-    let rows = sqlx::query_as::<_, (String, String, String, String, String, String, Option<i64>)>(
-        "SELECT r.space, r.repo, r.collection, r.rkey, r.rev, r.value, s.seen_at FROM space_records r \
-         LEFT JOIN space_record_seen s ON s.space = r.space AND s.repo = r.repo \
-         AND s.collection = r.collection AND s.rkey = r.rkey AND s.rev = r.rev \
-         WHERE r.value IS NOT NULL AND \
-         (r.space = $1 OR (r.space LIKE $2 AND r.collection IN ($6, $7)) \
-         OR (r.space LIKE $3 AND r.collection IN ($4, $5)))",
+    let rows = sqlx::query_as::<_, (String, String, String, String, String, String)>(
+        "SELECT space, repo, collection, rkey, rev, value FROM space_records \
+         WHERE value IS NOT NULL AND \
+         (space = $1 OR (space LIKE $2 AND collection IN ($6, $7)) \
+         OR (space LIKE $3 AND collection IN ($4, $5)))",
     )
     .bind(SpaceUri::admin(org).to_string())
     .bind(format!("at://{org}/space/{INTAKE_TYPE}/%"))
@@ -696,14 +773,13 @@ pub async fn records(state: &AppState, org: &str) -> Result<Vec<Rec>, String> {
     .map_err(|e| format!("could not read the index: {e}"))?;
     Ok(rows
         .into_iter()
-        .filter_map(|(space, repo, collection, rkey, rev, value, seen_at)| {
+        .filter_map(|(space, repo, collection, rkey, rev, value)| {
             // The query narrows by prefix; this is the rule itself.
             if !SpaceUri::parse(&space).is_some_and(|s| derives_from(&s, &collection)) {
                 return None;
             }
             Some(Rec {
                 us: tid_micros(&rev)?,
-                seen_us: seen_at.map(|ms| ms.max(0) as u64 * 1000),
                 value: serde_json::from_str(&value).ok()?,
                 space,
                 repo,
@@ -717,8 +793,9 @@ pub async fn records(state: &AppState, org: &str) -> Result<Vec<Rec>, String> {
 
 /// How many times an organization's index has changed. Every write of a
 /// record its view is derived from ([`derives_from`]) bumps it, from the
-/// server or the admin CLI (another process), so a derived view is reused
-/// exactly until the records under it change.
+/// server or the admin CLI (another process), and so does a change to its
+/// attestation keys, so a derived view is reused exactly until what's under
+/// it changes.
 pub async fn generation(state: &AppState, org: &str) -> Result<i64, String> {
     let generation =
         sqlx::query_scalar::<_, i64>("SELECT generation FROM index_generations WHERE org = $1")
@@ -754,6 +831,7 @@ pub async fn load(state: &AppState, org: &str) -> Result<Option<Arc<Org>>, Strin
     }
     let Some(authority) = super::authority::get(&state.db, org).await? else { return Ok(None) };
     let recs = records(state, org).await?;
+    let keys = attest::keys(&state.db, org).await?;
     let eventside = state.oauth.client_id_for("atproto");
     let derived = Arc::new(derive(
         org,
@@ -762,99 +840,11 @@ pub async fn load(state: &AppState, org: &str) -> Result<Option<Arc<Org>>, Strin
         &recs,
         &state.secrets,
         &eventside,
+        &keys,
+        crate::db::now_ms() as u64 * 1000,
     ));
     state.host.cache_org(org, generation, derived.clone());
     Ok(Some(derived))
-}
-
-/// An organization's permissions as they'd be with `admin` given `role`, or
-/// (`None`) not an admin at all: derived from its records with the super
-/// admin's `admin` record about them changed or left out. The decisions,
-/// codes, list rows and roles that then stop counting don't count here.
-pub async fn with_admin_as(
-    state: &AppState,
-    org: &Org,
-    admin: &str,
-    role: Option<Role>,
-) -> Result<Org, String> {
-    let admin_space = SpaceUri::admin(&org.did).to_string();
-    let mut recs = records(state, &org.did).await?;
-    let theirs = |r: &Rec| {
-        r.space == admin_space
-            && r.repo == org.super_admin
-            && r.collection == ADMIN
-            && r.str("subject") == Some(admin)
-    };
-    match role {
-        None => recs.retain(|r| !theirs(r)),
-        Some(role) => {
-            let mut found = false;
-            for rec in recs.iter_mut().filter(|r| theirs(r)) {
-                rec.value["role"] = json!(role.as_str());
-                found = true;
-            }
-            // Not an admin now: as if the super admin's record were written now.
-            if !found {
-                let us = crate::db::now_ms() as u64 * 1000;
-                recs.push(Rec {
-                    space: admin_space.clone(),
-                    repo: org.super_admin.clone(),
-                    collection: ADMIN.to_owned(),
-                    rkey: admin.to_owned(),
-                    rev: String::new(),
-                    us,
-                    seen_us: Some(us),
-                    value: json!({ "subject": admin, "role": role.as_str() }),
-                });
-            }
-        }
-    }
-    Ok(derive(
-        &org.did,
-        &org.super_admin,
-        org.created_us,
-        &recs,
-        &state.secrets,
-        &state.oauth.client_id_for("atproto"),
-    ))
-}
-
-/// Who'd be let back in by `changed`: (conference, person, whether they'd be
-/// a member again at once) for everyone who isn't a member of one of `org`'s
-/// conferences now but would be, or is banned now and wouldn't be, as when
-/// the admin whose ban or removal kept them out stops counting.
-pub fn would_let_in(org: &Org, changed: &Org, except: &str) -> Vec<(String, String, bool)> {
-    let mut back = Vec::new();
-    for conference in org.conferences.values() {
-        let space = conference.space();
-        let Some(then) = changed.conference(space) else { continue };
-        let members = then.current_members().filter(|did| !conference.is_member(did));
-        let unbanned = conference.banned.iter().filter(|did| !then.banned.contains(*did));
-        let people: BTreeSet<&String> = members.chain(unbanned).collect();
-        for did in people {
-            if did != except {
-                back.push((space.to_owned(), did.clone(), then.is_member(did)));
-            }
-        }
-    }
-    back
-}
-
-/// Who's a member of each of `org`'s conferences now but wouldn't be in
-/// `changed`: (conference, person, when their membership began).
-pub fn would_lose(org: &Org, changed: &Org, except: &str) -> Vec<(String, String, u64)> {
-    let mut lost = Vec::new();
-    for conference in org.conferences.values() {
-        let space = conference.space();
-        let stays = changed.conference(space);
-        for (did, periods) in &conference.members {
-            let Some(open) = periods.iter().find(|p| p.until.is_none()) else { continue };
-            if did != except && !stays.is_some_and(|c| c.is_member(did)) {
-                lost.push((space.to_owned(), did.clone(), open.since));
-            }
-        }
-    }
-    lost
 }
 
 /// The organization a space belongs to.
@@ -865,7 +855,9 @@ pub async fn load_for_space(
     load(state, &space.authority).await
 }
 
-/// Derives an organization's permissions from its records.
+/// Derives an organization's permissions from its records: those whose
+/// signature verifies against `keys` (at `now_us`), each `seq` once.
+#[allow(clippy::too_many_arguments)]
 pub fn derive(
     org: &str,
     super_admin: &str,
@@ -873,36 +865,88 @@ pub fn derive(
     recs: &[Rec],
     secrets: &Secrets,
     eventside_client: &str,
+    keys: &Keys,
+    now_us: u64,
 ) -> Org {
     let admin_space = SpaceUri::admin(org).to_string();
-    let in_admin = |r: &&Rec| r.space == admin_space;
 
-    // Admins, as the super admin's records name them.
-    let mut admins = BTreeMap::new();
-    for rec in
-        recs.iter().filter(in_admin).filter(|r| r.repo == super_admin && r.collection == ADMIN)
-    {
-        if let (Some(subject), Some(role)) =
-            (rec.str("subject"), rec.str("role").and_then(Role::parse))
-        {
-            admins.insert(subject.to_owned(), Admin { role, since_us: rec.us });
+    // Each `seq` counts once. Within a repo and space, the records that
+    // claim the same `seq` are versions of one decision (a copy, or an old
+    // version put back): the latest written is the one that stands, and it
+    // counts only if it verifies. Across repos or spaces a signature can't be
+    // copied (`repository` and `space` are signed), so a valid duplicate
+    // there means a leaked key; the first, in a fixed order, counts.
+    let mut latest: BTreeMap<(&str, &str, u64), &Rec> = BTreeMap::new();
+    let mut unclaimed: Vec<&Rec> = Vec::new();
+    for rec in recs {
+        match attest::claimed_seq(&rec.value, org, &rec.space) {
+            Some(seq) => {
+                let slot =
+                    latest.entry((rec.space.as_str(), rec.repo.as_str(), seq)).or_insert(rec);
+                if (&rec.rev, &rec.rkey) > (&slot.rev, &slot.rkey) {
+                    *slot = rec;
+                }
+            }
+            None => unclaimed.push(rec),
         }
     }
-    // The super admin is always an owner, whatever an `admin` record says.
-    let role_of = |did: &str| {
-        if did == super_admin { Some(Role::Owner) } else { admins.get(did).map(|a| a.role) }
-    };
+    let mut ordered: Vec<&Rec> = latest.into_values().chain(unclaimed).collect();
+    ordered.sort_by(|a, b| {
+        (&a.space, &a.repo, &a.collection, &a.rkey).cmp(&(
+            &b.space,
+            &b.repo,
+            &b.collection,
+            &b.rkey,
+        ))
+    });
+    let mut seqs = BTreeSet::new();
+    let mut signed: Vec<(&Rec, Sig)> = Vec::new();
+    let mut unsigned_joins: Vec<&Rec> = Vec::new();
+    let mut max_seq = 0;
+    for rec in ordered {
+        match attest::verify(&rec.value, &rec.repo, &rec.space, keys, now_us) {
+            Some(sig) => {
+                max_seq = max_seq.max(sig.seq);
+                if seqs.insert(sig.seq) {
+                    signed.push((rec, sig));
+                }
+            }
+            None if rec.collection == JOIN => unsigned_joins.push(rec),
+            None => {}
+        }
+    }
+    signed.sort_by_key(|(_, sig)| sig.seq);
 
-    // Space settings: the super admin's snapshots, latest last.
-    let mut snapshots: BTreeMap<String, Vec<Settings>> = BTreeMap::new();
-    let mut settings_recs: Vec<&Rec> = recs
+    // Admins, as the super admin's latest signed `admin` record about each
+    // names them.
+    let mut named: BTreeMap<String, (&Rec, Sig)> = BTreeMap::new();
+    for (rec, sig) in &signed {
+        if rec.space == admin_space
+            && rec.repo == super_admin
+            && rec.collection == ADMIN
+            && sig.rank == Rank::SuperAdmin
+            && let Some(subject) = rec.str("subject")
+        {
+            named.insert(subject.to_owned(), (rec, *sig));
+        }
+    }
+    let admins: BTreeMap<String, Admin> = named
         .iter()
-        .filter(in_admin)
-        .filter(|r| r.repo == super_admin && r.collection == SPACE)
+        .filter_map(|(subject, (rec, sig))| {
+            let role = rec.str("role").and_then(Role::parse)?;
+            let since_us = rec.str("since").and_then(parse_iso_us).unwrap_or(sig.signed_us);
+            Some((subject.clone(), Admin { role, since_us }))
+        })
         .collect();
-    settings_recs.sort_by(|a, b| a.us.cmp(&b.us).then_with(|| a.rkey.cmp(&b.rkey)));
-    for rec in settings_recs {
-        if let Some(settings) = Settings::from_record(rec)
+
+    // Space settings: the super admin's signed snapshots, latest last.
+    let mut snapshots: BTreeMap<String, Vec<Settings>> = BTreeMap::new();
+    for (rec, sig) in &signed {
+        if rec.space == admin_space
+            && rec.repo == super_admin
+            && rec.collection == SPACE
+            && sig.rank == Rank::SuperAdmin
+            && let Some(settings) = Settings::from_record(rec, sig.signed_us)
             && SpaceUri::parse(&settings.space).is_some_and(|s| s.authority == org)
         {
             snapshots.entry(settings.space.clone()).or_default().push(settings);
@@ -913,35 +957,22 @@ pub fn derive(
         .and_then(|h| h.last().cloned())
         .unwrap_or_else(|| Settings::default_admin(org, eventside_client));
 
-    // Admin decisions, from current admins, within their roles.
-    let decisions: Vec<&Rec> = recs
-        .iter()
-        .filter(in_admin)
-        .filter(|r| {
-            matches!(
-                (r.collection.as_str(), role_of(&r.repo)),
-                (MEMBER | DENY, Some(_)) | (BAN | CODE | LIST_ENTRY, Some(Role::Owner))
-            )
-        })
-        .collect();
-
+    let context = Context {
+        admin_space: &admin_space,
+        super_admin,
+        admins: &admins,
+        created_us,
+        secrets,
+        signed: &signed,
+        unsigned_joins: &unsigned_joins,
+    };
     let mut conferences = BTreeMap::new();
     for (space, history) in snapshots {
         let Some(current) = history.last().cloned() else { continue };
         if current.kind != CONFERENCE_TYPE {
             continue;
         }
-        let conference = derive_conference(
-            current,
-            history,
-            &decisions,
-            recs,
-            super_admin,
-            &admins,
-            created_us,
-            secrets,
-        );
-        conferences.insert(space, conference);
+        conferences.insert(space, derive_conference(current, history, &context));
     }
 
     Org {
@@ -949,84 +980,63 @@ pub fn derive(
         super_admin: super_admin.to_owned(),
         created_us,
         admins,
+        named_admins: named.into_keys().collect(),
         admin_settings,
         conferences,
+        max_seq,
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Event {
-    Admit,
-    Remove,
-    Leave,
-    Ban,
-    /// The end of a ban the super admin overrode by admitting the person.
-    Unban,
-    Deny,
-    /// A join no rule admitted: a request, if requests were on.
-    Request,
-    /// The super admin's mark that someone became an admin: a member from
-    /// then, banned or not, since admins can't be banned.
-    AdminStart,
-    /// Her mark that they stopped being one: their admin period ends, and a
-    /// ban from before or during it holds again.
-    AdminEnd,
-}
-
-/// Whose an event in a person's timeline is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum By {
-    /// An admin's decision, with their rank (see [`Rank`]).
-    Admin(Rank),
-    /// The person's own (a join or leave), or what no admin decided on the
-    /// day (a rule's admission, an email match, an admin period, a ban).
-    Neutral,
-}
-
-/// How much an admin's membership decisions weigh: a decision stands against
-/// later ones of a lower rank that contradict it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum Rank {
-    Staff,
-    Owner,
-    SuperAdmin,
-}
-
-#[allow(clippy::too_many_arguments)]
-fn derive_conference(
-    settings: Settings,
-    history: Vec<Settings>,
-    decisions: &[&Rec],
-    recs: &[Rec],
-    super_admin: &str,
-    admins: &BTreeMap<String, Admin>,
+/// What every conference of an organization is derived from.
+struct Context<'a> {
+    admin_space: &'a str,
+    super_admin: &'a str,
+    admins: &'a BTreeMap<String, Admin>,
     created_us: u64,
-    secrets: &Secrets,
-) -> Conference {
+    secrets: &'a Secrets,
+    /// The signed records, in `seq` order.
+    signed: &'a [(&'a Rec, Sig)],
+    unsigned_joins: &'a [&'a Rec],
+}
+
+/// One entry in a person's timeline.
+#[derive(Debug, Clone)]
+enum Event {
+    Admit { by: String },
+    Remove,
+    Ban,
+    Deny,
+    AdminStart,
+    AdminEnd,
+    Join,
+    Request,
+    Leave,
+}
+
+fn derive_conference(settings: Settings, history: Vec<Settings>, cx: &Context) -> Conference {
     let space = settings.space.clone();
-    let about = |r: &&&Rec| r.str("space") == Some(space.as_str());
-    let conference_super = settings.super_admin.clone().unwrap_or_else(|| super_admin.to_owned());
-    // Decisions come only from current admins, so every author has a rank.
-    let rank_of = |did: &str| {
-        if did == super_admin {
-            Rank::SuperAdmin
-        } else if admins.get(did).is_some_and(|a| a.role == Role::Owner) {
-            Rank::Owner
-        } else {
-            Rank::Staff
-        }
+    let intake = settings.intake.clone().unwrap_or_default();
+    let conference_super =
+        settings.super_admin.clone().unwrap_or_else(|| cx.super_admin.to_owned());
+    let about = |rec: &Rec, sig: &Sig| {
+        rec.space == cx.admin_space
+            && rec.str("space") == Some(space.as_str())
+            && sig.rank != Rank::Person
     };
 
-    let mut codes = BTreeMap::new();
+    // Codes, their revocations, and the attendee list.
+    let mut codes: BTreeMap<String, Code> = BTreeMap::new();
     let mut list = Vec::new();
-    for rec in decisions.iter().filter(about) {
+    for (rec, sig) in cx.signed.iter().filter(|(r, s)| about(r, s)) {
         match rec.collection.as_str() {
             CODE => {
                 if let Some(hash) = rec.str("codeHash") {
                     codes.insert(
                         hash.to_owned(),
                         Code {
-                            us: rec.us,
+                            seq: sig.seq,
+                            rank: sig.rank,
+                            author: rec.repo.clone(),
                             personal: rec
                                 .value
                                 .get("personal")
@@ -1034,8 +1044,16 @@ fn derive_conference(
                                 .unwrap_or(false),
                             expires_us: rec.str("expires").and_then(parse_iso_us),
                             max_uses: rec.value.get("maxUses").and_then(Value::as_u64),
+                            revoked: false,
                         },
                     );
+                }
+            }
+            CODE_REVOKE => {
+                if let Some(code) = rec.str("codeHash").and_then(|h| codes.get_mut(h))
+                    && code.seq < sig.seq
+                {
+                    code.revoked = true;
                 }
             }
             LIST_ENTRY => list.push(ListEntry {
@@ -1048,223 +1066,202 @@ fn derive_conference(
         }
     }
 
-    // Roles and rules: only from the conference's super admin, in its space,
-    // and only while they're an admin. A role written for another admin
-    // (`assignedBy`) counts only while that admin may assign it: owner and
-    // staff roles by owners, others by any admin. That's what lets a role
-    // admit the person it names. A conference's super admin assigns roles
-    // as the admin they are: owner and staff roles only while an owner.
-    let super_counts = conference_super == super_admin || admins.contains_key(&conference_super);
-    let super_owns = conference_super == super_admin
-        || admins.get(&conference_super).is_some_and(|a| a.role == Role::Owner);
-    let may_assign = |decider: &str, role: &str| {
-        if decider == super_admin {
-            return true;
+    // Roles and rules: the conference super admin's signed records in its
+    // space, the latest by `seq` for each person (or a join's role, if later).
+    struct Given {
+        seq: u64,
+        role: String,
+        since: u64,
+        list: bool,
+        by: Option<String>,
+    }
+    let mut given: BTreeMap<String, Given> = BTreeMap::new();
+    let mut rules = None;
+    for (rec, sig) in cx.signed {
+        if rec.space != space || rec.repo != conference_super || sig.rank == Rank::Person {
+            continue;
         }
-        match admins.get(decider).map(|a| a.role) {
-            Some(Role::Owner) => true,
-            Some(Role::Staff) => !matches!(role, "owner" | "staff"),
-            None => false,
+        match rec.collection.as_str() {
+            ROLE => {
+                if let (Some(subject), Some(role)) = (rec.str("subject"), rec.str("role")) {
+                    given.insert(
+                        subject.to_owned(),
+                        Given {
+                            seq: sig.seq,
+                            role: role.to_owned(),
+                            since: rec.str("since").and_then(parse_iso_us).unwrap_or(sig.signed_us),
+                            list: rec.str("via") == Some("list"),
+                            by: rec.str("assignedBy").map(str::to_owned),
+                        },
+                    );
+                }
+            }
+            RULES if rec.rkey == "self" => rules = Some(rec.value.clone()),
+            _ => {}
         }
-    };
+    }
+
+    // Each person's signed entries, in `seq` order.
+    let mut timelines: BTreeMap<String, Vec<(Sig, Event)>> = BTreeMap::new();
+    let mut uses: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (rec, sig) in cx.signed {
+        if about(rec, sig) {
+            let Some(subject) = rec.str("subject") else { continue };
+            let event = match rec.collection.as_str() {
+                MEMBER => match rec.str("via") {
+                    Some(VIA_ADMIN) if sig.rank == Rank::SuperAdmin => Event::AdminStart,
+                    Some(VIA_ADMIN_REMOVED) if sig.rank == Rank::SuperAdmin => Event::AdminEnd,
+                    Some(VIA_ADMIN | VIA_ADMIN_REMOVED) => continue,
+                    via if via == Some(VIA_REMOVED) || rec.value.get("until").is_some() => {
+                        Event::Remove
+                    }
+                    _ => Event::Admit { by: rec.repo.clone() },
+                },
+                BAN => Event::Ban,
+                DENY => Event::Deny,
+                _ => continue,
+            };
+            timelines.entry(subject.to_owned()).or_default().push((*sig, event));
+        } else if rec.space == intake && sig.rank == Rank::Person {
+            let person = rec.repo.clone();
+            let event = match rec.collection.as_str() {
+                JOIN if rec.str("via") == Some("request") => Event::Request,
+                JOIN => {
+                    if let Some(code) = rec.str("code").filter(|_| rec.str("via") == Some("code")) {
+                        let users = uses.entry(cx.secrets.code_hmac(code)).or_default();
+                        if !users.contains(&person) {
+                            users.push(person.clone());
+                        }
+                    }
+                    if let Some(role) = rec.str("role") {
+                        let later = given.get(&person).is_none_or(|g| g.seq < sig.seq);
+                        if later {
+                            given.insert(
+                                person.clone(),
+                                Given {
+                                    seq: sig.seq,
+                                    role: role.to_owned(),
+                                    since: sig.signed_us,
+                                    list: true,
+                                    by: None,
+                                },
+                            );
+                        }
+                    }
+                    Event::Join
+                }
+                LEAVE => Event::Leave,
+                _ => continue,
+            };
+            timelines.entry(person).or_default().push((*sig, event));
+        }
+    }
+
     let mut roles = BTreeMap::new();
     let mut list_roles = BTreeSet::new();
     let mut role_deciders = BTreeMap::new();
     let mut role_since = BTreeMap::new();
-    let mut rules = None;
-    for rec in
-        recs.iter().filter(|r| super_counts && r.space == space && r.repo == conference_super)
-    {
-        match rec.collection.as_str() {
-            ROLE => {
-                let decider = rec.str("assignedBy").unwrap_or(&conference_super);
-                if let (Some(subject), Some(role)) = (rec.str("subject"), rec.str("role"))
-                    && may_assign(decider, role)
-                    // A list's role counts only while the owner who imported
-                    // the list is one, as the list's rows do.
-                    && (rec.str("via") != Some("list")
-                        || decider == super_admin
-                        || admins.get(decider).is_some_and(|a| a.role == Role::Owner))
-                    // Naming someone else as the decider never lifts the
-                    // writer's own cap.
-                    && may_assign(&conference_super, role)
-                {
-                    roles.insert(subject.to_owned(), role.to_owned());
-                    let dated = conference_us(rec.us, rec.seen_us);
-                    role_since.insert(
-                        subject.to_owned(),
-                        rec.str("since").and_then(parse_iso_us).unwrap_or(dated),
-                    );
-                    if let Some(decider) = rec.str("assignedBy") {
-                        role_deciders.insert(subject.to_owned(), decider.to_owned());
-                    }
-                    if rec.str("via") == Some("list") {
-                        list_roles.insert(subject.to_owned());
-                    }
-                }
-            }
-            // Rules are an owner's to set.
-            RULES if rec.rkey == "self" && super_owns => rules = Some(rec.value.clone()),
-            _ => {}
+    for (subject, g) in given {
+        if !matches!(g.role.as_str(), "owner" | "staff" | "speaker") {
+            continue;
         }
+        if g.list {
+            list_roles.insert(subject.clone());
+        }
+        if let Some(by) = g.by {
+            role_deciders.insert(subject.clone(), by);
+        }
+        role_since.insert(subject.clone(), g.since);
+        roles.insert(subject, g.role);
     }
 
-    let mut conference = Conference {
-        settings,
-        history,
-        codes,
-        list,
-        super_admin_did: conference_super.clone(),
-        roles,
-        list_roles,
-        role_deciders,
-        role_since,
-        admin_periods: BTreeMap::new(),
-        rules,
-        members: BTreeMap::new(),
-        banned: BTreeSet::new(),
-        pending: BTreeMap::new(),
-        denied: BTreeSet::new(),
-        uses: HashMap::new(),
-    };
+    let is_admin = |did: &str| did == cx.super_admin || cx.admins.contains_key(did);
+    let mut members = BTreeMap::new();
+    let mut banned = BTreeSet::new();
+    let mut pending = BTreeMap::new();
+    let mut denied = BTreeSet::new();
+    let mut people = BTreeMap::new();
+    let mut admin_periods = BTreeMap::new();
+    let mut last_decided: BTreeMap<String, u64> = BTreeMap::new();
 
-    // Bans: the super admin's always stand; another owner's stands unless the
-    // super admin admitted the person after it.
-    let mut events: BTreeMap<String, Vec<(u64, Event, By)>> = BTreeMap::new();
-    let mut admin_marks: BTreeMap<String, Vec<(u64, bool)>> = BTreeMap::new();
-    let mut ban_at: BTreeMap<String, u64> = BTreeMap::new();
-    // Bans the super admin overrode: from the ban until she admitted them.
-    let mut lifted_bans: BTreeMap<String, Vec<(u64, u64)>> = BTreeMap::new();
-    let mut denied_at: BTreeMap<String, u64> = BTreeMap::new();
-    let mut decided_at: BTreeMap<String, u64> = BTreeMap::new();
-    // Only her admission decisions lift a ban: her admin marks and email
-    // matches are neutral, here as in the timeline.
-    let super_admits: Vec<(&str, u64)> = decisions
-        .iter()
-        .filter(about)
-        .filter(|r| {
-            r.repo == super_admin
-                && r.collection == MEMBER
-                && r.value.get("until").is_none()
-                && !matches!(r.str("via"), Some(VIA_ADMIN | VIA_ADMIN_REMOVED | "email"))
-        })
-        .filter_map(|r| Some((r.str("subject")?, r.us)))
-        .collect();
-    // Admins can't be banned: they're members because they're admins, and
-    // the super admin's say always stands. A ban of someone her admin marks
-    // cover still counts outside their admin periods (the timeline suspends
-    // it within them), so it's skipped only for admins with no marks: her,
-    // and admins made before marks were written.
-    let is_admin = |did: &str| did == super_admin || admins.contains_key(did);
-    let marked: BTreeSet<&str> = decisions
-        .iter()
-        .filter(about)
-        .filter(|r| {
-            r.repo == super_admin
-                && r.collection == MEMBER
-                && matches!(r.str("via"), Some(VIA_ADMIN | VIA_ADMIN_REMOVED))
-        })
-        .filter_map(|r| r.str("subject"))
-        .collect();
-    for rec in decisions.iter().filter(about) {
-        let Some(subject) = rec.str("subject") else { continue };
-        match rec.collection.as_str() {
-            BAN if is_admin(subject) && !marked.contains(subject) => {}
-            BAN => {
-                let lifted = super_admits
-                    .iter()
-                    .filter(|(s, us)| rec.repo != super_admin && *s == subject && *us > rec.us)
-                    .map(|(_, us)| *us)
-                    .min();
-                match lifted {
-                    Some(lifted) => {
-                        lifted_bans.entry(subject.to_owned()).or_default().push((rec.us, lifted));
-                    }
-                    None => {
-                        let at = ban_at.entry(subject.to_owned()).or_insert(rec.us);
-                        *at = (*at).min(rec.us);
-                    }
-                }
-            }
-            MEMBER => {
-                let event =
-                    if rec.value.get("until").is_some() { Event::Remove } else { Event::Admit };
-                let via = rec.str("via");
-                let marks_admin = matches!(via, Some(VIA_ADMIN | VIA_ADMIN_REMOVED));
-                if marks_admin && rec.repo == super_admin {
-                    admin_marks
-                        .entry(subject.to_owned())
-                        .or_default()
-                        .push((rec.us, event == Event::Admit));
-                }
-                // Her admin marks bound a period no ban cuts short.
-                let event = match event {
-                    Event::Admit if marks_admin && rec.repo == super_admin => Event::AdminStart,
-                    Event::Remove if marks_admin && rec.repo == super_admin => Event::AdminEnd,
-                    other => other,
-                };
-                // Admin periods and email matches are no one's verdict on
-                // the person's attendance: like their own joins, they end
-                // whatever an admin last decided. Only the super admin writes
-                // them; another admin's record saying so is their decision.
-                let by = if (marks_admin || via == Some("email")) && rec.repo == super_admin {
-                    By::Neutral
-                } else {
-                    By::Admin(rank_of(&rec.repo))
-                };
-                // The super admin keeping a departing admin's admission keeps
-                // the period it began: from its `since`, never after the record.
-                let us =
-                    if via == Some(VIA_KEPT) && rec.repo == super_admin && event == Event::Admit {
-                        rec.str("since")
-                            .and_then(parse_iso_us)
-                            .map_or(rec.us, |since| since.min(rec.us))
-                    } else {
-                        rec.us
-                    };
-                events.entry(subject.to_owned()).or_default().push((us, event, by));
-                let at = decided_at.entry(subject.to_owned()).or_default();
-                *at = (*at).max(rec.us);
-            }
-            DENY => {
-                let at = denied_at.entry(subject.to_owned()).or_default();
-                *at = (*at).max(rec.us);
-                events.entry(subject.to_owned()).or_default().push((
-                    rec.us,
-                    Event::Deny,
-                    By::Admin(rank_of(&rec.repo)),
-                ));
-            }
-            _ => {}
-        }
-    }
-    for (subject, at) in &ban_at {
-        events.entry(subject.clone()).or_default().push((*at, Event::Ban, By::Neutral));
-    }
-    for (subject, lifted) in &lifted_bans {
-        for (from, until) in lifted {
-            let timeline = events.entry(subject.clone()).or_default();
-            timeline.push((*from, Event::Ban, By::Neutral));
-            timeline.push((*until, Event::Unban, By::Neutral));
-        }
-    }
-    let banned_at = |subject: &str, us: u64| {
-        ban_at.get(subject).is_some_and(|at| *at <= us)
-            || lifted_bans
-                .get(subject)
-                .is_some_and(|l| l.iter().any(|(from, until)| *from <= us && us < *until))
-    };
-
-    // Admin periods, from the super admin's marks.
-    for (subject, mut marks) in admin_marks {
-        marks.sort_by_key(|(us, _)| *us);
+    for (did, timeline) in timelines {
+        let mut standing = Standing::default();
         let mut periods = Vec::new();
-        let mut since = None;
-        for (us, start) in marks {
-            match (start, since) {
-                (true, None) => since = Some(us),
+        let mut since: Option<u64> = None;
+        let mut request: Option<u64> = None;
+        let mut was_denied = false;
+        let mut admin_marks = Vec::new();
+        let mut admin_since: Option<u64> = None;
+        for (sig, event) in &timeline {
+            let rank = sig.rank;
+            match event {
+                Event::Admit { by } => {
+                    match standing.ban {
+                        Some(ban) if rank >= ban => standing.ban = None,
+                        Some(_) => continue,
+                        None => {}
+                    }
+                    standing.grounds.push(Ground::Admission { by: by.clone(), rank });
+                    standing.decide(rank, true);
+                    request = None;
+                    was_denied = false;
+                }
+                Event::Remove => {
+                    standing.end(rank);
+                    standing.decide(rank, false);
+                    request = None;
+                }
+                Event::Ban => {
+                    standing.end(rank);
+                    standing.ban = Some(standing.ban.map_or(rank, |b| b.max(rank)));
+                    standing.decide(rank, false);
+                    request = None;
+                }
+                Event::Deny => {
+                    standing.decide(rank, false);
+                    request = None;
+                    was_denied = true;
+                }
+                Event::AdminStart => {
+                    standing.grounds.retain(|g| *g != Ground::OrgAdmin);
+                    standing.grounds.push(Ground::OrgAdmin);
+                    admin_since.get_or_insert(sig.signed_us);
+                }
+                Event::AdminEnd => {
+                    standing.grounds.retain(|g| *g != Ground::OrgAdmin);
+                    if let Some(start) = admin_since.take() {
+                        admin_marks.push(Period { since: start, until: Some(sig.signed_us) });
+                    }
+                }
+                Event::Join => {
+                    if standing.ban.is_some() {
+                        continue;
+                    }
+                    standing.grounds.push(Ground::Own);
+                    // The person's own join stands over an earlier removal
+                    // or denial; it agrees with an admission.
+                    standing.decide(Rank::Person, true);
+                    request = None;
+                    was_denied = false;
+                }
+                Event::Request => {
+                    if standing.ban.is_some() {
+                        continue;
+                    }
+                    request = Some(sig.signed_us);
+                    was_denied = false;
+                }
+                Event::Leave => {
+                    standing.grounds.retain(|g| *g == Ground::OrgAdmin);
+                    standing.decision = Some((Rank::Person, false));
+                    request = None;
+                }
+            }
+            let member = standing.member();
+            match (member, since) {
+                (true, None) => since = Some(sig.signed_us),
                 (false, Some(start)) => {
-                    periods.push(Period { since: start, until: Some(us) });
+                    periods.push(Period { since: start, until: Some(sig.signed_us) });
                     since = None;
                 }
                 _ => {}
@@ -1273,132 +1270,60 @@ fn derive_conference(
         if let Some(start) = since {
             periods.push(Period { since: start, until: None });
         }
-        conference.admin_periods.insert(subject, periods);
-    }
-
-    // Joins and leaves, in commit order, against the rules in force then.
-    let intake = conference.settings.intake.clone().unwrap_or_default();
-    let mut intake_recs: Vec<&Rec> = recs.iter().filter(|r| r.space == intake).collect();
-    intake_recs.sort_by(|a, b| {
-        a.intake_us()
-            .cmp(&b.intake_us())
-            .then_with(|| a.repo.cmp(&b.repo))
-            .then_with(|| a.rkey.cmp(&b.rkey))
-    });
-    let mut requested_at: BTreeMap<String, u64> = BTreeMap::new();
-    let mut uses = HashMap::new();
-    for rec in intake_recs {
-        let subject = rec.repo.clone();
-        let us = rec.intake_us();
-        match rec.collection.as_str() {
-            JOIN => {
-                if banned_at(&subject, us) {
-                    continue;
-                }
-                let hash = rec.str("code").map(|c| secrets.code_hmac(c));
-                match conference.admission(&uses, &subject, hash.as_deref(), us) {
-                    Some(via) => {
-                        if via == Via::Code
-                            && let Some(hash) = hash
-                        {
-                            let used: &mut CodeUse = uses.entry(hash).or_default();
-                            used.count += 1;
-                            used.bound.get_or_insert_with(|| subject.clone());
-                        }
-                        events.entry(subject).or_default().push((us, Event::Admit, By::Neutral));
-                    }
-                    None if conference.settings_at(us).has("request") => {
-                        events.entry(subject.clone()).or_default().push((
-                            us,
-                            Event::Request,
-                            By::Neutral,
-                        ));
-                        requested_at.insert(subject, us);
-                    }
-                    None => {}
-                }
-            }
-            LEAVE => events.entry(subject).or_default().push((us, Event::Leave, By::Neutral)),
-            _ => {}
+        if let Some(start) = admin_since {
+            admin_marks.push(Period { since: start, until: None });
         }
-    }
-    conference.uses = uses;
-
-    // Each person's periods. The latest decision about them (admitting,
-    // removing or denying) by the highest rank to decide stands against later
-    // decisions of lower ranks that contradict it, until someone of its rank
-    // or higher decides again, or the person joins, leaves or is admitted by
-    // a rule. Within a rank, the latest decision stands.
-    for (subject, mut timeline) in events {
-        // A ban ends before the super admin's admission that lifts it.
-        timeline.sort_by_key(|(us, event, _)| (*us, *event != Event::Unban));
-        let mut periods = Vec::new();
-        let mut since: Option<u64> = None;
-        // The bans in force: an overridden one ends with an `Unban`.
-        let mut bans = 0usize;
-        // The decision that stands: its rank, and whether it admits.
-        let mut standing: Option<(Rank, bool)> = None;
-        // Within an admin period: a member whatever the bans.
-        let mut admin = false;
-        for (us, event, by) in timeline {
-            let admits = matches!(event, Event::Admit | Event::AdminStart);
-            match (by, standing) {
-                // Overridden by a higher rank's decision.
-                (By::Admin(rank), Some((above, says))) if above > rank && says != admits => {
-                    continue;
-                }
-                // Agreeing with it: the higher one still stands.
-                (By::Admin(rank), Some((above, _))) if above > rank => {}
-                (By::Admin(rank), _) => standing = Some((rank, admits)),
-                (By::Neutral, _) => standing = None,
-            }
-            match event {
-                Event::Admit if bans == 0 && since.is_none() => since = Some(us),
-                Event::AdminStart => {
-                    admin = true;
-                    since.get_or_insert(us);
-                }
-                // A ban while they were an admin counts from when it ends.
-                Event::Ban if admin => bans += 1,
-                Event::AdminEnd | Event::Remove | Event::Leave | Event::Ban => {
-                    admin &= event != Event::AdminEnd;
-                    if let Some(start) = since.take() {
-                        periods.push(Period { since: start, until: Some(us) });
-                    }
-                    bans += usize::from(event == Event::Ban);
-                }
-                // Only the super admin's admission lifts a ban, so she's
-                // admitting them then: a member from there (her kept
-                // admission is dated earlier, before the ban it lifts).
-                Event::Unban => {
-                    bans = bans.saturating_sub(1);
-                    if bans == 0 {
-                        since.get_or_insert(us);
-                    }
-                }
-                Event::Admit | Event::Deny | Event::Request => {}
-            }
+        if !admin_marks.is_empty() {
+            admin_periods.insert(did.clone(), admin_marks);
         }
-        if let Some(start) = since {
-            periods.push(Period { since: start, until: None });
+        if let Some((last, _)) = timeline.last() {
+            last_decided.insert(did.clone(), last.signed_us);
         }
-        // A current admin isn't banned, though a ban may hold again once
-        // they're not.
-        if bans > 0 && !is_admin(&subject) {
-            conference.banned.insert(subject.clone());
+        let member = standing.member();
+        if standing.ban.is_some() && !is_admin(&did) {
+            banned.insert(did.clone());
+        }
+        if !member && standing.ban.is_none() {
+            if let Some(at) = request {
+                pending.insert(did.clone(), at);
+            } else if was_denied {
+                denied.insert(did.clone());
+            }
         }
         if !periods.is_empty() {
-            conference.members.insert(subject, periods);
+            members.insert(did.clone(), periods);
         }
+        people.insert(did, standing);
     }
 
+    let mut conference = Conference {
+        settings,
+        history,
+        codes,
+        uses,
+        list,
+        super_admin_did: conference_super,
+        roles,
+        list_roles,
+        role_deciders,
+        role_since,
+        admin_periods,
+        rules,
+        members,
+        banned,
+        pending,
+        denied,
+        people,
+    };
+
     // Admins are members of every conference of theirs.
-    let admin_since = admins
+    let admin_since = cx
+        .admins
         .iter()
         .map(|(did, a)| (did.clone(), a.since_us))
-        .chain(std::iter::once((super_admin.to_owned(), created_us)));
+        .chain(std::iter::once((cx.super_admin.to_owned(), cx.created_us)));
     for (did, since) in admin_since {
-        if conference.banned.contains(&did) || conference.is_member(&did) {
+        if conference.is_member(&did) {
             continue;
         }
         let periods = conference.members.entry(did).or_default();
@@ -1406,18 +1331,23 @@ fn derive_conference(
         periods.push(Period { since, until: None });
     }
 
-    // Requests: the latest join no rule admitted, not since decided, denied
-    // or superseded by membership.
-    for (subject, at) in requested_at {
-        if conference.banned.contains(&subject) || conference.is_member(&subject) {
-            continue;
-        }
-        let decided = decided_at.get(&subject).is_some_and(|d| *d > at);
-        let denied = denied_at.get(&subject).is_some_and(|d| *d > at);
-        if denied {
-            conference.denied.insert(subject);
-        } else if !decided {
-            conference.pending.insert(subject, at);
+    // A join written by another app, without our signature, is a request at
+    // most: pending while requests are on, unless something about the
+    // person was signed after it.
+    let mut unsigned: BTreeMap<&str, u64> = BTreeMap::new();
+    for rec in cx.unsigned_joins.iter().filter(|r| r.space == intake) {
+        let at = unsigned.entry(rec.repo.as_str()).or_default();
+        *at = (*at).max(rec.us);
+    }
+    if conference.settings.has("request") {
+        for (did, at) in unsigned {
+            let decided = last_decided.get(did).is_some_and(|d| *d >= at);
+            if decided || conference.is_member(did) || conference.banned.contains(did) {
+                continue;
+            }
+            conference.denied.remove(did);
+            let waiting = conference.pending.entry(did.to_owned()).or_insert(at);
+            *waiting = (*waiting).max(at);
         }
     }
     conference
@@ -1463,6 +1393,8 @@ pub fn parse_iso_ms(s: &str) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::keys::EcKey;
+    use crate::spacehost::attest::tests::{signed, test_keys};
 
     #[test]
     fn timestamps_round_trip() {
@@ -1478,749 +1410,354 @@ mod tests {
     const ORG: &str = "did:plc:atmosphereorgaaaaaaaaaaa";
     const OLGA: &str = "did:plc:olgaaaaaaaaaaaaaaaaaaaaa";
     const PIM: &str = "did:plc:pimaaaaaaaaaaaaaaaaaaaaa";
+    const KEES: &str = "did:plc:keesaaaaaaaaaaaaaaaaaaaa";
+    const ANA: &str = "did:plc:anaaaaaaaaaaaaaaaaaaaaaa";
+    const BRAM: &str = "did:plc:bramaaaaaaaaaaaaaaaaaaaa";
+    /// A time, in microseconds, all signings here are after.
+    const T0: u64 = 1_800_000_000_000_000;
 
     fn space(kind: &str) -> String {
         SpaceUri::new(ORG, kind, "3conf").to_string()
     }
 
-    fn rec(space: &str, repo: &str, collection: &str, rkey: &str, us: u64, value: Value) -> Rec {
-        Rec {
-            space: space.to_owned(),
-            repo: repo.to_owned(),
-            collection: collection.to_owned(),
-            rkey: rkey.to_owned(),
-            rev: String::new(),
-            us,
-            seen_us: None,
-            value,
+    /// Records, signed as our host would, one `seq` after another.
+    struct World {
+        key: EcKey,
+        keys: Keys,
+        seq: u64,
+        recs: Vec<Rec>,
+    }
+
+    impl World {
+        /// Atmosphere, with Pim as staff and Kees as an owner, and a
+        /// conference whose join methods are `methods`.
+        fn new(methods: &[&str]) -> Self {
+            let (key, keys) = test_keys(ORG);
+            let mut world = Self { key, keys, seq: 0, recs: Vec::new() };
+            let admin = SpaceUri::admin(ORG).to_string();
+            world.sign(
+                &admin,
+                OLGA,
+                SPACE,
+                "s1",
+                Rank::SuperAdmin,
+                json!({ "space": space(CONFERENCE_TYPE),
+                "intake": space(INTAKE_TYPE), "superAdmin": OLGA, "join": { "methods": methods } }),
+            );
+            world.sign(
+                &admin,
+                OLGA,
+                ADMIN,
+                PIM,
+                Rank::SuperAdmin,
+                json!({ "subject": PIM, "role": "staff" }),
+            );
+            world.sign(
+                &admin,
+                OLGA,
+                ADMIN,
+                KEES,
+                Rank::SuperAdmin,
+                json!({ "subject": KEES, "role": "owner" }),
+            );
+            world
+        }
+
+        fn sign(
+            &mut self,
+            space: &str,
+            repo: &str,
+            collection: &str,
+            rkey: &str,
+            rank: Rank,
+            value: Value,
+        ) {
+            self.seq += 1;
+            let us = T0 + self.seq * 1000;
+            let value = signed(value, &self.key, ORG, space, self.seq, rank, us, repo);
+            self.recs.push(Rec {
+                space: space.to_owned(),
+                repo: repo.to_owned(),
+                collection: collection.to_owned(),
+                rkey: rkey.to_owned(),
+                rev: String::new(),
+                us,
+                value,
+            });
+        }
+
+        /// An admin's decision about someone in the conference.
+        fn decide(&mut self, by: &str, rank: Rank, collection: &str, subject: &str, extra: Value) {
+            let mut value = json!({ "space": space(CONFERENCE_TYPE), "subject": subject });
+            value.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            let rkey = format!("d{}", self.seq + 1);
+            self.sign(&SpaceUri::admin(ORG).to_string(), by, collection, &rkey, rank, value);
+        }
+
+        fn join(&mut self, who: &str, value: Value) {
+            let rkey = format!("j{}", self.seq + 1);
+            self.sign(&space(INTAKE_TYPE), who, JOIN, &rkey, Rank::Person, value);
+        }
+
+        fn org(&self) -> Org {
+            derive(
+                ORG,
+                OLGA,
+                T0,
+                &self.recs,
+                &Secrets::for_tests(),
+                "https://app.example/client.json",
+                &self.keys,
+                T0 + 1_000_000_000,
+            )
+        }
+
+        fn conference(&self) -> Conference {
+            self.org().conference(&space(CONFERENCE_TYPE)).unwrap().clone()
         }
     }
 
-    /// Atmosphere, with Pim as staff (unless `pim_is_admin` is false) and a
-    /// conference whose join methods are `methods`, plus `more` records.
-    fn org_with(methods: &[&str], pim_is_admin: bool, more: Vec<Rec>) -> Org {
+    #[test]
+    fn tc_59_an_admin_record_without_our_signature_doesnt_count() {
+        let mut world = World::new(&["code"]);
+        world.recs.push(Rec {
+            space: SpaceUri::admin(ORG).to_string(),
+            repo: PIM.into(),
+            collection: MEMBER.into(),
+            rkey: "x".into(),
+            rev: String::new(),
+            us: T0,
+            value: json!({ "space": space(CONFERENCE_TYPE), "subject": BRAM, "via": "admin" }),
+        });
+        assert!(!world.conference().is_member(BRAM));
+        world.decide(PIM, Rank::Staff, MEMBER, BRAM, json!({ "via": "admin" }));
+        assert!(world.conference().is_member(BRAM));
+    }
+
+    #[test]
+    fn tc_53_a_former_admins_decisions_keep_standing() {
+        let mut world = World::new(&["code"]);
+        world.decide(PIM, Rank::Staff, MEMBER, BRAM, json!({ "via": "admin" }));
+        // Olga removes Pim as an admin.
         let admin = SpaceUri::admin(ORG).to_string();
-        let mut recs = vec![rec(
+        world.sign(
             &admin,
             OLGA,
-            SPACE,
-            "s1",
-            1,
-            json!({ "space": space(CONFERENCE_TYPE), "intake": space(INTAKE_TYPE),
-                    "superAdmin": OLGA, "join": { "methods": methods } }),
-        )];
-        if pim_is_admin {
-            recs.push(rec(&admin, OLGA, ADMIN, PIM, 1, json!({ "subject": PIM, "role": "staff" })));
-        }
-        recs.extend(more);
-        derive(ORG, OLGA, 0, &recs, &Secrets::for_tests(), "https://app.example/client.json")
-    }
-
-    fn role(subject: &str, role: &str, extra: Value) -> Rec {
-        let mut value = json!({ "subject": subject, "role": role });
-        value.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
-        rec(&space(CONFERENCE_TYPE), OLGA, ROLE, subject, 2, value)
-    }
-
-    fn join(who: &str, us: u64, seen_us: Option<u64>, value: Value) -> Rec {
-        Rec { seen_us, ..rec(&space(INTAKE_TYPE), who, JOIN, "j", us, value) }
-    }
-
-    #[test]
-    fn a_role_admits_only_while_whoever_assigned_it_could() {
-        let bram = "did:plc:bramaaaaaaaaaaaaaaaaaaaa";
-        let mallory = "did:plc:malloryaaaaaaaaaaaaaaaaa";
-        let records = || {
-            vec![
-                role(bram, "speaker", json!({ "assignedBy": PIM })),
-                // Staff can't make anyone an owner.
-                role(mallory, "owner", json!({ "assignedBy": PIM })),
-                join(bram, 20, None, json!({})),
-                join(mallory, 21, None, json!({})),
-            ]
-        };
-        let org = org_with(&["code"], true, records());
-        let conference = org.conference(&space(CONFERENCE_TYPE)).unwrap();
-        assert!(conference.is_member(bram));
-        assert_eq!(conference.role_of(&org, bram).as_deref(), Some("speaker"));
-        assert!(!conference.is_member(mallory));
-        assert_eq!(conference.role_of(&org, mallory), None);
-
-        // Once Pim isn't an admin, the role Pim assigned stops counting.
-        let org = org_with(&["code"], false, records());
-        let conference = org.conference(&space(CONFERENCE_TYPE)).unwrap();
-        assert!(!conference.is_member(bram));
-        assert_eq!(conference.role_of(&org, bram), None);
-    }
-
-    #[test]
-    fn a_role_from_the_list_admits_only_while_the_list_does() {
-        let ana = "did:plc:anaaaaaaaaaaaaaaaaaaaaaa";
-        let records = || {
-            vec![
-                role(ana, "speaker", json!({ "assignedBy": OLGA, "via": "list" })),
-                join(ana, 20, None, json!({})),
-            ]
-        };
-        let off = org_with(&["code"], true, records());
-        assert!(!off.conference(&space(CONFERENCE_TYPE)).unwrap().is_member(ana));
-        let on = org_with(&["list"], true, records());
-        assert!(on.conference(&space(CONFERENCE_TYPE)).unwrap().is_member(ana));
-    }
-
-    #[test]
-    fn a_join_counts_from_when_it_was_first_seen_not_before() {
-        let ana = "did:plc:anaaaaaaaaaaaaaaaaaaaaaa";
-        let code = rec(
-            &SpaceUri::admin(ORG).to_string(),
-            OLGA,
-            CODE,
-            "c1",
-            1_000_000,
-            json!({ "space": space(CONFERENCE_TYPE), "codeHash": Secrets::for_tests().code_hmac("tulips"),
-                    "expires": iso(5_000_000) }),
+            ADMIN,
+            PIM,
+            Rank::SuperAdmin,
+            json!({ "subject": PIM, "role": "none" }),
         );
-        let joined = |seen_us| {
-            let org = org_with(
-                &["code"],
-                true,
-                vec![code.clone(), join(ana, 2_000_000, seen_us, json!({ "code": "tulips" }))],
-            );
-            org.conference(&space(CONFERENCE_TYPE)).unwrap().is_member(ana)
-        };
-        assert!(joined(None), "committed before the code expired");
-        assert!(joined(Some(3_000_000)), "and seen before it did");
-        assert!(!joined(Some(6_000_000)), "seen only after it expired: a backdated join");
+        let org = world.org();
+        assert!(!org.is_admin(PIM));
+        assert!(org.named_admins.contains(PIM), "the crawl still reads his repo");
+        assert!(org.conference(&space(CONFERENCE_TYPE)).unwrap().is_member(BRAM));
     }
 
-    fn admin_rec(subject: &str, role: &str, us: u64) -> Rec {
-        rec(
-            &SpaceUri::admin(ORG).to_string(),
+    #[test]
+    fn tc_58_grounds_stand_until_a_removal_of_their_rank() {
+        let mut world = World::new(&["code"]);
+        world.join(ANA, json!({ "via": "open" }));
+        world.decide(PIM, Rank::Staff, MEMBER, ANA, json!({ "via": "admin" }));
+        world.decide(PIM, Rank::Staff, MEMBER, BRAM, json!({ "via": "admin" }));
+        let conference = world.conference();
+        assert_eq!(conference.standing(ANA).grounds.len(), 2, "her own join and Pim's admission");
+        assert_eq!(
+            conference.standing(BRAM).grounds,
+            [Ground::Admission { by: PIM.into(), rank: Rank::Staff }]
+        );
+        // An owner's removal ends both of Ana's grounds.
+        world.decide(KEES, Rank::Owner, MEMBER, ANA, json!({ "via": "removed", "until": iso(T0) }));
+        let conference = world.conference();
+        assert!(!conference.is_member(ANA));
+        assert_eq!(conference.standing(ANA).decision, Some((Rank::Owner, false)));
+        // Her own join stands over it.
+        world.join(ANA, json!({ "via": "open" }));
+        assert!(world.conference().is_member(ANA));
+    }
+
+    #[test]
+    fn tc_60_a_ban_keeps_the_rank_it_was_signed_with() {
+        let mut world = World::new(&["code"]);
+        world.join(BRAM, json!({ "via": "open" }));
+        world.decide(KEES, Rank::Owner, BAN, BRAM, json!({}));
+        // Kees is made staff: the ban he signed as an owner keeps its rank.
+        let admin = SpaceUri::admin(ORG).to_string();
+        world.sign(
+            &admin,
             OLGA,
             ADMIN,
-            subject,
-            us,
-            json!({ "subject": subject, "role": role }),
-        )
-    }
-
-    fn member(by: &str, subject: &str, rkey: &str, us: u64, removed: bool) -> Rec {
-        let mut value = json!({ "space": space(CONFERENCE_TYPE), "subject": subject });
-        if removed {
-            value["until"] = json!(iso(us));
-        }
-        rec(&SpaceUri::admin(ORG).to_string(), by, MEMBER, rkey, us, value)
-    }
-
-    #[test]
-    fn an_admins_membership_keeps_its_start_and_its_end() {
-        let admitted = member(OLGA, PIM, "m1", 10, false);
-        // Promoted to owner later: the admin record is rewritten, but the
-        // membership still starts when Pim became an admin.
-        let org = org_with(&["code"], false, vec![admin_rec(PIM, "owner", 50), admitted.clone()]);
-        let conference = org.conference(&space(CONFERENCE_TYPE)).unwrap();
-        assert!(conference.was_member_at(PIM, 20));
-        // Removed as an admin: what Pim wrote as a member still counts.
-        let org = org_with(&["code"], false, vec![admitted, member(OLGA, PIM, "m2", 80, true)]);
-        let conference = org.conference(&space(CONFERENCE_TYPE)).unwrap();
-        assert!(!conference.is_member(PIM));
-        assert!(conference.was_member_at(PIM, 20));
-        assert!(!conference.was_member_at(PIM, 90));
-    }
-
-    #[test]
-    fn a_conference_super_admin_counts_only_while_an_admin() {
-        let mallory = "did:plc:malloryaaaaaaaaaaaaaaaaa";
-        let conference_space = space(CONFERENCE_TYPE);
-        let settings = rec(
-            &SpaceUri::admin(ORG).to_string(),
-            OLGA,
-            SPACE,
-            "s2",
-            3,
-            json!({ "space": conference_space, "intake": space(INTAKE_TYPE),
-                    "superAdmin": PIM, "join": { "methods": ["code"] } }),
+            KEES,
+            Rank::SuperAdmin,
+            json!({ "subject": KEES, "role": "staff" }),
         );
-        let made_speaker = rec(
-            &conference_space,
-            PIM,
-            ROLE,
-            mallory,
-            4,
-            json!({ "subject": mallory, "role": "speaker", "assignedBy": PIM }),
+        let conference = world.conference();
+        assert!(conference.banned.contains(BRAM));
+        assert_eq!(conference.standing(BRAM).ban, Some(Rank::Owner));
+        // The super admin's admission lifts it.
+        world.decide(OLGA, Rank::SuperAdmin, MEMBER, BRAM, json!({ "via": "admin" }));
+        let conference = world.conference();
+        assert!(conference.is_member(BRAM) && !conference.banned.contains(BRAM));
+    }
+
+    #[test]
+    fn tc_64_an_unsigned_join_is_a_request_at_most() {
+        let mut world = World::new(&["code", "request"]);
+        world.recs.push(Rec {
+            space: space(INTAKE_TYPE),
+            repo: ANA.into(),
+            collection: JOIN.into(),
+            rkey: "j".into(),
+            rev: String::new(),
+            // After the world's first three signings, before the next.
+            us: T0 + 3_500,
+            value: json!({ "code": "atmosphere27" }),
+        });
+        let conference = world.conference();
+        assert!(!conference.is_member(ANA));
+        assert!(conference.pending.contains_key(ANA));
+        // Denied after it, it's no longer waiting.
+        world.decide(OLGA, Rank::SuperAdmin, DENY, ANA, json!({}));
+        let conference = world.conference();
+        assert!(!conference.pending.contains_key(ANA));
+        // With requests off, it's nothing at all.
+        let mut off = World::new(&["code"]);
+        off.recs.push(Rec {
+            repo: ANA.into(),
+            ..world.recs.iter().find(|r| r.rkey == "j").unwrap().clone()
+        });
+        assert!(off.conference().pending.is_empty());
+    }
+
+    #[test]
+    fn a_copy_with_the_same_seq_counts_once_and_leaves_dont_count_unsigned() {
+        let mut world = World::new(&["open"]);
+        world.join(ANA, json!({ "via": "open" }));
+        let copy = Rec { rkey: "copy".into(), ..world.recs.last().unwrap().clone() };
+        world.recs.push(copy);
+        // An unsigned leave doesn't take her out.
+        world.recs.push(Rec {
+            space: space(INTAKE_TYPE),
+            repo: ANA.into(),
+            collection: LEAVE.into(),
+            rkey: "l".into(),
+            rev: String::new(),
+            us: T0 + 900_000,
+            value: json!({}),
+        });
+        let conference = world.conference();
+        assert_eq!(conference.standing(ANA).grounds, [Ground::Own]);
+        assert!(conference.is_member(ANA));
+        // A signed one does.
+        world.sign(&space(INTAKE_TYPE), ANA, LEAVE, "l2", Rank::Person, json!({}));
+        assert!(!world.conference().is_member(ANA));
+    }
+
+    #[test]
+    fn tc_63_the_latest_version_of_a_decision_in_its_repo_stands() {
+        let mut world = World::new(&["code"]);
+        world.decide(OLGA, Rank::SuperAdmin, MEMBER, BRAM, json!({ "via": "admin" }));
+        assert!(world.conference().is_member(BRAM));
+        // A later copy of it, in the same repo, whose signature no longer
+        // verifies (here: tampered), is the version that stands.
+        let mut copy = world.recs.last().unwrap().clone();
+        copy.rkey = "copy".into();
+        copy.rev = "3zzzzzzzzzzzz".into();
+        copy.value["signatures"][0]["signature"]["$bytes"] =
+            json!(crate::crypto::encode_b64(&[1; 64]));
+        world.recs.push(copy.clone());
+        assert!(!world.conference().is_member(BRAM));
+        // Written earlier than the original, it's an old version: the original stands.
+        world.recs.last_mut().unwrap().rev = String::new();
+        world
+            .recs
+            .iter_mut()
+            .filter(|r| r.rkey != "copy")
+            .for_each(|r| r.rev = "3aaaaaaaaaaaa".into());
+        assert!(world.conference().is_member(BRAM));
+        // In another repo, a copy changes nothing.
+        let elsewhere = Rec { repo: PIM.into(), rev: "3zzzzzzzzzzzz".into(), ..copy };
+        world.recs.retain(|r| r.rkey != "copy");
+        world.recs.push(elsewhere);
+        assert!(world.conference().is_member(BRAM));
+    }
+
+    #[test]
+    fn code_limits_count_distinct_dids() {
+        let secrets = Secrets::for_tests();
+        let hash = secrets.code_hmac("crew");
+        let mut world = World::new(&["code"]);
+        world.decide(
+            KEES,
+            Rank::Owner,
+            CODE,
+            "",
+            json!({ "codeHash": hash, "personal": false, "maxUses": 2 }),
         );
-        let org = org_with(&["code"], true, vec![settings.clone(), made_speaker.clone()]);
-        let conference = org.conference(&conference_space).unwrap();
-        assert_eq!(conference.roles.get(mallory).map(String::as_str), Some("speaker"));
-        let org = org_with(&["code"], false, vec![settings, made_speaker]);
-        let conference = org.conference(&conference_space).unwrap();
-        assert!(conference.roles.is_empty(), "Pim isn't an admin any more");
-    }
-
-    #[test]
-    fn a_staff_conference_super_admin_has_only_staff_powers() {
-        let mallory = "did:plc:malloryaaaaaaaaaaaaaaaaa";
-        let conference_space = space(CONFERENCE_TYPE);
-        let settings = rec(
-            &SpaceUri::admin(ORG).to_string(),
-            OLGA,
-            SPACE,
-            "s2",
-            3,
-            json!({ "space": conference_space, "intake": space(INTAKE_TYPE),
-                    "superAdmin": PIM, "join": { "methods": ["code"] } }),
+        world.join(ANA, json!({ "via": "code", "code": "crew" }));
+        world.join(ANA, json!({ "via": "code", "code": "crew" }));
+        let none = BTreeSet::new();
+        let conference = world.conference();
+        assert!(conference.code_admits(&hash, BRAM, T0, &none), "Ana's two joins are one use");
+        assert!(!conference.code_admits(&hash, BRAM, T0, &BTreeSet::from([PIM.to_owned()])));
+        assert!(
+            conference.code_admits(&hash, ANA, T0, &BTreeSet::from([PIM.to_owned()])),
+            "she can rejoin"
         );
-        let in_space = |collection: &str, rkey: &str, value: Value| {
-            rec(&conference_space, PIM, collection, rkey, 4, value)
-        };
-        let recs = |pim_role: &str| {
-            vec![
-                settings.clone(),
-                admin_rec(PIM, pim_role, 2),
-                in_space(ROLE, mallory, json!({ "subject": mallory, "role": "owner" })),
-                in_space(RULES, "self", json!({ "rules": [] })),
-            ]
-        };
-        let staff = org_with(&["code"], true, recs("staff"));
-        let conference = staff.conference(&conference_space).unwrap();
-        assert!(!conference.roles.contains_key(mallory), "staff can't make an owner");
-        assert!(conference.rules.is_none(), "nor set the rules");
-        let owner = org_with(&["code"], true, recs("owner"));
-        let conference = owner.conference(&conference_space).unwrap();
-        assert_eq!(conference.roles.get(mallory).map(String::as_str), Some("owner"));
-        assert!(conference.rules.is_some());
-    }
-
-    #[test]
-    fn admins_cant_be_banned() {
-        let kees = "did:plc:keesaaaaaaaaaaaaaaaaaaaa";
-        let ban = |subject: &str| {
-            rec(
-                &SpaceUri::admin(ORG).to_string(),
-                kees,
-                BAN,
-                subject,
-                5,
-                json!({ "space": space(CONFERENCE_TYPE), "subject": subject }),
-            )
-        };
-        let org = org_with(&["code"], true, vec![admin_rec(kees, "owner", 1), ban(OLGA), ban(PIM)]);
-        let conference = org.conference(&space(CONFERENCE_TYPE)).unwrap();
-        assert!(conference.banned.is_empty());
-        assert!(conference.is_member(OLGA) && conference.is_member(PIM));
-    }
-
-    #[test]
-    fn a_list_row_counts_by_its_did_and_only_while_its_importer_is_an_owner() {
-        let kees = "did:plc:keesaaaaaaaaaaaaaaaaaaaa";
-        let ana = "did:plc:anaaaaaaaaaaaaaaaaaaaaaa";
-        let entry = rec(
-            &SpaceUri::admin(ORG).to_string(),
-            kees,
-            LIST_ENTRY,
-            "l1",
-            5,
-            json!({ "space": space(CONFERENCE_TYPE), "did": ana, "handle": "ana.test" }),
-        );
-        // A row with only a handle (from another app, say) matches no one.
-        let handle_only = rec(
-            &SpaceUri::admin(ORG).to_string(),
-            kees,
-            LIST_ENTRY,
-            "l2",
-            5,
-            json!({ "space": space(CONFERENCE_TYPE), "handle": "mallory.test" }),
-        );
-        let org = org_with(
-            &["list"],
-            true,
-            vec![admin_rec(kees, "owner", 1), entry.clone(), handle_only.clone()],
-        );
-        let conference = org.conference(&space(CONFERENCE_TYPE)).unwrap();
-        assert!(conference.on_list(ana));
-        assert_eq!(conference.list.len(), 2);
-        assert!(conference.list.iter().all(|e| e.by == kees));
-        assert!(!conference.on_list("did:plc:malloryaaaaaaaaaaaaaaaaa"));
-
-        // Once Kees isn't an owner, the rows Kees imported stop counting.
-        let org = org_with(&["list"], true, vec![admin_rec(kees, "staff", 1), entry, handle_only]);
-        assert!(!org.conference(&space(CONFERENCE_TYPE)).unwrap().on_list(ana));
-    }
-
-    #[test]
-    fn an_owners_decision_stands_against_staff_and_staff_decide_among_themselves() {
-        let kees = "did:plc:keesaaaaaaaaaaaaaaaaaaaa";
-        let lotte = "did:plc:lotteaaaaaaaaaaaaaaaaaaa";
-        let ana = "did:plc:anaaaaaaaaaaaaaaaaaaaaaa";
-        let admins = || vec![admin_rec(kees, "owner", 1), admin_rec(lotte, "staff", 1)];
-        let member_of = |more: Vec<Rec>| {
-            let mut recs = admins();
-            recs.extend(more);
-            let org = org_with(&["code", "request"], true, recs);
-            org.conference(&space(CONFERENCE_TYPE)).unwrap().is_member(ana)
-        };
-        let joined = || join(ana, 5, None, json!({}));
-        let deny = |by: &str, us: u64| {
-            rec(
-                &SpaceUri::admin(ORG).to_string(),
-                by,
-                DENY,
-                &format!("d{us}"),
-                us,
-                json!({ "space": space(CONFERENCE_TYPE), "subject": ana }),
-            )
-        };
-        // Kees removes Ana; Pim, staff, can't undo it, but Kees can.
-        let removed = vec![member(kees, ana, "m1", 10, false), member(kees, ana, "m2", 20, true)];
-        let mut by_staff = removed.clone();
-        by_staff.push(member(PIM, ana, "m3", 30, false));
-        assert!(!member_of(by_staff.clone()), "the owner's removal stands");
-        by_staff.push(member(kees, ana, "m4", 40, false));
-        assert!(member_of(by_staff), "the owner admits her again");
-        // Kees admits Ana; staff can't remove her.
-        assert!(member_of(vec![
-            member(kees, ana, "m1", 10, false),
-            member(PIM, ana, "m2", 20, true)
-        ]));
-        // Kees denies her request; staff can't admit her.
-        let mut asked = vec![join(ana, 5, None, json!({})), deny(kees, 10)];
-        asked.push(member(PIM, ana, "m1", 20, false));
-        assert!(!member_of(asked), "the owner's denial stands");
-        // Between staff, the latest decision stands.
-        assert!(member_of(vec![
-            joined(),
-            member(lotte, ana, "m1", 10, true),
-            member(PIM, ana, "m2", 20, false),
-        ]));
-        assert!(!member_of(vec![
-            joined(),
-            member(PIM, ana, "m1", 10, false),
-            member(lotte, ana, "m2", 20, true),
-        ]));
-        // A staff denial is overridden by staff too.
-        assert!(member_of(vec![joined(), deny(lotte, 10), member(PIM, ana, "m1", 20, false)]));
-        // Between owners too; and the super admin's stands against owners.
-        let sem = "did:plc:semaaaaaaaaaaaaaaaaaaaaa";
-        let mut recs = vec![admin_rec(sem, "owner", 1)];
-        recs.extend([member(kees, ana, "m1", 10, true), member(sem, ana, "m2", 20, false)]);
-        assert!(member_of(recs));
-        assert!(!member_of(vec![
-            member(OLGA, ana, "m1", 10, true),
-            member(kees, ana, "m2", 20, false)
-        ]));
-        // The person acting themselves ends any decision's say.
-        assert!(member_of(vec![
-            member(kees, ana, "m1", 10, true),
-            join(ana, 15, None, json!({})),
-            member(PIM, ana, "m2", 20, false),
-        ]));
-    }
-
-    #[test]
-    fn a_kept_admission_keeps_the_period_it_began() {
-        let bram = "did:plc:bramaaaaaaaaaaaaaaaaaaaa";
-        let mut kept = member(OLGA, bram, "m2", 30_000, false);
-        kept.value["via"] = json!(VIA_KEPT);
-        kept.value["since"] = json!(iso(10_000));
-        // Pim, who admitted Bram at 10, isn't an admin any more.
-        let org =
-            org_with(&["code"], false, vec![member(PIM, bram, "m1", 10_000, false), kept.clone()]);
-        let conference = org.conference(&space(CONFERENCE_TYPE)).unwrap();
-        assert!(conference.is_member(bram));
-        assert!(conference.was_member_at(bram, 20_000), "what he wrote before the keep");
-        // A `since` after the record, or from anyone but the super admin, isn't honoured.
-        kept.value["since"] = json!(iso(90_000));
-        let org = org_with(&["code"], false, vec![kept.clone()]);
-        assert!(!org.conference(&space(CONFERENCE_TYPE)).unwrap().was_member_at(bram, 20_000));
-    }
-
-    #[test]
-    fn a_list_role_counts_only_while_its_importer_is_an_owner() {
-        let kees = "did:plc:keesaaaaaaaaaaaaaaaaaaaa";
-        let zoe = "did:plc:zoeaaaaaaaaaaaaaaaaaaaaa";
-        let given = role(zoe, "speaker", json!({ "assignedBy": kees, "via": "list" }));
-        let joined = join(zoe, 20, None, json!({}));
-        let member = |kees_role: &str| {
-            let recs = vec![admin_rec(kees, kees_role, 1), given.clone(), joined.clone()];
-            org_with(&["list"], true, recs)
-                .conference(&space(CONFERENCE_TYPE))
-                .unwrap()
-                .is_member(zoe)
-        };
-        assert!(member("owner"));
-        assert!(!member("staff"), "a staff admin's list gives no roles");
+        // Revoked by an admin of its rank, it admits no one.
+        world.decide(OLGA, Rank::SuperAdmin, CODE_REVOKE, "", json!({ "codeHash": hash }));
+        assert!(!world.conference().code_admits(&hash, ANA, T0, &none));
     }
 
     #[test]
     fn the_index_derives_from_admin_records_joins_leaves_roles_and_rules_only() {
-        let of = |kind: &str| SpaceUri::new(ORG, kind, "3conf");
+        let conference = SpaceUri::new(ORG, CONFERENCE_TYPE, "3conf");
+        let intake = SpaceUri::new(ORG, INTAKE_TYPE, "3conf");
         let admin = SpaceUri::admin(ORG);
-        assert!(derives_from(&admin, MEMBER) && derives_from(&admin, "com.example.anything"));
-        assert!(!derives_from(&SpaceUri::new(ORG, ADMIN_TYPE, "other"), MEMBER));
-        assert!(derives_from(&of(INTAKE_TYPE), JOIN) && derives_from(&of(INTAKE_TYPE), LEAVE));
-        assert!(!derives_from(&of(INTAKE_TYPE), "com.example.junk"));
-        assert!(
-            derives_from(&of(CONFERENCE_TYPE), ROLE) && derives_from(&of(CONFERENCE_TYPE), RULES)
-        );
-        // Members' own records: no one's access depends on them.
-        assert!(!derives_from(&of(CONFERENCE_TYPE), "community.lexicon.calendar.event"));
-        assert!(!derives_from(&of(CONFERENCE_TYPE), "app.eventside.chat.message"));
-        assert!(!derives_from(&of("com.example.space"), ROLE));
+        assert!(derives_from(&admin, "app.eventside.admin.anything"));
+        assert!(derives_from(&intake, JOIN) && derives_from(&intake, LEAVE));
+        assert!(!derives_from(&intake, "com.example.junk"));
+        assert!(derives_from(&conference, ROLE) && derives_from(&conference, RULES));
+        assert!(!derives_from(&conference, "community.lexicon.calendar.event"));
+        assert!(!derives_from(&SpaceUri::new(ORG, ADMIN_TYPE, "other"), ADMIN));
     }
 
     #[test]
-    fn a_conference_record_cant_be_dated_long_before_it_was_seen() {
-        assert_eq!(conference_us(5_000_000, None), 5_000_000);
-        // A notification's ordinary delay: dated by its commit.
-        assert_eq!(conference_us(5_000_000, Some(30_000_000)), 5_000_000);
-        // Backdated by more than that: dated by when it was seen.
-        let seen = 500_000_000;
-        assert_eq!(conference_us(5_000_000, Some(seen)), seen - BACKDATE_SLACK_US);
-    }
-
-    #[test]
-    fn the_super_admins_latest_decision_stands_against_other_admins() {
-        let bram = "did:plc:bramaaaaaaaaaaaaaaaaaaaa";
-        let deny = |by: &str, us: u64| {
-            rec(
-                &SpaceUri::admin(ORG).to_string(),
-                by,
-                DENY,
-                "d",
-                us,
-                json!({ "space": space(CONFERENCE_TYPE), "subject": bram }),
-            )
-        };
-        let member_of = |recs: Vec<Rec>| {
-            let org = org_with(&["request"], true, recs);
-            org.conference(&space(CONFERENCE_TYPE)).unwrap().is_member(bram)
-        };
-        // Olga removes Bram; Pim, staff, can't undo it.
-        let removed = vec![member(OLGA, bram, "m1", 10, false), member(OLGA, bram, "m2", 20, true)];
-        let mut undone = removed.clone();
-        undone.push(member(PIM, bram, "m3", 30, false));
-        assert!(!member_of(undone), "Olga's removal stands");
-        // Olga admits Bram; Pim can't remove him.
-        assert!(member_of(vec![
-            member(OLGA, bram, "m1", 10, false),
-            member(PIM, bram, "m2", 20, true)
-        ]));
-        // Olga denies Bram; Pim can't admit him.
-        assert!(!member_of(vec![
-            join(bram, 5, None, json!({})),
-            deny(OLGA, 10),
-            member(PIM, bram, "m1", 20, false),
-        ]));
-        // Until Bram asks again: a new request is a new question.
-        let mut asked_again = removed;
-        asked_again.push(join(bram, 25, None, json!({})));
-        asked_again.push(member(PIM, bram, "m3", 30, false));
-        assert!(member_of(asked_again));
-        // Or Olga decides again.
-        assert!(member_of(vec![
-            member(OLGA, bram, "m1", 10, true),
-            member(OLGA, bram, "m2", 20, false),
-            member(PIM, bram, "m3", 15, false),
-        ]));
-    }
-
-    #[test]
-    fn only_the_super_admins_admin_and_email_records_are_neutral() {
-        let bram = "did:plc:bramaaaaaaaaaaaaaaaaaaaa";
-        let claimed = |via: &str, us: u64, removed: bool| {
-            let mut value = json!({ "space": space(CONFERENCE_TYPE), "subject": bram, "via": via });
-            if removed {
-                value["until"] = json!(iso(us));
-            }
-            rec(&SpaceUri::admin(ORG).to_string(), PIM, MEMBER, "x", us, value)
-        };
-        let member_of = |recs: Vec<Rec>| {
-            let org = org_with(&["request"], true, recs);
-            org.conference(&space(CONFERENCE_TYPE)).unwrap().is_member(bram)
-        };
-        let removed =
-            || vec![member(OLGA, bram, "m1", 10, false), member(OLGA, bram, "m2", 20, true)];
-        for via in ["email", VIA_ADMIN] {
-            let mut readmitted = removed();
-            readmitted.push(claimed(via, 30, false));
-            assert!(!member_of(readmitted), "Pim's via {via} can't undo Olga's removal");
-        }
-        assert!(
-            member_of(vec![
-                member(OLGA, bram, "m1", 10, false),
-                claimed(VIA_ADMIN_REMOVED, 20, true)
-            ]),
-            "Pim's via orgAdminRemoved can't undo Olga's admission"
-        );
-        // Olga's own email match still ends her earlier decision.
-        let mut matched = removed();
-        let mut email = member(OLGA, bram, "m3", 30, false);
-        email.value["via"] = json!("email");
-        matched.push(email);
-        assert!(member_of(matched));
-    }
-
-    #[test]
-    fn a_ban_the_super_admin_overrode_still_ended_the_membership_then() {
-        let bram = "did:plc:bramaaaaaaaaaaaaaaaaaaaa";
-        let kees = "did:plc:keesaaaaaaaaaaaaaaaaaaaa";
-        let ban = rec(
-            &SpaceUri::admin(ORG).to_string(),
-            kees,
-            BAN,
-            "b",
-            20,
-            json!({ "space": space(CONFERENCE_TYPE), "subject": bram }),
-        );
-        let org = org_with(
-            &["code"],
-            true,
-            vec![
-                admin_rec(kees, "owner", 1),
-                member(OLGA, bram, "m1", 10, false),
-                ban,
-                member(PIM, bram, "m3", 30, false),
-                member(OLGA, bram, "m2", 40, false),
-            ],
-        );
-        let conference = org.conference(&space(CONFERENCE_TYPE)).unwrap();
-        assert!(conference.was_member_at(bram, 15));
-        assert!(!conference.was_member_at(bram, 25), "banned from 20");
-        assert!(!conference.was_member_at(bram, 35), "staff can't admit him while banned");
-        assert!(conference.was_member_at(bram, 45), "Olga admitted him again at 40");
-        assert!(conference.is_member(bram));
-        assert!(!conference.banned.contains(bram));
-    }
-
-    #[test]
-    fn only_the_super_admins_own_admission_lifts_a_ban() {
-        let bram = "did:plc:bramaaaaaaaaaaaaaaaaaaaa";
-        let kees = "did:plc:keesaaaaaaaaaaaaaaaaaaaa";
-        let ban = rec(
-            &SpaceUri::admin(ORG).to_string(),
-            kees,
-            BAN,
-            "b",
-            20,
-            json!({ "space": space(CONFERENCE_TYPE), "subject": bram }),
-        );
-        let marked = |rkey: &str, via: &str, us: u64| {
-            let mut value = json!({ "space": space(CONFERENCE_TYPE), "subject": bram, "via": via });
-            if via == VIA_ADMIN_REMOVED {
-                value["until"] = json!(iso(us));
-            }
-            rec(&SpaceUri::admin(ORG).to_string(), OLGA, MEMBER, rkey, us, value)
-        };
-        // Bram, banned by Kees, is made an admin and then removed again:
-        // `org admin add`'s mark doesn't lift the ban.
-        let org = org_with(
-            &["code"],
-            true,
-            vec![
-                admin_rec(kees, "owner", 1),
-                ban.clone(),
-                marked("m1", VIA_ADMIN, 30),
-                marked("m2", VIA_ADMIN_REMOVED, 40),
-            ],
-        );
-        let conference = org.conference(&space(CONFERENCE_TYPE)).unwrap();
-        assert!(conference.banned.contains(bram), "Kees's ban stands");
-        assert!(!conference.is_member(bram));
-        // Nor does an email match.
-        let org = org_with(
-            &["code"],
-            true,
-            vec![admin_rec(kees, "owner", 1), ban.clone(), marked("m1", "email", 30)],
-        );
-        assert!(org.conference(&space(CONFERENCE_TYPE)).unwrap().banned.contains(bram));
-        // Her own admission does.
-        let org = org_with(
-            &["code"],
-            true,
-            vec![admin_rec(kees, "owner", 1), ban, member(OLGA, bram, "m1", 30, false)],
-        );
-        let conference = org.conference(&space(CONFERENCE_TYPE)).unwrap();
-        assert!(!conference.banned.contains(bram));
-        assert!(conference.is_member(bram));
-    }
-
-    #[test]
-    fn a_banned_persons_admin_period_ends_rather_than_vanishing() {
-        let bram = "did:plc:bramaaaaaaaaaaaaaaaaaaaa";
-        let kees = "did:plc:keesaaaaaaaaaaaaaaaaaaaa";
-        let ban = |us: u64| {
-            rec(
-                &SpaceUri::admin(ORG).to_string(),
-                kees,
-                BAN,
-                &format!("b{us}"),
-                us,
-                json!({ "space": space(CONFERENCE_TYPE), "subject": bram }),
-            )
-        };
-        let marked = |rkey: &str, via: &str, us: u64| {
-            let mut value = json!({ "space": space(CONFERENCE_TYPE), "subject": bram, "via": via });
-            if via == VIA_ADMIN_REMOVED {
-                value["until"] = json!(iso(us));
-            }
-            rec(&SpaceUri::admin(ORG).to_string(), OLGA, MEMBER, rkey, us, value)
-        };
-        // Banned by Kees at 20 (or at 35, while an admin), Bram is an admin
-        // from 30 until 40: a member then, and banned again after.
-        for banned_at in [20, 35] {
-            let org = org_with(
-                &["code"],
-                true,
-                vec![
-                    admin_rec(kees, "owner", 1),
-                    ban(banned_at),
-                    marked("m1", VIA_ADMIN, 30),
-                    marked("m2", VIA_ADMIN_REMOVED, 40),
-                    join(bram, 50, None, json!({})),
-                ],
-            );
-            let conference = org.conference(&space(CONFERENCE_TYPE)).unwrap();
-            assert!(!conference.was_member_at(bram, 25));
-            assert!(conference.was_member_at(bram, 35), "an admin then (ban at {banned_at})");
-            assert!(conference.was_member_at(bram, 39));
-            assert!(!conference.was_member_at(bram, 45));
-            assert!(!conference.is_member(bram), "the ban holds again (ban at {banned_at})");
-            assert!(conference.banned.contains(bram));
-        }
-    }
-
-    #[test]
-    fn a_ban_holds_outside_an_admin_period_whether_or_not_they_are_still_an_admin() {
-        let bram = "did:plc:bramaaaaaaaaaaaaaaaaaaaa";
-        let kees = "did:plc:keesaaaaaaaaaaaaaaaaaaaa";
-        let ban = rec(
-            &SpaceUri::admin(ORG).to_string(),
-            kees,
-            BAN,
-            "b",
-            20,
-            json!({ "space": space(CONFERENCE_TYPE), "subject": bram }),
-        );
-        let marked = |rkey: &str, via: &str, us: u64| {
-            let mut value = json!({ "space": space(CONFERENCE_TYPE), "subject": bram, "via": via });
-            if via == VIA_ADMIN_REMOVED {
-                value["until"] = json!(iso(us));
-            }
-            rec(&SpaceUri::admin(ORG).to_string(), OLGA, MEMBER, rkey, us, value)
-        };
-        let mut joined = join(bram, 10, None, json!({}));
-        joined.rkey = "j10".into();
-        let mut during_ban = join(bram, 25, None, json!({}));
-        during_ban.rkey = "j25".into();
-        let base =
-            vec![admin_rec(kees, "owner", 1), joined, ban, during_ban, marked("m1", VIA_ADMIN, 30)];
-
-        // Still an admin: a member again from the mark, but not while banned
-        // before it, and the join written during the ban isn't honoured.
-        let mut still = base.clone();
-        still.push(admin_rec(bram, "staff", 30));
-        let org = org_with(&["open"], true, still);
-        let conference = org.conference(&space(CONFERENCE_TYPE)).unwrap();
-        assert!(conference.was_member_at(bram, 15));
-        assert!(!conference.was_member_at(bram, 25), "banned from 20, while still an admin");
-        assert!(conference.was_member_at(bram, 35));
-        assert!(conference.is_member(bram));
-        assert!(!conference.banned.contains(bram), "a current admin isn't banned");
-
-        // Removed at 40: the same history, and banned again after.
-        let mut removed = base;
-        removed.push(marked("m2", VIA_ADMIN_REMOVED, 40));
-        let org = org_with(&["open"], true, removed);
-        let conference = org.conference(&space(CONFERENCE_TYPE)).unwrap();
-        assert!(conference.was_member_at(bram, 15));
-        assert!(!conference.was_member_at(bram, 25), "banned from 20, once removed");
-        assert!(conference.was_member_at(bram, 35));
-        assert!(!conference.was_member_at(bram, 45));
-        assert!(conference.banned.contains(bram));
-    }
-
-    #[test]
-    fn a_staff_conference_super_admin_cant_borrow_an_owners_powers() {
-        let mallory = "did:plc:malloryaaaaaaaaaaaaaaaaa";
-        let kees = "did:plc:keesaaaaaaaaaaaaaaaaaaaa";
-        let conference_space = space(CONFERENCE_TYPE);
-        let settings = rec(
-            &SpaceUri::admin(ORG).to_string(),
+    fn a_role_is_the_latest_signed_one_and_counts_from_when_it_took_effect() {
+        let mut world = World::new(&["code"]);
+        let conf = space(CONFERENCE_TYPE);
+        world.sign(
+            &conf,
             OLGA,
-            SPACE,
-            "s2",
-            3,
-            json!({ "space": conference_space, "intake": space(INTAKE_TYPE),
-                    "superAdmin": PIM, "join": { "methods": ["code"] } }),
+            ROLE,
+            ANA,
+            Rank::Owner,
+            json!({ "subject": ANA, "role": "speaker" }),
         );
-        let recs = |pim_role: &str| {
-            vec![
-                settings.clone(),
-                admin_rec(PIM, pim_role, 2),
-                admin_rec(kees, "owner", 2),
-                rec(
-                    &conference_space,
-                    PIM,
-                    ROLE,
-                    mallory,
-                    4,
-                    json!({ "subject": mallory, "role": "owner", "assignedBy": kees }),
-                ),
-            ]
-        };
-        let staff = org_with(&["code"], true, recs("staff"));
-        let conference = staff.conference(&conference_space).unwrap();
-        assert!(!conference.roles.contains_key(mallory), "an owner named as decider lends nothing");
-        let owner = org_with(&["code"], true, recs("owner"));
-        let conference = owner.conference(&conference_space).unwrap();
-        assert_eq!(conference.roles.get(mallory).map(String::as_str), Some("owner"));
-    }
-
-    #[test]
-    fn the_super_admin_is_always_an_owner() {
-        let code = rec(
-            &SpaceUri::admin(ORG).to_string(),
+        world.sign(
+            &conf,
             OLGA,
-            CODE,
-            "c1",
-            2,
-            json!({ "space": space(CONFERENCE_TYPE), "codeHash": Secrets::for_tests().code_hmac("tulips") }),
+            ROLE,
+            ANA,
+            Rank::Owner,
+            json!({ "subject": ANA, "role": "staff", "since": iso(T0 + 40_000) }),
         );
-        // An `admin` record naming Olga staff changes nothing.
-        let org = org_with(&["code"], true, vec![admin_rec(OLGA, "staff", 1), code]);
-        assert_eq!(org.admin_role(OLGA), Some(Role::Owner));
-        let conference = org.conference(&space(CONFERENCE_TYPE)).unwrap();
-        assert!(conference.has_code(&Secrets::for_tests().code_hmac("tulips")), "her code counts");
-    }
-
-    #[test]
-    fn admin_and_role_periods_are_judged_at_the_time() {
-        let ana = "did:plc:anaaaaaaaaaaaaaaaaaaaa";
-        let mark = |rkey: &str, us: u64, via: &str| {
-            let mut value = json!({ "space": space(CONFERENCE_TYPE), "subject": PIM, "via": via });
-            if via == VIA_ADMIN_REMOVED {
-                value["until"] = json!(iso(us));
-            }
-            rec(&SpaceUri::admin(ORG).to_string(), OLGA, MEMBER, rkey, us, value)
-        };
-        // Pim was an admin from 10 until 50, and isn't one now.
-        let org = org_with(
-            &["code"],
-            false,
-            vec![
-                mark("m1", 10, VIA_ADMIN),
-                mark("m2", 50, VIA_ADMIN_REMOVED),
-                role(ana, "staff", json!({ "since": iso(40_000) })),
-            ],
+        // Written by anyone else, or unsigned, a role doesn't count.
+        world.sign(
+            &conf,
+            PIM,
+            ROLE,
+            BRAM,
+            Rank::Staff,
+            json!({ "subject": BRAM, "role": "owner" }),
         );
-        let conference = org.conference(&space(CONFERENCE_TYPE)).unwrap();
-        assert!(conference.was_admin_at(&org, PIM, 20));
-        assert!(!conference.was_admin_at(&org, PIM, 60));
-        assert!(!conference.was_admin_at(&org, PIM, 5));
+        let org = world.org();
+        let conference = org.conference(&conf).unwrap();
+        assert_eq!(conference.roles.get(ANA).map(String::as_str), Some("staff"));
+        assert_eq!(conference.role_at(ANA, T0 + 30_000), None);
+        assert_eq!(conference.role_at(ANA, T0 + 45_000), Some("staff"));
+        assert!(!conference.roles.contains_key(BRAM));
         assert!(conference.was_admin_at(&org, OLGA, 1));
-        // Ana's staff role counts from when it took effect, not before.
-        assert_eq!(conference.role_at(ana, 30_000), None);
-        assert_eq!(conference.role_at(ana, 45_000), Some("staff"));
     }
 
     #[test]
