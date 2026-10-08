@@ -299,6 +299,295 @@ experience builds on, sets the app's navigation, changes the premise of
 
 ## Design review
 
+**Approach.**
+
+- **Eventside is the feed host.** Every record in this feature lives in
+  the conference's private space, in its author's repo there.
+- **Every write goes through eventside.** Sign-in is a backend-for-frontend
+  ([`attendee-sign-in`](attendee-sign-in.md)): the PWA holds only a cookie,
+  and eventside holds the OAuth tokens. So when an attendee posts,
+  eventside writes the record with their session. That lets it:
+  - decide acceptance at write time and tell the composer straight away
+    ("posted to Keynote; Announcements is organizers only");
+  - index the record as it writes it, so it shows without waiting for
+    [`space-sync`](space-sync.md);
+  - refuse records the author may not write: feed records, pins, labels,
+    `urgent`.
+- **Records written behind eventside's back** (straight to a PDS) are
+  checked the same way when space-sync indexes them.
+  - A post whose target feed isn't indexed yet stays pending until the
+    feed record arrives, rather than being refused.
+- **Decisions are kept, not recomputed.** Each acceptance decision is
+  stored with the time it was made:
+  - A later role change or bar doesn't retract earlier posts. That follows
+    the principle from the conference-space redesign: a decision is
+    checked when it's made and stays valid.
+  - A re-index or backfill keeps the stored decisions rather than
+    recomputing them against today's roles.
+  - Other apps the organizer allows have to trust eventside's decisions.
+    They can read the records but can't reproduce the decisions exactly.
+  - To take a post down, a moderator hides it, or the author deletes it.
+- **`getFeed` builds one page of one feed for one viewer:**
+  1. **Read the feed record.** If the viewer isn't in its audience, the
+     answer is "not found", the same as for a feed that doesn't exist.
+  2. **Get a skeleton from the feed's algorithm.** A built-in one runs
+     in-process. For an outside service, eventside sends a candidate
+     list and the service only orders it (see Interfaces).
+  3. **Filter for the viewer.** A post stays if both hold:
+     - it was accepted into at least one feed whose audience includes the
+       viewer;
+     - it either has no audience of its own, or the viewer is in that
+       audience too.
+
+     Hidden, deleted and unknown entries are dropped.
+  4. **Apply the moderators' pins**, on the first page only:
+     - a pin counts only if the post was accepted into this feed and
+       passed step 3;
+     - pinned posts don't appear again on later pages.
+  5. **Hydrate** the posts and computed cards, through the visibility
+     rules below.
+- **Short pages.** Filtering can leave a page short. Eventside asks the
+  algorithm for more until the page is full or a budget runs out.
+
+**Visibility of card data.** Every card is resolved by eventside, since
+attendees can't read the space. That's the main privacy boundary, so this
+feature defines the read-only `SourceResolver` and its rule. A source
+resolves only if it is:
+
+- (a) a post the viewer can see under the filter above;
+- (b) a record in the viewer's own repo; or
+- (c) a record by eventside or an organizer.
+
+Beyond that:
+
+- A card written by an attendee can't use `collectionSource`.
+- Anything else is `unavailable`, and the reason never reaches the card
+  (the [`ui-blocks`](ui-blocks.md) contract).
+- `getCardData` providers run the same check on every URI in their
+  parameters. "Missing" and "forbidden" give the same answer.
+- [`block-actions`](block-actions.md) views (tallies, lists) are reached
+  only through cards that pass this check.
+
+**Who may write what** (eventside checks at write time, and again at
+ingest for direct writes):
+
+- **Feed records** count only from eventside's own repo. Eventside writes
+  them:
+  - the main feed, from the conference's template;
+  - a scoped feed whenever a session, room, plan or group appears. Its
+    rkey comes from the subject, so creating it again is harmless.
+  - An organizer edits a feed through eventside, which rewrites the
+    record.
+- **Pins and labels** count only from the feed's moderators, and that's
+  decided when they're written, like acceptance.
+- **`urgent`** counts only on a post by an organizer or a moderator of a
+  target feed.
+- **`pinKinds`** lifts only posts by organizers or moderators. An
+  attendee's post with `kind: wifi` isn't pinned.
+- **Scopes.** Attendees' sessions get `space:` `create` and `delete` on
+  `app.eventside.feed.post` only. Pins and labels are written with
+  moderators' sessions, which add those collections. Feed records are
+  written by eventside as the authority.
+
+**Components.**
+
+- **Server** (`crates/server/src/feeds/`):
+  - `write`: posts, pins and labels, each checked as it's written.
+  - `acceptance`: decisions, and the ingest hook for direct writes.
+  - `audience`: resolvers by kind. An unknown kind matches nobody.
+  - `sources`: the read-only source resolver and its visibility rule.
+  - `algorithms`: built-in algorithms, plus the outside-service client.
+  - `assemble`: `getFeed`.
+  - `cards`: `getCardData` providers.
+  - `provision`: the automatic feed records.
+  - `live`: change notices, and Web Push.
+  - A migration for decisions, pins, labels and push subscriptions.
+- **Built-in algorithms:**
+  - `reverseChronological`: newest first, with parameters `pinKinds` and
+    `expireAfter`.
+  - `chat`: oldest first.
+  - `main`:
+    - pinned kinds first;
+    - then organizer posts and featured plans, newest first;
+    - interleaved with computed cards such as "your next session".
+- **PWA** (`web/src/feeds/`):
+  - `FeedScreen`, which renders entries with `<BlockCard surface="feed">`;
+  - feed navigation from `listFeeds`;
+  - a composer that posts to one or more feeds and shows where the post
+    was accepted;
+  - moderator actions;
+  - an IndexedDB cache of each feed's last page, cleared on sign-out;
+  - a service worker for push.
+- **Routes:**
+  - `/c/<conference>` opens the main feed.
+  - `/c/<conference>/f/<feed rkey>` opens a scoped feed.
+
+**Data** (lexicons under `app.eventside.feed.*`):
+
+- **Card body.** `app.eventside.block.card` is a record type, so the
+  card's body is split out as an object def, `app.eventside.block.defs#cardBody`,
+  that a post can embed.
+  - A card's `CardRef` is then the post's URI.
+  - `block-actions` accepts `feed.post` as a container for cards.
+- **`#audience`** is a list matching the union of:
+  - `#members`;
+  - `#organizers`;
+  - `#group{uri}`;
+  - `#attendees{of}`;
+  - `#people{dids}`.
+
+  Kinds are resolved by the features that own them. Until `groups`,
+  `plans` and `program-import` provide theirs, `#group` and `#attendees`
+  match nobody.
+- **`app.eventside.feed.feed`** (eventside's repo):
+  - `name`, `kind` and `subject?`;
+  - `algorithm`: `#builtin{name, params}`, `#service{did, sendViewer}`,
+    or the reserved `#declarative` and `#wasm`;
+  - `audience`, `posters` and `moderators`;
+  - `freshness`: `live`, `refresh` or `push`.
+- **`app.eventside.feed.post`:**
+  - `feeds`, `kind`, `audience?`, `card` (a `#cardBody`), `urgent?` and
+    `createdAt`.
+- **`app.eventside.feed.pin`** `{feed, subject, createdAt}`, by a
+  moderator. Bluesky keeps a pin on the profile record; here a pin is per
+  feed, so it's a record of its own.
+- **`app.eventside.feed.label`** `{feed, uri, val, neg?, cts}`, by a
+  moderator. It's shaped after `com.atproto.label.defs#label`, scoped to
+  one feed:
+  - `hide` on a post hides it from this feed.
+  - `bar` on a DID refuses that author's future posts here.
+  - `neg` undoes either one.
+- **Decisions** (eventside's database): `(record, feed, outcome, reason,
+  decidedAt)`, for posts, pins and labels.
+- **The post view** that clients get leaves out `feeds` and `audience`.
+  It shows only the target feeds the viewer can see, and never the
+  audience. Otherwise a post would reveal that a private plan's feed
+  exists, or who is in its audience.
+
+**Interfaces** (XRPC; the PWA calls them with the session cookie):
+
+- **Writes:**
+  - `app.eventside.feed.createPost` returns the per-feed decisions.
+  - `deletePost`.
+  - `pin` and `label`, for moderators.
+- **Reads:**
+  - `getFeed{feed, cursor?}` returns the feed's view (name, kind,
+    freshness, and whether the viewer may post or moderate), plus
+    entries `[{post, pinned?} | {card}]`.
+  - `listFeeds{conference}`.
+  - `getCardData{provider, params}`.
+- **`app.eventside.feed.getSkeleton`**, which outside services implement
+  (modeled on `app.bsky.feed.getFeedSkeleton`):
+  - Eventside POSTs `{feed, candidates: [{uri, kind, author,
+    createdAt}], cursor?}`. The candidates are already filtered to what
+    the viewer may see.
+  - The service returns `{entries: [{uri}], cursor?}`, an ordering.
+  - It gets no space access and learns nothing new.
+  - The viewer's DID goes in the service JWT's `sub` only if the feed
+    record says `sendViewer`.
+  - Eventside calls only services on the organizer's allow-list.
+  - Outside services can't add computed cards.
+  - A slow or failing service is cut off at a timeout, and the feed falls
+    back to newest first with a quiet note.
+- **Live:**
+  - `subscribe` is a WebSocket saying "feed X changed".
+  - `registerPush`.
+
+**Impact on existing features.**
+
+- **`conference-space`:** rewritten around one private space per
+  conference, with eventside's `did:web` as its authority. It provides:
+  - the `#members` and `#organizers` resolvers;
+  - the organizer's list of allowed apps;
+  - the template that seeds the main feed.
+
+  The rewrite has to confirm that the space host on the parked branch can
+  hold the authority's own repo, and that the `did:web` document points at
+  it.
+- **`space-sync`:** its index stays. Writes through eventside are indexed
+  as they're written, so the demo doesn't need the notify path. The
+  organizer's delegation token goes, since eventside is the authority. It
+  gains the ingest hook.
+- **`block-actions`:** treats `feed.post` as a container for cards. Its
+  views are reached through the source visibility rule.
+- **`attendee-sign-in`:** adds `space:` scopes on `feed.post` for
+  everyone, and on `feed.pin` and `feed.label` for moderators. Everyone is
+  asked to sign in again, so this should ship before attendees install the
+  app, not during the conference.
+- **`ui-blocks`:** `#cardBody` is split out of the card record, with no
+  change in behavior. `feed` surface cards get a real host.
+- **`plans`:**
+  - A plan's chat is its feed.
+  - Its "changed", "invited you" and "featured" reasons become behavior
+    of the `main` and chat algorithms.
+  - Its audiences use `#audience`.
+
+**Alternatives.**
+
+- **Decide acceptance at read time**, from current roles: a role change
+  would retroactively hide or reveal old posts.
+- **Implicit feeds**, with no record per subject: other allowed apps
+  wouldn't see them, and organizers couldn't override one feed.
+- **Writes straight from the PWA** (the first draft said "no proxy"):
+  impossible with a backend-for-frontend. Writing through eventside also
+  gives immediate feedback.
+- **Outside services reading the space themselves:** they'd see secret
+  ballots and mark-safe responses, and they'd need space credentials.
+  Sending candidates is enough for ranking.
+- **Two record types for hides and bars:** the label shape covers both,
+  plus undoing them.
+
+**Risks.**
+
+- **Schedule.**
+  - Nov 1 is 24 days away. Feeds needs the `conference-space` rewrite,
+    which isn't specced yet, and `space-sync` (in `analysis`). Both need
+    tests and a build.
+  - Proposed demo slice: the main feed, chat feeds, posting with
+    decisions, pins and hides, one computed card, built-in algorithms and
+    the candidate-ordering outside service, refreshed on open, with
+    indexing done as eventside writes.
+  - Proposed to defer: live sockets, Web Push and the offline cache.
+- **Web Push** works on iOS only for an installed PWA, and needs VAPID
+  keys and a service worker.
+- **Trusting eventside's decisions.** Other allowed apps have to take
+  eventside's acceptance decisions on trust. If that matters later, the
+  decisions could be published as records.
+
+### Round 1
+
+The draft was critiqued before being presented. Folded in:
+
+- **Card sources.** The source visibility rule was added. Without it, a
+  card's sources could have exposed other attendees' votes, RSVPs and
+  responses.
+- **Writes go through eventside**, since sign-in is a backend-for-frontend:
+  - posts are decided as they're written;
+  - the composer gets the decision straight away;
+  - records are indexed as they're written.
+- **Trust rules** for feed records, pins, labels, `urgent` and `pinKinds`,
+  with scopes narrowed to match.
+- **Outside services** only order a filtered candidate list. The viewer's
+  DID is sent only if the feed opts in, and only allow-listed services are
+  called.
+- **The post view** hides `feeds` and `audience`. `getCardData` checks
+  every URI in its parameters.
+- **Pending posts** when the target feed isn't indexed yet. Stored
+  decisions are kept, never recomputed.
+- **Smaller points:**
+  - the `#cardBody` split;
+  - pin paging;
+  - checking that the space host can hold the authority's own repo;
+  - idempotent feed rkeys;
+  - clearing the offline cache on sign-out;
+  - timing the new sign-in;
+  - audience kinds that match nobody until their features exist.
+- **The demo slice** now keeps the outside-service algorithm, which was
+  chosen for Nov 1. It defers live sockets, Web Push and the offline
+  cache instead.
+
+Awaiting the user's review.
+
 ## Test cases
 
 ## Review log
