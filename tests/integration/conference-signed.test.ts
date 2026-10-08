@@ -192,7 +192,7 @@ test('TC-63: Rotating the signing key keeps earlier decisions', async ({ viv }) 
   expect(await dirk.isMember(conference.space), 'so is Dirk, re-signed').toBe(true)
 
   // A record signed only with the old key no longer counts: Dirk's admission, put back as it was.
-  const rkey = String(dirkBefore.uri).split('/').at(-1) as string
+  const rkey = String(dirkBefore.rkey)
   await putSpaceRecord(superAdmin, org.adminSpace, MEMBER, rkey, dirkBefore.value)
   await cliOk(dep, ['reindex', '--org', org.did])
   expect(await dirk.isMember(conference.space), 'Dirk’s old-key admission doesn’t count').toBe(false)
