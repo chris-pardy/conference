@@ -132,14 +132,20 @@ pub fn sign(record: &mut Value, key_id: &str, key: &EcKey, repository: &str) -> 
 }
 
 /// The keys (`did#fragment`) whose signatures on a record verify, for the
-/// record as read from `repository`, against `signer`'s keys as its DID
+/// record as read from `repository` in `space`, against `signer`'s keys as its DID
 /// document lists them now (`fragment`, public key).
 pub fn verify(
     record: &Value,
     repository: &str,
+    space: &str,
     signer: &str,
     keys: &[(String, PublicKey)],
 ) -> Vec<String> {
+    // A record names the space it's about, under its signature: a copy in
+    // another space, even of the same organization, doesn't count there.
+    if record.get("space").and_then(Value::as_str) != Some(space) {
+        return Vec::new();
+    }
     let Some(entries) = record.get("signatures").and_then(Value::as_array) else {
         return Vec::new();
     };
@@ -171,10 +177,12 @@ mod tests {
 
     const EVENTSIDE: &str = "did:web:eventside.test";
     const ORG: &str = "did:plc:aaaaaaaaaaaaaaaaaaaaaaaa";
+    const SPACE: &str = "at://did:plc:aaaaaaaaaaaaaaaaaaaaaaaa/space/app.eventside.private/one";
 
     fn member() -> Value {
         json!({
             "$type": "app.eventside.conference.member",
+            "space": SPACE,
             "subject": "did:plc:bbbbbbbbbbbbbbbbbbbbbbbb",
             "role": "attendee",
             "seq": 3,
@@ -189,7 +197,7 @@ mod tests {
         sign(&mut record, &format!("{EVENTSIDE}#{KEY_PREFIX}"), &key, ORG).unwrap();
         let keys = [(KEY_PREFIX.to_owned(), key.verifying_key())];
         assert_eq!(
-            verify(&record, ORG, EVENTSIDE, &keys),
+            verify(&record, ORG, SPACE, EVENTSIDE, &keys),
             vec![format!("{EVENTSIDE}#{KEY_PREFIX}")]
         );
     }
@@ -202,14 +210,23 @@ mod tests {
         let keys = [(KEY_PREFIX.to_owned(), key.verifying_key())];
         let mut altered = record.clone();
         altered["role"] = json!("owner");
-        assert!(verify(&altered, ORG, EVENTSIDE, &keys).is_empty());
+        assert!(verify(&altered, ORG, SPACE, EVENTSIDE, &keys).is_empty());
         // The same record, read from another repo.
-        assert!(verify(&record, "did:plc:cccccccccccccccccccccccc", EVENTSIDE, &keys).is_empty());
+        assert!(
+            verify(&record, "did:plc:cccccccccccccccccccccccc", SPACE, EVENTSIDE, &keys).is_empty()
+        );
         // Signed by another key than the one listed.
         let other = [(KEY_PREFIX.to_owned(), EcKey::generate().verifying_key())];
-        assert!(verify(&record, ORG, EVENTSIDE, &other).is_empty());
+        assert!(verify(&record, ORG, SPACE, EVENTSIDE, &other).is_empty());
+        // The same record, copied into another space of the same organization.
+        let other_space = "at://did:plc:aaaaaaaaaaaaaaaaaaaaaaaa/space/app.eventside.private/two";
+        assert!(verify(&record, ORG, other_space, EVENTSIDE, &keys).is_empty());
+        // Its space changed to the other one: the signature no longer matches.
+        let mut moved = record.clone();
+        moved["space"] = json!(other_space);
+        assert!(verify(&moved, ORG, other_space, EVENTSIDE, &keys).is_empty());
         // Claiming another signer.
-        assert!(verify(&record, ORG, "did:web:other.test", &keys).is_empty());
+        assert!(verify(&record, ORG, SPACE, "did:web:other.test", &keys).is_empty());
     }
 
     #[test]

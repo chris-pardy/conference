@@ -17,6 +17,8 @@ const id = 'app.eventside.conference.ban'
 
 export interface Main {
   $type: 'app.eventside.conference.ban'
+  /** The conference space this record is about. Signed with it, so it counts only when read from that space. */
+  space: string
   subject: string
   decidedBy: string
   decidedRank: AppEventsideConferenceDefs.Rank

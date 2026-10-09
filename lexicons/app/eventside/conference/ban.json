@@ -8,17 +8,43 @@
       "key": "any",
       "record": {
         "type": "object",
-        "required": ["subject", "decidedBy", "decidedRank", "seq", "decidedAt", "createdAt", "signatures"],
+        "required": ["space", "subject", "decidedBy", "decidedRank", "seq", "decidedAt", "createdAt", "signatures"],
         "properties": {
-          "subject": { "type": "string", "format": "did" },
-          "decidedBy": { "type": "string", "format": "did" },
-          "decidedRank": { "type": "ref", "ref": "app.eventside.conference.defs#rank" },
-          "seq": { "type": "integer", "minimum": 1 },
-          "decidedAt": { "type": "string", "format": "datetime" },
-          "createdAt": { "type": "string", "format": "datetime" },
+          "space": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "The conference space this record is about. Signed with it, so it counts only when read from that space."
+          },
+          "subject": {
+            "type": "string",
+            "format": "did"
+          },
+          "decidedBy": {
+            "type": "string",
+            "format": "did"
+          },
+          "decidedRank": {
+            "type": "ref",
+            "ref": "app.eventside.conference.defs#rank"
+          },
+          "seq": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "decidedAt": {
+            "type": "string",
+            "format": "datetime"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime"
+          },
           "signatures": {
             "type": "array",
-            "items": { "type": "ref", "ref": "app.eventside.conference.defs#signature" }
+            "items": {
+              "type": "ref",
+              "ref": "app.eventside.conference.defs#signature"
+            }
           }
         }
       }

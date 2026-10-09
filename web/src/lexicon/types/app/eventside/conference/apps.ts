@@ -17,6 +17,8 @@ const id = 'app.eventside.conference.apps'
 
 export interface Main {
   $type: 'app.eventside.conference.apps'
+  /** The conference space this record is about. Signed with it, so it counts only when read from that space. */
+  space: string
   apps: App[]
   createdAt: string
   signatures: AppEventsideConferenceDefs.Signature[]

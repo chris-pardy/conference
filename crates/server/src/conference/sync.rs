@@ -95,7 +95,7 @@ pub async fn counts(
             .map(|(fragment, key)| (fragment, key.verifying_key()))
             .collect();
         let signer = eventside_did(&state.oauth.public_url);
-        if attest::verify(value, &conference.org, &signer, &keys).is_empty() {
+        if attest::verify(value, &conference.org, &conference.space, &signer, &keys).is_empty() {
             return Ok(false);
         }
         if collection == APPS {

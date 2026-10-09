@@ -8,13 +8,30 @@
       "key": "literal:self",
       "record": {
         "type": "object",
-        "required": ["apps", "createdAt", "signatures"],
+        "required": ["space", "apps", "createdAt", "signatures"],
         "properties": {
-          "apps": { "type": "array", "items": { "type": "ref", "ref": "#app" } },
-          "createdAt": { "type": "string", "format": "datetime" },
+          "space": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "The conference space this record is about. Signed with it, so it counts only when read from that space."
+          },
+          "apps": {
+            "type": "array",
+            "items": {
+              "type": "ref",
+              "ref": "#app"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime"
+          },
           "signatures": {
             "type": "array",
-            "items": { "type": "ref", "ref": "app.eventside.conference.defs#signature" }
+            "items": {
+              "type": "ref",
+              "ref": "app.eventside.conference.defs#signature"
+            }
           }
         }
       }
@@ -23,11 +40,21 @@
       "type": "object",
       "required": ["uses"],
       "properties": {
-        "client": { "type": "string", "format": "uri", "description": "An OAuth client ID." },
-        "service": { "type": "string", "format": "did" },
+        "client": {
+          "type": "string",
+          "format": "uri",
+          "description": "An OAuth client ID."
+        },
+        "service": {
+          "type": "string",
+          "format": "did"
+        },
         "uses": {
           "type": "array",
-          "items": { "type": "string", "knownValues": ["read", "cardProvider", "feedGenerator"] }
+          "items": {
+            "type": "string",
+            "knownValues": ["read", "cardProvider", "feedGenerator"]
+          }
         }
       }
     }

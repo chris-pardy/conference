@@ -204,14 +204,15 @@ function WayIn({ conference, reload }: { conference: ConferenceView; reload: () 
   const viewer = session.kind === 'signedIn' ? session.user.did : undefined
   const byList = methods.has('list')
 
-  // Someone on the attendee list is in as soon as they open the page.
+  // Someone on the attendee list is in as soon as they first open the page
+  // (the server admits only someone it has never decided anything about).
   useEffect(() => {
     if (!viewer || !byList) return
     let cancelled = false
     api('/xrpc/app.eventside.conference.join', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ conference: conference.space }),
+      body: JSON.stringify({ conference: conference.space, onOpen: true }),
     })
       .then(async (res) => {
         const answer = res.ok ? await res.json().catch(() => ({})) : {}

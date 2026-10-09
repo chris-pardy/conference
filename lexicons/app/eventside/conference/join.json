@@ -11,8 +11,18 @@
           "type": "object",
           "required": ["conference"],
           "properties": {
-            "conference": { "type": "string", "description": "The conference's space URI." },
-            "code": { "type": "string", "maxLength": 200 }
+            "conference": {
+              "type": "string",
+              "description": "The conference's space URI."
+            },
+            "code": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "onOpen": {
+              "type": "boolean",
+              "description": "The app joining someone as they open the conference's page: admits only someone the conference has never decided anything about."
+            }
           }
         }
       },
@@ -22,14 +32,24 @@
           "type": "object",
           "required": ["status"],
           "properties": {
-            "status": { "type": "string", "knownValues": ["joined", "pending", "emailNeeded", "refused"] },
-            "conference": { "type": "string" }
+            "status": {
+              "type": "string",
+              "knownValues": ["joined", "pending", "emailNeeded", "refused"]
+            },
+            "conference": {
+              "type": "string"
+            }
           }
         }
       },
       "errors": [
-        { "name": "NotFound" },
-        { "name": "RateLimitExceeded", "description": "Too many refused attempts lately." }
+        {
+          "name": "NotFound"
+        },
+        {
+          "name": "RateLimitExceeded",
+          "description": "Too many refused attempts lately."
+        }
       ]
     }
   }

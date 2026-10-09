@@ -1470,8 +1470,14 @@ export const schemaDict = {
         key: 'literal:self',
         record: {
           type: 'object',
-          required: ['apps', 'createdAt', 'signatures'],
+          required: ['space', 'apps', 'createdAt', 'signatures'],
           properties: {
+            space: {
+              type: 'string',
+              format: 'at-uri',
+              description:
+                'The conference space this record is about. Signed with it, so it counts only when read from that space.',
+            },
             apps: {
               type: 'array',
               items: {
@@ -1529,6 +1535,7 @@ export const schemaDict = {
         record: {
           type: 'object',
           required: [
+            'space',
             'subject',
             'decidedBy',
             'decidedRank',
@@ -1538,6 +1545,12 @@ export const schemaDict = {
             'signatures',
           ],
           properties: {
+            space: {
+              type: 'string',
+              format: 'at-uri',
+              description:
+                'The conference space this record is about. Signed with it, so it counts only when read from that space.',
+            },
             subject: {
               type: 'string',
               format: 'did',
@@ -1682,6 +1695,11 @@ export const schemaDict = {
                 type: 'string',
                 maxLength: 200,
               },
+              onOpen: {
+                type: 'boolean',
+                description:
+                  "The app joining someone as they open the conference's page: admits only someone the conference has never decided anything about.",
+              },
             },
           },
         },
@@ -1758,6 +1776,7 @@ export const schemaDict = {
         record: {
           type: 'object',
           required: [
+            'space',
             'subject',
             'role',
             'decidedBy',
@@ -1768,6 +1787,12 @@ export const schemaDict = {
             'signatures',
           ],
           properties: {
+            space: {
+              type: 'string',
+              format: 'at-uri',
+              description:
+                'The conference space this record is about. Signed with it, so it counts only when read from that space.',
+            },
             subject: {
               type: 'string',
               format: 'did',

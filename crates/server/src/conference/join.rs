@@ -33,22 +33,41 @@ pub fn code_hash(conference: &str, code: &str) -> String {
 }
 
 /// Joins a person to a conference by whichever of its methods admits them.
+///
+/// `on_open` is the app joining someone as they open the conference's page
+/// (for the attendee list): it only ever admits someone the conference has
+/// never decided anything about. Someone who left, or was removed, rejoins
+/// only by asking.
 pub async fn join(
     state: &AppState,
     conference: &Conference,
     did: &str,
     code: Option<&str>,
+    on_open: bool,
 ) -> Result<Joined, String> {
     let mut tx = decide::begin(state).await?;
-    // Counted and recorded inside the transaction, before the code is
-    // looked at, so attempts made at once can't all slip under the limit.
-    // Only attempts with a code count: one without (the app checking the
-    // attendee list as someone opens the page) guesses nothing.
-    if refused_lately(&mut tx, &conference.space, did).await? >= MAX_REFUSED {
+    if on_open {
+        let decided = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM decisions WHERE conference = $1 AND subject = $2",
+        )
+        .bind(&conference.space)
+        .bind(did)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
+        if decided > 0 {
+            tx.rollback().await.map_err(|e| e.to_string())?;
+            return Ok(Joined::Refused);
+        }
+    }
+    // Only attempts with a code are limited: one without guesses nothing.
+    // They're counted and recorded inside the transaction, before the code
+    // is looked at, so attempts made at once can't all slip under the limit.
+    let guessing = code.is_some_and(|c| !c.trim().is_empty());
+    if guessing && refused_lately(&mut tx, &conference.space, did).await? >= MAX_REFUSED {
         tx.rollback().await.map_err(|e| e.to_string())?;
         return Ok(Joined::SlowDown);
     }
-    let guessing = code.is_some_and(|c| !c.trim().is_empty());
     let at = now_ms();
     if guessing {
         sqlx::query("INSERT INTO join_attempts (conference, did, at) VALUES ($1, $2, $3)")
@@ -226,26 +245,79 @@ mod tests {
         (state, dir)
     }
 
-    #[tokio::test]
-    async fn tc_16_wrong_codes_tried_at_once_are_still_capped() {
-        let (state, _dir) = state().await;
+    /// A conference taking the given join methods.
+    async fn conference(state: &AppState, methods: &str) -> Conference {
         let space = super::super::SpaceUri::conference("did:plc:aaaaaaaaaaaaaaaaaaaaaaaa", "3kx");
         sqlx::query(
             "INSERT INTO conferences (space, org, rkey, event, name, starts_at, ends_at, city, theme, \
              methods, created_by, created_at) VALUES ($1, 'did:plc:aaaaaaaaaaaaaaaaaaaaaaaa', '3kx', \
              'at://x/y/3kx', 'Conf', '2027-04-29T07:00:00.000Z', '2027-05-02T16:00:00.000Z', \
-             'Amsterdam', '{}', 'code', 'did:plc:aaaaaaaaaaaaaaaaaaaaaaaa', 0)",
+             'Amsterdam', '{}', $2, 'did:plc:aaaaaaaaaaaaaaaaaaaaaaaa', 0)",
         )
         .bind(&space)
+        .bind(methods)
         .execute(&state.db)
         .await
         .unwrap();
-        let conference = super::super::load(&state.db, &space).await.unwrap().unwrap();
+        super::super::load(&state.db, &space).await.unwrap().unwrap()
+    }
+
+    const ANA: &str = "did:plc:nnnnnnnnnnnnnnnnnnnnnnnn";
+
+    async fn listed(state: &AppState, conference: &Conference, did: &str) {
+        sqlx::query("INSERT INTO attendee_list (conference, did, handle, imported_at) VALUES ($1, $2, 'ana.test', 0)")
+            .bind(&conference.space)
+            .bind(did)
+            .execute(&state.db)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn opening_the_page_joins_a_listed_attendee_only_the_first_time() {
+        let (state, _dir) = state().await;
+        let conference = conference(&state, "list").await;
+        listed(&state, &conference, ANA).await;
+        assert_eq!(join(&state, &conference, ANA, None, true).await.unwrap(), Joined::Joined);
+        let left = decide::decide(&state, &conference.space, ANA, Action::Leave, &Actor::Subject)
+            .await
+            .unwrap();
+        assert!(matches!(left, Outcome::Decided(_)));
+        // Opening the page again doesn't bring her back…
+        assert_eq!(join(&state, &conference, ANA, None, true).await.unwrap(), Joined::Refused);
+        assert!(!decide::is_member_now(&state.db, &conference.space, ANA).await.unwrap());
+        // …asking does.
+        assert_eq!(join(&state, &conference, ANA, None, false).await.unwrap(), Joined::Joined);
+    }
+
+    #[tokio::test]
+    async fn a_join_without_a_code_isnt_slowed_by_wrong_codes() {
+        let (state, _dir) = state().await;
+        let conference = conference(&state, "code").await;
+        for i in 0..MAX_REFUSED {
+            let answer =
+                join(&state, &conference, ANA, Some(&format!("wrong-{i}")), false).await.unwrap();
+            assert_eq!(answer, Joined::Refused);
+        }
+        assert_eq!(
+            join(&state, &conference, ANA, Some("wrong"), false).await.unwrap(),
+            Joined::SlowDown
+        );
+        // Without a code it's an answer, not a wait.
+        assert_eq!(join(&state, &conference, ANA, None, false).await.unwrap(), Joined::Refused);
+    }
+
+    #[tokio::test]
+    async fn tc_16_wrong_codes_tried_at_once_are_still_capped() {
+        let (state, _dir) = state().await;
+        let conference = conference(&state, "code").await;
         let mallory = "did:plc:mmmmmmmmmmmmmmmmmmmmmmmm";
         let tries = (0..40).map(|i| {
             let (state, conference) = (state.clone(), conference.clone());
             tokio::spawn(async move {
-                join(&state, &conference, mallory, Some(&format!("wrong-{i}"))).await.unwrap()
+                join(&state, &conference, mallory, Some(&format!("wrong-{i}")), false)
+                    .await
+                    .unwrap()
             })
         });
         let mut refused = 0;

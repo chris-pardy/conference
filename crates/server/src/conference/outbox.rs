@@ -290,7 +290,7 @@ async fn write_member_once(
     match (standing.role, &standing.membership) {
         (Some(role), Some(decision)) => {
             let admitted = decisions.iter().rev().find(|d| d.action == "admit");
-            let mut record = decided(MEMBER, subject, decision);
+            let mut record = decided(MEMBER, conference, subject, decision);
             record["role"] = json!(role.as_str());
             if let Some(method) = admitted.and_then(|d| d.method.as_deref()) {
                 record["method"] = json!(method);
@@ -305,7 +305,8 @@ async fn write_member_once(
     }
     match &standing.ban {
         Some(decision) => {
-            let record = signed(state, conference, decided(BAN, subject, decision)).await?;
+            let record =
+                signed(state, conference, decided(BAN, conference, subject, decision)).await?;
             repo::put(state, conference, BAN, subject, record).await?;
         }
         None if decisions.iter().any(|d| d.action == "ban") => {
@@ -316,10 +317,12 @@ async fn write_member_once(
     Ok(decisions.last().map(|d| d.seq))
 }
 
-/// The fields every decision's record carries.
-fn decided(collection: &str, subject: &str, decision: &Decision) -> Value {
+/// The fields every decision's record carries, its space among them, so
+/// a copy in another space doesn't count.
+fn decided(collection: &str, conference: &str, subject: &str, decision: &Decision) -> Value {
     json!({
         "$type": collection,
+        "space": conference,
         "subject": subject,
         "decidedBy": decision.actor,
         "decidedRank": decision.rank,
@@ -353,7 +356,8 @@ async fn write_apps(state: &AppState, conference: &str) -> Result<(), String> {
         .into_iter()
         .map(|(client, uses)| json!({ "client": client, "uses": super::split_methods(&uses) }))
         .collect();
-    let record = json!({ "$type": APPS, "apps": apps, "createdAt": iso(now_ms()) });
+    let record =
+        json!({ "$type": APPS, "space": conference, "apps": apps, "createdAt": iso(now_ms()) });
     let record = signed(state, conference, record).await?;
     repo::put(state, conference, APPS, "self", record).await
 }

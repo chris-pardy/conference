@@ -114,6 +114,9 @@ fn viewer(role: Option<Role>) -> Value {
 pub struct JoinInput {
     conference: Option<String>,
     code: Option<String>,
+    /// The app joining someone as they open the page: only the first time.
+    #[serde(rename = "onOpen", default)]
+    on_open: bool,
 }
 
 /// `app.eventside.conference.join`: answers `joined` or `refused` (and, for
@@ -131,7 +134,7 @@ pub async fn join(
         Ok(None) => return not_found(),
         Err(why) => return server_error(&why),
     };
-    match join::join(&state, &conference, &user.did, input.code.as_deref()).await {
+    match join::join(&state, &conference, &user.did, input.code.as_deref(), input.on_open).await {
         Ok(Joined::Joined) => {
             super::outbox::kick();
             Json(json!({ "status": "joined", "conference": conference.space })).into_response()

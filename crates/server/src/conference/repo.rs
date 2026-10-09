@@ -183,8 +183,51 @@ pub fn space_signature(
 /// Eventside's own space credentials, by space, with when they run out.
 static CREDENTIALS: Mutex<Option<HashMap<String, (String, i64)>>> = Mutex::new(None);
 
-/// Credentials being fetched: one at a time.
-static FETCHING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+/// A lock per space, so one space's credential is fetched once at a time,
+/// and an unreachable organization holds up only its own spaces.
+static FETCHING: Mutex<Option<HashMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>>> =
+    Mutex::new(None);
+
+fn fetch_lock(space: &str) -> std::sync::Arc<tokio::sync::Mutex<()>> {
+    let mut locks = FETCHING.lock().expect("the fetch locks aren't poisoned");
+    let locks = locks.get_or_insert_with(HashMap::new);
+    // Drop locks nobody holds or waits on, so the map stays small.
+    locks.retain(|_, lock| std::sync::Arc::strong_count(lock) > 1);
+    locks.entry(space.to_owned()).or_default().clone()
+}
+
+/// Spaces whose credential couldn't be fetched lately, and until when not
+/// to try again.
+static FAILED: Mutex<Option<HashMap<String, (i64, String)>>> = Mutex::new(None);
+
+/// How long a space whose credential couldn't be fetched is left alone.
+const FAILED_BACKOFF_MS: i64 = 5_000;
+
+/// The error a space's last fetch failed with, while it's backing off.
+fn backing_off(space: &str, now: i64) -> Option<String> {
+    FAILED
+        .lock()
+        .expect("the failures aren't poisoned")
+        .as_ref()
+        .and_then(|f| f.get(space).cloned())
+        .filter(|(until, _)| *until > now)
+        .map(|(_, why)| why)
+}
+
+/// Records how a space's fetch went: a failure backs it off.
+fn note_fetch(space: &str, result: &Result<String, String>, now: i64) {
+    let mut failed = FAILED.lock().expect("the failures aren't poisoned");
+    let failed = failed.get_or_insert_with(HashMap::new);
+    match result {
+        Ok(_) => {
+            failed.remove(space);
+        }
+        Err(why) => {
+            failed.retain(|_, (until, _)| *until > now);
+            failed.insert(space.to_owned(), (now + FAILED_BACKOFF_MS, why.clone()));
+        }
+    }
+}
 
 /// A credential for the space that's still good, if there is one.
 fn cached_credential(space: &str) -> Option<String> {
@@ -207,12 +250,31 @@ pub async fn credential(state: &AppState, space: &str) -> Result<String, String>
     if let Some(credential) = cached_credential(space) {
         return Ok(credential);
     }
-    // One fetch at a time: syncs that start together share the first one's.
-    let _one = FETCHING.lock().await;
+    // One fetch at a time per space: syncs that start together share the
+    // first one's, and a failure backs the space off for a moment.
+    let lock = fetch_lock(space);
+    let _one = lock.lock().await;
     if let Some(credential) = cached_credential(space) {
         return Ok(credential);
     }
     let now = now_ms();
+    if let Some(why) = backing_off(space, now) {
+        return Err(format!("not trying again yet: {why}"));
+    }
+    let fetched = fetch_credential(state, space).await;
+    note_fetch(space, &fetched, now_ms());
+    let credential = fetched?;
+    CREDENTIALS
+        .lock()
+        .expect("the credential cache isn't poisoned")
+        .get_or_insert_with(HashMap::new)
+        .insert(space.to_owned(), (credential.clone(), now + CREDENTIAL_MS));
+    Ok(credential)
+}
+
+/// Fetches a credential: a delegation from the organization, traded at the
+/// space's host.
+async fn fetch_credential(state: &AppState, space: &str) -> Result<String, String> {
     let org = authority(space)?;
     let client = org_client(state, &org).await?;
     let delegation = call(
@@ -242,11 +304,6 @@ pub async fn credential(state: &AppState, space: &str) -> Result<String, String>
         .filter(|_| status.is_success())
         .ok_or_else(|| format!("getSpaceCredential answered {status}: {body}"))?
         .to_owned();
-    CREDENTIALS
-        .lock()
-        .expect("the credential cache isn't poisoned")
-        .get_or_insert_with(HashMap::new)
-        .insert(space.to_owned(), (credential.clone(), now + CREDENTIAL_MS));
     Ok(credential)
 }
 
@@ -423,6 +480,29 @@ pub async fn register_notify(state: &AppState, space: &str) -> Result<(), String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_failed_fetch_backs_off_only_its_own_space() {
+        let (one, two) =
+            ("at://did:plc:x/space/t/backoff-one", "at://did:plc:x/space/t/backoff-two");
+        note_fetch(one, &Err("unreachable".into()), 1_000);
+        assert_eq!(backing_off(one, 1_001).as_deref(), Some("unreachable"));
+        assert_eq!(backing_off(two, 1_001), None);
+        // Over once the backoff is.
+        assert_eq!(backing_off(one, 1_000 + FAILED_BACKOFF_MS), None);
+        // A fetch that works clears it.
+        note_fetch(one, &Err("unreachable".into()), 2_000);
+        note_fetch(one, &Ok("credential".into()), 2_001);
+        assert_eq!(backing_off(one, 2_002), None);
+    }
+
+    #[test]
+    fn spaces_have_locks_of_their_own() {
+        let one = fetch_lock("at://did:plc:x/space/t/lock-one");
+        let _held = one.try_lock().unwrap();
+        assert!(fetch_lock("at://did:plc:x/space/t/lock-two").try_lock().is_ok());
+        assert!(fetch_lock("at://did:plc:x/space/t/lock-one").try_lock().is_err());
+    }
 
     #[test]
     fn a_space_signature_covers_the_authorization_and_audience() {

@@ -20,6 +20,8 @@ export interface InputSchema {
   /** The conference's space URI. */
   conference: string
   code?: string
+  /** The app joining someone as they open the conference's page: admits only someone the conference has never decided anything about. */
+  onOpen?: boolean
 }
 
 export interface OutputSchema {

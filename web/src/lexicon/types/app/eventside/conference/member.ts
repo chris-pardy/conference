@@ -17,6 +17,8 @@ const id = 'app.eventside.conference.member'
 
 export interface Main {
   $type: 'app.eventside.conference.member'
+  /** The conference space this record is about. Signed with it, so it counts only when read from that space. */
+  space: string
   subject: string
   role: AppEventsideConferenceDefs.Role
   method?: 'code' | 'list' | 'open' | 'admin' | (string & {})

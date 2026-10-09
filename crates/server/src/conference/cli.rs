@@ -742,8 +742,15 @@ pub fn parse_iso(text: &str) -> Option<i64> {
             sign * (h.parse::<i64>().ok()? * 60 + m.parse::<i64>().ok()?)
         }
     };
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let month_days = match month {
+        2 if leap => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    };
     if !(1..=12).contains(&month)
-        || !(1..=31).contains(&day)
+        || !(1..=month_days).contains(&day)
         || hour > 23
         || minute > 59
         || second > 60
@@ -773,6 +780,12 @@ mod tests {
         assert_eq!(iso(parse_iso("2026-10-09T12:34:56.789Z").unwrap()), "2026-10-09T12:34:56.789Z");
         assert_eq!(parse_iso("tomorrow"), None);
         assert_eq!(parse_iso("2027-13-01T00:00:00Z"), None);
+        assert_eq!(parse_iso("2027-02-31T00:00:00Z"), None);
+        assert_eq!(parse_iso("2027-04-31T00:00:00Z"), None);
+        assert_eq!(parse_iso("2027-02-29T00:00:00Z"), None);
+        assert!(parse_iso("2028-02-29T00:00:00Z").is_some());
+        assert!(parse_iso("2000-02-29T00:00:00Z").is_some());
+        assert_eq!(parse_iso("2100-02-29T00:00:00Z"), None);
     }
 
     #[test]
