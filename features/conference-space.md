@@ -1252,3 +1252,8 @@ connect and signature checks held up.
    method; word refusals by method.
 5. **[nit]** `join set` changes the database before writing the sidecar.
    **Fix:** write the sidecar first.
+
+Rework (`84cadad`): all five fixed. `pnpm check` green. The join limit is
+checked and recorded inside the decision transaction, with a Rust test
+firing 40 wrong codes at once; only attempts that carry a code count, so
+the page's code-less list join on open doesn't use up the limit.
