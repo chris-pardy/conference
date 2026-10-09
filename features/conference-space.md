@@ -1257,3 +1257,26 @@ Rework (`84cadad`): all five fixed. `pnpm check` green. The join limit is
 checked and recorded inside the decision transaction, with a Rust test
 firing 40 wrong codes at once; only attempts that carry a code count, so
 the page's code-less list join on open doesn't use up the limit.
+
+### Round 4
+
+Reviewed `d4b2a3b`. `pnpm check` green; frozen files unchanged apart from
+the approved `other-app.ts` fix.
+
+1. **[major]** The page's automatic list join readmits a listed attendee
+   right after they leave (and readmits someone staff removed) just by
+   opening the page. **Fix:** join on open only someone with no decision
+   in this conference yet; an explicit Join still rejoins.
+2. **[major]** Signed member, ban and apps records don't name their
+   space, so a signed record copied into another conference space of the
+   same organization still verifies for outside readers. **Fix:** add a
+   required `space` field (the space URI) to the three records, and
+   require it to match where the record was read. This adds a field to
+   the record shapes in the design; it's called out in the PR.
+3. **[minor]** A code-less join is refused with 429 after wrong-code
+   attempts. **Fix:** apply the limit only to attempts with a code.
+4. **[minor]** The credential single-flight is one global lock, so an
+   unreachable organization stalls every conference. **Fix:** lock per
+   space, with a short backoff after a failure.
+5. **[nit]** `parse_iso` accepts impossible dates like 31 February.
+   **Fix:** check the day against the month.
