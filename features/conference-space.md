@@ -1,5 +1,5 @@
 ---
-status: test-cases
+status: ready
 impact: cross-cutting
 depends-on: [attendee-sign-in]
 branch:
@@ -698,5 +698,315 @@ The draft was critiqued before being presented. Folded in:
   feature.
 
 ## Test cases
+
+These cover the Nov 1 slice (design review round 1). Email matching,
+request and approve, personal codes, invite-only and key removal are a
+fast-follow feature.
+
+The scenario is AtmosphereConf 2027 in Amsterdam:
+
+- The organization "Atmosphere" has its own account on a PDS that
+  supports spaces. In tests that's vivarium's PDS; in the demo, vlpds.
+- **Olga** and **Kees** are owners. **Pim** and **Lotte** are staff.
+- **Ana**, **Bram**, **Joost** and **Ruud** are attendees.
+- **Mallory** isn't a member.
+
+### The organization and its conference
+
+#### TC-1: Connecting the organization makes eventside its space host
+
+- **Given** the organization's account on its PDS
+- **When** the operator connects it with the CLI
+- **Then** its DID document names eventside as its space host, and lists
+  a decision-signing key
+- **And** its repo stays on its own PDS
+
+#### TC-2: A public conference publishes an event other calendar apps can read
+
+- **When** Olga creates the public conference "AtmosphereConf 2027"
+- **Then** a `community.lexicon.calendar.event` with its name, dates and
+  city is in the organization's public repo
+- **And** another calendar app can read it, along with a link to the
+  conference
+
+#### TC-3: Creating a conference sets up its main feed
+
+- **When** Olga creates the conference
+- **Then** the conference's main feed record exists in the organization's
+  repo in the space
+
+#### TC-4: Admins act only as themselves
+
+- **Given** Pim has connected and Lotte hasn't
+- **When** the CLI is asked to act as Lotte, or as Mallory
+- **Then** it refuses, and nothing is decided
+- **And** acting as Pim works, and the decision records Pim
+
+#### TC-5: There's always an owner
+
+- **Given** Olga is the only owner
+- **When** anyone tries to remove Olga, make her staff, or have her leave
+- **Then** it's refused
+- **And** once Kees is an owner too, Olga can step down
+
+### Finding a conference
+
+#### TC-6: A non-member sees the public page and how to get in
+
+- **Given** the conference accepts a shared code and has an attendee list
+- **When** Mallory opens its link
+- **Then** she sees its name, dates, city, description and branding
+- **And** a way to enter a code, and "Sign in" for people on the list
+- **And** nothing from inside it
+
+#### TC-7: The public page works by DID or by handle
+
+- **When** the conference's link names the organization by DID, or by
+  handle
+- **Then** both open the same page
+
+### Joining
+
+#### TC-8: Ana joins with a shared invite code
+
+- **Given** the shared code "atmosphere27"
+- **When** Ana signs in and enters it
+- **Then** she's a member, and lands inside the conference
+
+#### TC-9: A wrong code doesn't admit anyone
+
+- **When** Mallory enters "atmosphere26"
+- **Then** she's refused, and isn't a member
+
+#### TC-10: Expired and used-up shared codes stop working
+
+- **Given** one code that expired yesterday, and one limited to two uses
+  that has been used twice
+- **When** Joost tries each
+- **Then** both are refused
+
+#### TC-11: Being on the attendee list by handle admits you on sign-in
+
+- **Given** Olga imported a list with Ana's handle
+- **When** Ana signs in and opens the conference
+- **Then** she's a member, without entering a code
+
+#### TC-12: A handle on the list stays with the account it first named
+
+- **Given** Bram's handle was on the imported list
+- **When** Bram moves that handle to a new account, and someone else takes
+  it over
+- **Then** the account the handle named at import is the one admitted
+
+#### TC-13: A handle that doesn't resolve is refused at import
+
+- **When** Olga imports a list with a handle that doesn't resolve
+- **Then** the import reports that row, and imports the rest
+
+#### TC-14: An open conference admits anyone signed in
+
+- **Given** Olga turns on open joining
+- **When** Joost signs in and joins
+- **Then** he's a member
+
+#### TC-15: A conference with no way in for you refuses
+
+- **Given** the conference only takes its attendee list
+- **When** Mallory, who isn't on it, tries to join
+- **Then** she's refused
+
+#### TC-16: Too many join attempts are slowed down
+
+- **When** Mallory tries one wrong code after another
+- **Then** after a few attempts she's told to wait, even for a right
+  code
+
+### Inside, and which apps can read
+
+#### TC-17: A member writes to the space but can't read other members' records
+
+- **Given** Ana and Bram are members, and Bram has written records in the
+  space
+- **When** Ana writes a record in the space
+- **Then** it's written
+- **And** whatever Ana asks for, directly or through eventside, she gets
+  none of Bram's raw records, only her own
+
+#### TC-18: Non-members can't see inside
+
+- **When** Mallory, or a visitor who isn't signed in, asks for anything
+  inside the conference
+- **Then** they get nothing, the same as for a conference that doesn't
+  exist
+
+#### TC-19: An allowed app reads the space with an organizer's delegation
+
+- **Given** Olga has allowed another app to read the conference
+- **When** that app uses Pim's delegation
+- **Then** it can read every member's records in the space
+
+#### TC-20: An allowed app can't read others' records for an attendee
+
+- **Given** the same allowed app
+- **When** it uses Ana's delegation
+- **Then** it can read only Ana's own records
+
+#### TC-21: An app that isn't allowed can't read at all
+
+- **When** an app Olga hasn't allowed asks to read the space, with any
+  delegation
+- **Then** it's refused
+
+#### TC-22: Staff can manage which apps may read
+
+- **When** Pim allows an app, and later disallows it
+- **Then** the app can read with an organizer's delegation, and afterwards
+  can't
+
+### Leaving, removal and bans
+
+#### TC-23: Ana leaves, and can come back
+
+- **Given** Ana joined with the shared code
+- **When** she leaves
+- **Then** she's no longer a member, and can't see inside
+- **And** she can rejoin with the code
+
+#### TC-24: A removed member loses access at once
+
+- **Given** Ruud is a member, and is signed in
+- **When** Pim removes him
+- **Then** Ruud's next request inside the conference is refused
+- **And** he can't write to the space any more
+
+#### TC-25: A banned person can't get back in by any method
+
+- **Given** Bram is a member, and is also on the attendee list
+- **When** Olga bans him
+- **Then** he's removed
+- **And** the code, the list and open joining all refuse him
+
+#### TC-26: Someone can be banned before they join
+
+- **When** Olga bans Mallory, who has never joined
+- **Then** Mallory can't join by any method
+
+#### TC-27: Lifting a ban lets someone join again, without joining them
+
+- **Given** Bram is banned
+- **When** Olga lifts the ban
+- **Then** Bram isn't a member
+- **And** he can join again with the code
+
+### Who can undo whom
+
+#### TC-28: Staff can tighten an owner's admission
+
+- **Given** Olga admitted Joost
+- **When** Pim removes Joost, or bans him
+- **Then** it takes effect
+
+#### TC-29: Staff can't loosen an owner's removal or ban
+
+- **Given** Olga removed Ana and banned Bram
+- **When** Pim tries to admit Ana, or to lift Bram's ban
+- **Then** both are refused, and nothing changes
+- **And** Kees, an owner, can do either
+
+#### TC-30: Rejoining after a removal depends on who removed you
+
+- **Given** Pim removed Ruud, and Olga removed Joost
+- **When** each tries to rejoin with the shared code
+- **Then** Ruud gets back in
+- **And** Joost is refused until an owner or staff member admits him
+
+#### TC-31: Only owners act on admins
+
+- **When** Pim tries to remove Lotte, ban Kees, or make himself an owner
+- **Then** each is refused
+- **And** Olga can remove Lotte
+
+#### TC-32: An owner demoted to staff keeps the weight of their owner decisions
+
+- **Given** Kees banned Bram while he was an owner
+- **When** Olga makes Kees staff
+- **Then** Bram's ban still needs an owner to lift it, and Kees can't
+
+#### TC-33: A former admin's decisions stand
+
+- **Given** Pim admitted Joost while he was staff
+- **When** Olga removes Pim as an admin
+- **Then** Joost is still a member
+- **And** Pim can no longer decide anything
+
+#### TC-34: Between staff, the latest decision stands
+
+- **Given** Ana joined with the code
+- **When** Lotte removes her, and then Pim admits her
+- **Then** Ana is a member
+
+#### TC-35: Decisions made at the same moment are applied in order
+
+- **When** the CLI removes Ana while the server handles her leaving and
+  rejoining at the same time
+- **Then** the result is the same as some order of those decisions, one
+  after another
+- **And** the records in the space match the decision that came last
+
+#### TC-36: Staff can make an attendee a speaker
+
+- **Given** Olga admitted Joost
+- **When** Pim makes Joost a speaker
+- **Then** Joost is a speaker
+
+### Signed records
+
+#### TC-37: Another app can verify who's a member and who organizes
+
+- **Given** an allowed app with Olga's delegation
+- **When** it reads the membership and role records in the space
+- **Then** it finds Ana as an attendee and Pim as staff
+- **And** each record's signature verifies against a key in the
+  organization's DID document
+
+#### TC-38: Records that aren't properly signed don't count
+
+- **When** Mallory's app writes a record claiming she's an owner into
+  its own repo, and a record in the organization's repo is altered so
+  its signature no longer matches
+- **Then** neither counts: Mallory isn't a member, and the altered record
+  is ignored
+
+#### TC-39: A new signing key is used, and older records still verify
+
+- **When** the operator adds a second signing key, and Pim then admits
+  Joost
+- **Then** Joost's record is signed with the new key
+- **And** earlier records still verify with the first one
+
+#### TC-40: A decision interrupted by a crash is completed on restart
+
+- **Given** the server stops after Pim admits Joost but before the record
+  is written
+- **When** the server starts again
+- **Then** Joost's record appears in the space, and he can write to it
+
+#### TC-41: A record written while not a member is never counted
+
+- **Given** Ruud was removed
+- **When** he writes a record into the space from another client, and is
+  admitted again later
+- **Then** the record he wrote while removed is never counted
+- **And** records he writes after rejoining are
+
+### Regressions
+
+#### TC-42: Signing in still works, with the new permissions
+
+- **When** Ana signs in
+- **Then** she's asked for permission to write to conferences, and the
+  sign-in cases of [`attendee-sign-in`](attendee-sign-in.md) still pass
+- **And** someone signed in before this change is asked to sign in again
+  before joining
 
 ## Review log
