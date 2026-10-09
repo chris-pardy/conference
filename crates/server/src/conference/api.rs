@@ -35,3 +35,15 @@ pub async fn leave() -> Response {
 pub async fn get_membership() -> Response {
     not_implemented("app.eventside.conference.getMembership")
 }
+
+/// `com.atproto.simplespace.checkUserAccess`: what the organization's PDS asks
+/// eventside, the managing app, before a read or write in a conference space.
+pub async fn check_user_access() -> Response {
+    not_implemented("com.atproto.simplespace.checkUserAccess")
+}
+
+/// `/.well-known/did.json`: eventside's did:web document, with its
+/// `#eventside_access` service and `#eventside_attest` keys.
+pub async fn did_document() -> Response {
+    not_implemented("/.well-known/did.json")
+}

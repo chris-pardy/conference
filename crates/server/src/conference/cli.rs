@@ -13,18 +13,21 @@ use std::process::ExitCode;
 pub const USAGE: &str = "\
 usage: conference-server admin <command> [--json]
 
-  org connect <handle> [--plc-token <token>]
-      Prints a URL to open. After the organization account signs in there,
-      adds #atproto_space_host (this server), #atproto_space and
-      #eventside_attest to its DID document by PLC operation, using the
-      email token from requestPlcOperationSignature. --json: {did, handle}
-  org key add --org <did> [--plc-token <token>]
-      Adds another #eventside_attest… key. --json: {key}
+  org connect <handle>
+      Connects the organization's account over OAuth: prints a URL to open,
+      waits for sign-in. Its DID document is left untouched. --json: {did,
+      handle}
+  keys add
+      Adds another #eventside_attest key to eventside's own DID document
+      (its did:web). --json: {key}
   connect <handle>
       Connects an admin over OAuth: prints a URL to open, waits for sign-in.
   conference create --org <did> --as <handle> --name <name> --starts <iso>
       --ends <iso> --city <city> [--description <text>] [--theme <json>]
-      The acting admin becomes the first owner. --json: {space, event}
+      Creates the space on the organization's PDS (simplespace.createSpace
+      under its session) with managingAppPolicy {managingApp: <eventside
+      did:web>#eventside_access}, publishes the public event and sidecar,
+      and makes the acting admin the first owner. --json: {space, event}
   admin add <handle> --role owner|staff --conference <space> --as <handle>
   admin remove <handle> --conference <space> --as <handle>
   join set --conference <space> --methods code,list,open --as <handle>

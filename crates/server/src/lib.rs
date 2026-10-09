@@ -125,6 +125,11 @@ fn routes() -> Router<AppState> {
         .route("/xrpc/app.eventside.conference.join", post(conference::api::join))
         .route("/xrpc/app.eventside.conference.leave", post(conference::api::leave))
         .route("/xrpc/app.eventside.conference.getMembership", get(conference::api::get_membership))
+        .route(
+            "/xrpc/com.atproto.simplespace.checkUserAccess",
+            get(conference::api::check_user_access),
+        )
+        .route("/.well-known/did.json", get(conference::api::did_document))
 }
 
 /// Wraps a finished set of routes in the CSRF check. `Router::layer` covers
