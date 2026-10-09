@@ -6,6 +6,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router, extract::State, middleware};
 
 pub mod auth;
+pub mod conference;
 pub mod config;
 pub mod db;
 pub mod identity;
@@ -120,6 +121,10 @@ fn routes() -> Router<AppState> {
         .route("/oauth/callback", get(routes::callback))
         .route("/oauth/logout", post(routes::logout))
         .route("/xrpc/app.eventside.auth.getSession", get(routes::get_session))
+        .route("/xrpc/app.eventside.conference.get", get(conference::api::get))
+        .route("/xrpc/app.eventside.conference.join", post(conference::api::join))
+        .route("/xrpc/app.eventside.conference.leave", post(conference::api::leave))
+        .route("/xrpc/app.eventside.conference.getMembership", get(conference::api::get_membership))
 }
 
 /// Wraps a finished set of routes in the CSRF check. `Router::layer` covers

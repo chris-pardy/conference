@@ -7,6 +7,11 @@ use tokio::net::TcpListener;
 
 #[tokio::main]
 async fn main() -> ExitCode {
+    // `conference-server admin …`: the operator's CLI (conference-space).
+    if std::env::args().nth(1).as_deref() == Some("admin") {
+        let args: Vec<String> = std::env::args().skip(2).collect();
+        return conference_server::conference::cli::main(args).await;
+    }
     let config = match Config::from_env() {
         Ok(config) => config,
         Err(err) => {
