@@ -1,7 +1,7 @@
 ---
 status: design-review
 impact: cross-cutting
-depends-on: [conference-space, space-sync, block-actions, feeds, groups, places]
+depends-on: [conference-space, block-actions, feeds, groups, places]
 branch:
 tests-commit:
 ---
