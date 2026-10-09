@@ -1,7 +1,7 @@
 ---
 status: analysis
 impact:
-depends-on: [ui-blocks, space-sync, attendee-sign-in]
+depends-on: [ui-blocks, conference-space, attendee-sign-in]
 branch:
 tests-commit:
 ---
