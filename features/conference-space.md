@@ -1,5 +1,5 @@
 ---
-status: blocked
+status: implementing
 impact: cross-cutting
 depends-on: [attendee-sign-in]
 branch: feature/conference-space
@@ -829,7 +829,7 @@ code does:
 - The red-test approval expected that refusal from `getSpaceCredential`,
   one step later.
 
-**Proposed fix, awaiting approval:** `requestCredential` returns the
+**Fix, approved by the user ("apply your fix", 2026-10-09):** `requestCredential` returns the
 delegation-token refusal as its answer (status and body) instead of
 throwing, so TC-18's "refused, no credential" check sees it. The test
 itself doesn't change.
