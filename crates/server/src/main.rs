@@ -41,6 +41,8 @@ async fn main() -> ExitCode {
     // Writes what decisions left for the organizations' repos, starting with
     // anything an earlier run (or a stopped CLI) didn't get to.
     conference::outbox::spawn(state.clone());
+    // Keeps the conferences' records index current.
+    conference::sync::spawn(state.clone());
 
     // Tests and tooling wait for this exact line to learn the port.
     let mut stdout = std::io::stdout();

@@ -28,6 +28,7 @@ pub mod decide;
 pub mod join;
 pub mod outbox;
 pub mod repo;
+pub mod sync;
 
 use serde_json::Value;
 
@@ -166,7 +167,7 @@ impl Conference {
 /// A conference by its space URI.
 pub async fn load(db: &Db, space: &str) -> Result<Option<Conference>, String> {
     sqlx::query_as::<_, ConferenceRow>(&format!(
-        "SELECT {CONFERENCE_COLUMNS} FROM conferences WHERE space = $1"
+        "SELECT {CONFERENCE_COLUMNS} FROM conferences WHERE space = $1 AND status = 'ready'"
     ))
     .bind(space)
     .fetch_optional(db)
@@ -178,7 +179,7 @@ pub async fn load(db: &Db, space: &str) -> Result<Option<Conference>, String> {
 /// A conference by its public event: the organization's DID and the event's rkey.
 pub async fn by_event(db: &Db, org: &str, rkey: &str) -> Result<Option<Conference>, String> {
     sqlx::query_as::<_, ConferenceRow>(&format!(
-        "SELECT {CONFERENCE_COLUMNS} FROM conferences WHERE org = $1 AND rkey = $2"
+        "SELECT {CONFERENCE_COLUMNS} FROM conferences WHERE org = $1 AND rkey = $2 AND status = 'ready'"
     ))
     .bind(org)
     .bind(rkey)

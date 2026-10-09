@@ -254,6 +254,8 @@ pub struct Op {
     pub rkey: String,
     /// The revision the writer's PDS gave the commit that wrote it.
     pub rev: String,
+    /// The CID it wrote; `None` when it deleted the record.
+    pub cid: Option<String>,
     /// The record as it is now, when this op wrote the current version.
     pub value: Option<Value>,
 }
@@ -261,9 +263,15 @@ pub struct Op {
 /// The most pages of ops read from one repo at once.
 const MAX_PAGES: usize = 100;
 
-/// A writer's ops in a space, oldest first, read from their PDS with
-/// eventside's credential. No repo in the space is no ops.
-pub async fn repo_ops(state: &AppState, space: &str, repo: &str) -> Result<Vec<Op>, String> {
+/// A writer's ops in a space after revision `since` (all of them without
+/// it), oldest first, read from their PDS with eventside's credential. No
+/// repo in the space is no ops.
+pub async fn repo_ops(
+    state: &AppState,
+    space: &str,
+    repo: &str,
+    since: Option<&str>,
+) -> Result<Vec<Op>, String> {
     let credential = credential(state, space).await?;
     let pds = pds_of(state, repo).await?;
     let url = format!("{pds}/xrpc/com.atproto.space.listRepoOps");
@@ -277,6 +285,9 @@ pub async fn repo_ops(state: &AppState, space: &str, repo: &str) -> Result<Vec<O
             ("repo", repo.to_owned()),
             ("limit", "500".to_owned()),
         ];
+        if let Some(since) = since {
+            query.push(("since", since.to_owned()));
+        }
         if let Some(cursor) = &cursor {
             query.push(("cursor", cursor.clone()));
         }
@@ -315,6 +326,7 @@ pub async fn repo_ops(state: &AppState, space: &str, repo: &str) -> Result<Vec<O
                 collection: collection.to_owned(),
                 rkey: rkey.to_owned(),
                 rev: rev.to_owned(),
+                cid: op.get("cid").and_then(Value::as_str).map(str::to_owned),
                 value: op.get("value").cloned(),
             });
         }
@@ -326,47 +338,78 @@ pub async fn repo_ops(state: &AppState, space: &str, repo: &str) -> Result<Vec<O
     Ok(ops)
 }
 
-/// The current version of each record in a collection, with the revision
-/// that wrote it: the last op on each record, if it carries a value.
-pub fn current_records(ops: &[Op], collection: &str) -> Vec<Op> {
-    let mut latest: HashMap<&str, &Op> = HashMap::new();
-    let mut order = Vec::new();
-    for op in ops.iter().filter(|op| op.collection == collection) {
-        if latest.insert(&op.rkey, op).is_none() {
-            order.push(op.rkey.as_str());
+/// A call to the space's host (the organization's PDS) with eventside's
+/// credential, whose audience is the space's authority.
+async fn host_call(
+    state: &AppState,
+    space: &str,
+    nsid: &str,
+    query: &[(&str, String)],
+    body: Option<&Value>,
+) -> Result<Value, String> {
+    let org = authority(space)?;
+    let credential = credential(state, space).await?;
+    let host = pds_of(state, &org).await?;
+    let url = format!("{host}/xrpc/{nsid}");
+    let client = state.http.guarded(&url)?;
+    let mut req = match body {
+        Some(body) => client.post(&url).json(body),
+        None => client.get(&url).query(query),
+    };
+    for (name, value) in
+        space_signature(&state.oauth.key, &format!("Atproto-Space {credential}"), Some(&org))
+    {
+        req = req.header(name, value);
+    }
+    let res = req.send().await.map_err(|e| format!("{url}: {e}"))?;
+    let status = res.status();
+    let text = res.text().await.unwrap_or_default();
+    if !status.is_success() {
+        if (status.as_u16() == 401 || status.as_u16() == 403)
+            && let Some(cache) =
+                CREDENTIALS.lock().expect("the credential cache isn't poisoned").as_mut()
+        {
+            cache.remove(space);
+        }
+        return Err(format!("{nsid} answered {status}: {text}"));
+    }
+    Ok(serde_json::from_str(&text).unwrap_or(Value::Null))
+}
+
+/// Every writer the space's host lists (`listRepos`).
+pub async fn writers(state: &AppState, space: &str) -> Result<Vec<String>, String> {
+    let mut out = Vec::new();
+    let mut cursor: Option<String> = None;
+    for _ in 0..MAX_PAGES {
+        let mut query = vec![("space", space.to_owned()), ("limit", "1000".to_owned())];
+        if let Some(cursor) = &cursor {
+            query.push(("cursor", cursor.clone()));
+        }
+        let body = host_call(state, space, "com.atproto.space.listRepos", &query, None).await?;
+        let repos = body.get("repos").and_then(Value::as_array).cloned().unwrap_or_default();
+        out.extend(
+            repos.iter().filter_map(|r| r.get("did").and_then(Value::as_str).map(str::to_owned)),
+        );
+        cursor = body.get("cursor").and_then(|c| {
+            c.as_str().map(str::to_owned).or_else(|| c.as_i64().map(|n| n.to_string()))
+        });
+        if cursor.is_none() || repos.is_empty() {
+            break;
         }
     }
-    order
-        .into_iter()
-        .filter_map(|rkey| latest.get(rkey).copied())
-        .filter(|op| op.value.is_some())
-        .cloned()
-        .collect()
+    Ok(out)
+}
+
+/// Registers eventside for the space's write notifications, at its
+/// `#eventside_access` service.
+pub async fn register_notify(state: &AppState, space: &str) -> Result<(), String> {
+    let body = json!({ "space": space, "service": super::access_service(&state.oauth.public_url) });
+    host_call(state, space, "com.atproto.space.registerNotify", &[], Some(&body)).await.map(drop)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn op(rkey: &str, rev: &str, value: Option<Value>) -> Op {
-        Op { collection: "c".into(), rkey: rkey.into(), rev: rev.into(), value }
-    }
-
-    #[test]
-    fn the_current_version_of_each_record_is_its_last_op() {
-        let ops = [
-            op("a", "1", None),
-            op("b", "2", Some(json!({ "n": 1 }))),
-            op("a", "3", Some(json!({ "n": 2 }))),
-            op("c", "4", Some(json!({}))),
-            op("c", "5", None),
-        ];
-        let current = current_records(&ops, "c");
-        assert_eq!(
-            current.iter().map(|o| (o.rkey.as_str(), o.rev.as_str())).collect::<Vec<_>>(),
-            vec![("a", "3"), ("b", "2")]
-        );
-    }
 
     #[test]
     fn a_space_signature_covers_the_authorization_and_audience() {

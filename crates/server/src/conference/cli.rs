@@ -20,7 +20,7 @@ use super::{
 use crate::AppState;
 use crate::auth::session::{self, ADMIN, ORG};
 use crate::config::{ADMIN_SCOPES, Config, ORG_SCOPES};
-use crate::crypto::{tid_ms, tid_now};
+use crate::crypto::tid_now;
 use crate::db::now_ms;
 use crate::keys::random_token;
 
@@ -343,12 +343,63 @@ async fn conference_create(state: &AppState, args: &Args) -> Result<Done, String
         return Err("--theme must be a JSON object of token names to values".into());
     }
 
-    let rkey = tid_now();
-    let space = repo::create_space(state, &org, &rkey).await?;
-    if space != SpaceUri::conference(&org, &rkey) {
-        return Err(format!(
-            "the organization's PDS made {space}, not the conference space asked for"
-        ));
+    // Recorded as pending first, so a create that stops partway (the PDS
+    // unreachable, the process killed) is finished by running it again.
+    let pending = sqlx::query_scalar::<_, String>(
+        "SELECT rkey FROM conferences WHERE org = $1 AND name = $2 AND starts_at = $3 \
+         AND created_by = $4 AND status = 'pending' ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(&org)
+    .bind(&name)
+    .bind(&starts)
+    .bind(&actor)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| e.to_string())?;
+    let resuming = pending.is_some();
+    let rkey = pending.unwrap_or_else(tid_now);
+    let space = SpaceUri::conference(&org, &rkey);
+    let event_uri = format!("at://{org}/{EVENT}/{rkey}");
+    let saved = if resuming {
+        sqlx::query(
+            "UPDATE conferences SET ends_at = $1, city = $2, description = $3, theme = $4 \
+             WHERE space = $5 AND status = 'pending'",
+        )
+        .bind(&ends)
+        .bind(&city)
+        .bind(&description)
+        .bind(theme.to_string())
+        .bind(&space)
+    } else {
+        sqlx::query(
+            "INSERT INTO conferences (space, org, rkey, event, name, starts_at, ends_at, city, description, \
+             theme, methods, created_by, created_at, status) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, '', $11, $12, 'pending')",
+        )
+        .bind(&space)
+        .bind(&org)
+        .bind(&rkey)
+        .bind(&event_uri)
+        .bind(&name)
+        .bind(&starts)
+        .bind(&ends)
+        .bind(&city)
+        .bind(&description)
+        .bind(theme.to_string())
+        .bind(&actor)
+        .bind(now_ms())
+    };
+    saved.execute(&state.db).await.map_err(|e| e.to_string())?;
+    match repo::create_space(state, &org, &rkey).await {
+        Ok(made) if made == space => {}
+        Ok(made) => {
+            return Err(format!(
+                "the organization's PDS made {made}, not the conference space asked for"
+            ));
+        }
+        // Made by the run this one finishes.
+        Err(why) if resuming && why.contains("SpaceAlreadyExists") => {}
+        Err(why) => return Err(why),
     }
     let page = format!("{}/c/{org}/{rkey}", state.oauth.public_url);
     let mut address =
@@ -387,25 +438,17 @@ async fn conference_create(state: &AppState, args: &Args) -> Result<Done, String
     write_sidecar(state, &conference).await?;
 
     let mut tx = decide::begin(state).await?;
-    sqlx::query(
-        "INSERT INTO conferences (space, org, rkey, event, name, starts_at, ends_at, city, description, theme, \
-         methods, created_by, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, '', $11, $12)",
+    let finished = sqlx::query(
+        "UPDATE conferences SET status = 'ready', event = $1 WHERE space = $2 AND status = 'pending'",
     )
-    .bind(&space)
-    .bind(&org)
-    .bind(&rkey)
     .bind(&event_uri)
-    .bind(&name)
-    .bind(&starts)
-    .bind(&ends)
-    .bind(&city)
-    .bind(&description)
-    .bind(theme.to_string())
-    .bind(&actor)
-    .bind(now_ms())
+    .bind(&space)
     .execute(&mut *tx)
     .await
     .map_err(|e| e.to_string())?;
+    if finished.rows_affected() != 1 {
+        return Err(format!("{space} was finished by another run"));
+    }
     let first_owner = Action::Admit { role: Role::Owner, method: "admin".into() };
     decide::decide_in(&mut tx, &space, &actor, first_owner, &Actor::Creator(actor.clone())).await?;
     decide::enqueue(&mut tx, &space, outbox::CREATED_ENTRY, None).await?;
@@ -654,49 +697,16 @@ async fn apps(state: &AppState, args: &Args, allow: bool) -> Result<Done, String
 }
 
 /// `records list --collection <nsid>`: the records eventside counts in the
-/// space. A member's record counts while they're a member, if they were one
-/// when their PDS dated it; the organization's always count.
+/// space, from its records index (see `sync`).
 async fn records_list(state: &AppState, args: &Args) -> Result<Done, String> {
     let conference = conference(state, args).await?;
     organizer(state, args, &conference).await?;
     let collection = args.need("collection")?;
-    let decisions = decide::decisions(&state.db, &conference.space).await?;
-    let mut writers = vec![conference.org.clone()];
-    for d in decisions.iter().filter(|d| d.action == "admit") {
-        if !writers.contains(&d.subject) {
-            writers.push(d.subject.clone());
-        }
+    // Read what's new first, so the answer is current.
+    if let Err(why) = super::sync::sync_space(state, &conference).await {
+        eprintln!("warning: the index may be behind: {why}");
     }
-    let mut records = Vec::new();
-    for writer in writers {
-        let authority = writer == conference.org;
-        if !authority && !decide::standing(&decisions, &writer, None).is_member() {
-            continue;
-        }
-        let ops = match repo::repo_ops(state, &conference.space, &writer).await {
-            Ok(ops) => ops,
-            Err(why) => {
-                eprintln!("warning: couldn't read {writer}'s records: {why}");
-                continue;
-            }
-        };
-        for op in repo::current_records(&ops, collection) {
-            let dated = tid_ms(&op.rev);
-            let counts = authority
-                || dated
-                    .is_some_and(|at| decide::standing(&decisions, &writer, Some(at)).is_member());
-            if counts {
-                records.push(json!({
-                    "uri": format!("{}/{writer}/{collection}/{}", conference.space, op.rkey),
-                    "repo": writer,
-                    "collection": collection,
-                    "rkey": op.rkey,
-                    "rev": op.rev,
-                    "value": op.value,
-                }));
-            }
-        }
-    }
+    let records = super::sync::counted_records(state, &conference, collection).await?;
     done(format!("{} records counted.", records.len()), json!({ "records": records }))
 }
 

@@ -187,6 +187,9 @@ pub struct Standing {
     pub membership: Option<Decision>,
     /// The ban in force.
     pub ban: Option<Decision>,
+    /// The removal in force when the ban in force was placed, which lifting
+    /// the ban restores: a ban never loosens a removal.
+    removed_before_ban: Option<Rank>,
 }
 
 impl Standing {
@@ -216,15 +219,19 @@ impl Standing {
                 self.membership = None;
             }
             "ban" => {
+                if self.banned.is_none() {
+                    self.removed_before_ban = self.removed;
+                }
                 self.role = None;
                 self.membership = None;
                 self.banned = Some(d.rank());
-                self.removed = Some(d.rank());
+                // The higher of the removal's and the ban's weight.
+                self.removed = self.removed.max(Some(d.rank()));
                 self.ban = Some(d.clone());
             }
             "unban" => {
                 self.banned = None;
-                self.removed = None;
+                self.removed = self.removed_before_ban.take();
                 self.ban = None;
             }
             _ => {}
@@ -406,11 +413,20 @@ pub async fn decide_in(
     action: Action,
     actor: &Actor,
 ) -> Result<Outcome, String> {
+    let actor_did = match actor {
+        Actor::Subject => subject,
+        Actor::Admin(did) | Actor::Creator(did) => did.as_str(),
+    };
+    // The subject's and the actor's decisions, and those of anyone who has
+    // ever been made an owner (to count the owners now).
     let all = sqlx::query_as::<_, Decision>(
         "SELECT seq, subject, action, role, method, actor, rank, decided_at FROM decisions \
-         WHERE conference = $1 ORDER BY seq",
+         WHERE conference = $1 AND (subject = $2 OR subject = $3 OR subject IN \
+         (SELECT subject FROM decisions WHERE conference = $1 AND role = 'owner')) ORDER BY seq",
     )
     .bind(conference)
+    .bind(subject)
+    .bind(actor_did)
     .fetch_all(&mut **tx)
     .await
     .map_err(|e| e.to_string())?;
@@ -709,6 +725,26 @@ mod tests {
         let s = standing_of(&log);
         assert!(!s.is_member());
         assert_eq!(precedence(&s, &join(), Rank::Own, 1), Ok(Some(join())));
+    }
+
+    #[test]
+    fn staff_cant_loosen_an_owners_removal_by_banning_and_unbanning() {
+        let mut log = vec![
+            d(1, "s", "admit", Some("attendee"), "self"),
+            d(2, "s", "remove", None, "owner"),
+            d(3, "s", "ban", None, "staff"),
+        ];
+        let banned = standing_of(&log);
+        assert_eq!(banned.removed, Some(Rank::Owner));
+        assert_eq!(precedence(&banned, &Action::Unban, Rank::Staff, 1), Ok(Some(Action::Unban)));
+        log.push(d(4, "s", "unban", None, "staff"));
+        let unbanned = standing_of(&log);
+        assert_eq!(unbanned.removed, Some(Rank::Owner));
+        assert_eq!(precedence(&unbanned, &join(), Rank::Own, 1), Err(Refusal::RemovedByOwner));
+        assert_eq!(
+            precedence(&unbanned, &admit(Role::Attendee), Rank::Staff, 1),
+            Err(Refusal::RemovedByOwner)
+        );
     }
 
     #[test]

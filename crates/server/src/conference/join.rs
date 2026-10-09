@@ -146,8 +146,14 @@ async fn method(
     Ok(None)
 }
 
-/// How many times a person was refused lately.
+/// How many times a person was refused lately. Attempts older than the
+/// window no longer count, and are dropped.
 async fn refused_lately(state: &AppState, conference: &str, did: &str) -> Result<i64, String> {
+    sqlx::query("DELETE FROM join_attempts WHERE at <= $1")
+        .bind(now_ms() - ATTEMPT_WINDOW_MS)
+        .execute(&state.db)
+        .await
+        .map_err(|e| e.to_string())?;
     sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(*) FROM join_attempts WHERE conference = $1 AND did = $2 AND at > $3",
     )

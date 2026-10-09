@@ -133,7 +133,7 @@ pub async fn join(
     };
     match join::join(&state, &conference, &user.did, input.code.as_deref()).await {
         Ok(Joined::Joined) => {
-            kick(&state);
+            super::outbox::kick();
             Json(json!({ "status": "joined", "conference": conference.space })).into_response()
         }
         Ok(Joined::Refused) => Json(json!({ "status": "refused" })).into_response(),
@@ -144,16 +144,6 @@ pub async fn join(
         ),
         Err(why) => server_error(&why),
     }
-}
-
-/// Applies the outbox now, in the background, rather than at the next poll.
-fn kick(state: &AppState) {
-    let state = state.clone();
-    tokio::spawn(async move {
-        if let Err(err) = super::outbox::drain(&state).await {
-            eprintln!("outbox: {err}");
-        }
-    });
 }
 
 #[derive(Deserialize)]
@@ -179,7 +169,7 @@ pub async fn leave(
     match decide::decide(&state, &conference.space, &user.did, Action::Leave, &Actor::Subject).await
     {
         Ok(Outcome::Decided(_)) => {
-            kick(&state);
+            super::outbox::kick();
             Json(json!({})).into_response()
         }
         Ok(Outcome::Unchanged) => Json(json!({})).into_response(),
@@ -251,7 +241,14 @@ pub async fn check_user_access(
     let Some(parsed) = SpaceUri::parse(&space) else {
         return xrpc_error(StatusCode::BAD_REQUEST, "InvalidRequest", "space must be a space URI");
     };
-    if let Err(why) = check_service_auth(&state, &headers, &parsed.authority).await {
+    if let Err(why) = check_service_auth(
+        &state,
+        &headers,
+        &parsed.authority,
+        "com.atproto.simplespace.checkUserAccess",
+    )
+    .await
+    {
         return xrpc_error(StatusCode::UNAUTHORIZED, "AuthenticationRequired", &why);
     }
     let authorized =
@@ -304,13 +301,15 @@ pub async fn app_allowed(
     Ok(uses.is_some_and(|uses| super::split_methods(&uses).iter().any(|u| u == used_for)))
 }
 
-/// Checks the service JWT a PDS sent with `checkUserAccess`: issued by the
-/// space's authority, signed with its `#atproto` key, for eventside's
-/// access service and this method, and not expired.
-async fn check_service_auth(
+/// Checks the service JWT a PDS sent eventside: issued by `issuer` (the
+/// space's authority), signed with its `#atproto` key, for eventside (its
+/// DID, or its access service) and for exactly the method `lxm`, and not
+/// expired.
+pub async fn check_service_auth(
     state: &AppState,
     headers: &HeaderMap,
-    authority: &str,
+    issuer: &str,
+    lxm: &str,
 ) -> Result<(), String> {
     let token = headers
         .get("authorization")
@@ -318,7 +317,7 @@ async fn check_service_auth(
         .and_then(|v| v.strip_prefix("Bearer "))
         .ok_or("a service JWT from the space's authority is required")?;
     let jwt = Jwt::decode(token)?;
-    if jwt.claim_str("iss") != Some(authority) {
+    if jwt.claim_str("iss") != Some(issuer) {
         return Err("the token isn't from the space's authority".into());
     }
     let ours = eventside_did(&state.oauth.public_url);
@@ -326,18 +325,42 @@ async fn check_service_auth(
     if audience != ours && audience != format!("{ours}#eventside_access") {
         return Err("the token isn't for eventside".into());
     }
-    if jwt.claim_str("lxm").is_some_and(|lxm| lxm != "com.atproto.simplespace.checkUserAccess") {
-        return Err("the token is for another method".into());
+    if jwt.claim_str("lxm") != Some(lxm) {
+        return Err(format!("the token isn't for {lxm}"));
     }
     if jwt.expired(now_secs()) {
         return Err("the token has expired".into());
     }
-    let key = signing_key(state, authority).await?;
+    // A cached key that doesn't verify may have been rotated: fetch it again, once.
+    let key = signing_key(state, issuer, false).await?;
+    if jwt.verify(&key).is_ok() {
+        return Ok(());
+    }
+    let key = signing_key(state, issuer, true).await?;
     jwt.verify(&key)
 }
 
-/// A DID's `#atproto` signing key, from its document.
-async fn signing_key(state: &AppState, did: &str) -> Result<PublicKey, String> {
+/// How long a DID's signing key is reused.
+const KEY_TTL_MS: i64 = 5 * 60 * 1000;
+
+/// DIDs' `#atproto` keys, with when they were fetched.
+static SIGNING_KEYS: std::sync::Mutex<Option<std::collections::HashMap<String, (PublicKey, i64)>>> =
+    std::sync::Mutex::new(None);
+
+/// A DID's `#atproto` signing key, from its document: cached for a few
+/// minutes, unless `fresh`.
+async fn signing_key(state: &AppState, did: &str, fresh: bool) -> Result<PublicKey, String> {
+    let now = crate::db::now_ms();
+    if !fresh
+        && let Some((key, at)) = SIGNING_KEYS
+            .lock()
+            .expect("the key cache isn't poisoned")
+            .as_ref()
+            .and_then(|keys| keys.get(did).cloned())
+        && now - at < KEY_TTL_MS
+    {
+        return Ok(key);
+    }
     let doc = state.resolver.did_document(did).await.map_err(|e| format!("{e:?}"))?;
     let multibase = doc
         .get("verificationMethod")
@@ -352,7 +375,14 @@ async fn signing_key(state: &AppState, did: &str) -> Result<PublicKey, String> {
         .and_then(|m| m.get("publicKeyMultibase"))
         .and_then(Value::as_str)
         .ok_or_else(|| format!("{did} lists no #atproto key"))?;
-    PublicKey::from_did_key(multibase)
+    let key = PublicKey::from_did_key(multibase)?;
+    let mut cache = SIGNING_KEYS.lock().expect("the key cache isn't poisoned");
+    let cache = cache.get_or_insert_with(std::collections::HashMap::new);
+    if cache.len() > 10_000 {
+        cache.clear();
+    }
+    cache.insert(did.to_owned(), (key.clone(), now));
+    Ok(key)
 }
 
 /// `/.well-known/did.json`: eventside's `did:web` document, with the

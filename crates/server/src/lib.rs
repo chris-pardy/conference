@@ -131,6 +131,7 @@ fn routes() -> Router<AppState> {
             "/xrpc/com.atproto.simplespace.checkUserAccess",
             get(conference::api::check_user_access),
         )
+        .route("/xrpc/com.atproto.space.notifyWrite", post(conference::sync::notify_write))
         .route("/.well-known/did.json", get(conference::api::did_document))
 }
 

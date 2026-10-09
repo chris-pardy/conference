@@ -1,17 +1,20 @@
 //! The outbox: what decisions, new conferences and changes of apps still
 //! have to write into the organization's repo in the space. Entries are
 //! added in the same transaction as what caused them, and applied after it
-//! commits, in order, by one process at a time (a lease in the database):
-//! the CLI applies its own before it exits, and the server applies whatever
-//! is left, on start and every half second after.
+//! commits, in order, by one drain at a time: within a process a mutex
+//! keeps drains apart, and between processes (the server and the CLI) a
+//! lease in the database does, held by a token per drain. The CLI applies
+//! its own entries before it exits; the server applies whatever is left, on
+//! start, whenever a request [`kick`]s it, and every half second.
 //!
 //! Applying a member entry writes the subject's records as the decisions
 //! log has them *now*, so entries can be applied twice, or late, and the
 //! records still end up matching the last decision.
 
 use std::collections::HashSet;
-use std::sync::OnceLock;
 use std::time::Duration;
+
+use tokio::sync::{Mutex, Notify};
 
 use serde_json::{Value, json};
 
@@ -37,10 +40,15 @@ const BATCH: i64 = 50;
 /// The longest wait before an entry that failed is tried again.
 const MAX_RETRY_MS: i64 = 60_000;
 
-/// This process, as the lease's holder.
-fn holder() -> &'static str {
-    static HOLDER: OnceLock<String> = OnceLock::new();
-    HOLDER.get_or_init(|| random_token(12))
+/// One drain at a time in this process.
+static DRAINING: Mutex<()> = Mutex::const_new(());
+/// Wakes the server's drain loop.
+static WAKE: Notify = Notify::const_new();
+
+/// Asks the server's drain loop to apply the outbox now, rather than at its
+/// next poll.
+pub fn kick() {
+    WAKE.notify_one();
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -52,13 +60,13 @@ struct Entry {
     attempts: i64,
 }
 
-async fn take_lease(state: &AppState) -> Result<bool, String> {
+async fn take_lease(state: &AppState, holder: &str) -> Result<bool, String> {
     let now = now_ms();
     let taken = sqlx::query(
         "UPDATE outbox_lease SET holder = $1, until_ms = $2 \
          WHERE slot = 1 AND (until_ms < $3 OR holder = $1)",
     )
-    .bind(holder())
+    .bind(holder)
     .bind(now + LEASE_MS)
     .bind(now)
     .execute(&state.db)
@@ -67,11 +75,11 @@ async fn take_lease(state: &AppState) -> Result<bool, String> {
     Ok(taken.rows_affected() == 1)
 }
 
-async fn release_lease(state: &AppState) {
+async fn release_lease(state: &AppState, holder: &str) {
     let released = sqlx::query(
         "UPDATE outbox_lease SET holder = NULL, until_ms = 0 WHERE slot = 1 AND holder = $1",
     )
-    .bind(holder())
+    .bind(holder)
     .execute(&state.db)
     .await;
     if let Err(err) = released {
@@ -79,18 +87,20 @@ async fn release_lease(state: &AppState) {
     }
 }
 
-/// Applies every entry that's due, if no other process is. Returns whether
-/// this process held the lease.
+/// Applies every entry that's due, unless another process is. Waits for any
+/// drain already running in this process. Returns whether it held the lease.
 pub async fn drain(state: &AppState) -> Result<bool, String> {
-    if !take_lease(state).await? {
+    let _one = DRAINING.lock().await;
+    let holder = random_token(12);
+    if !take_lease(state, &holder).await? {
         return Ok(false);
     }
-    let result = drain_leased(state).await;
-    release_lease(state).await;
+    let result = drain_leased(state, &holder).await;
+    release_lease(state, &holder).await;
     result.map(|()| true)
 }
 
-async fn drain_leased(state: &AppState) -> Result<(), String> {
+async fn drain_leased(state: &AppState, holder: &str) -> Result<(), String> {
     // A conference whose entry failed waits for its turn again, so its
     // records are still written in order.
     let mut failed: HashSet<String> = HashSet::new();
@@ -113,7 +123,7 @@ async fn drain_leased(state: &AppState) -> Result<(), String> {
             if failed.contains(&entry.conference) {
                 continue;
             }
-            if !take_lease(state).await? {
+            if !take_lease(state, holder).await? {
                 return Ok(());
             }
             // A later entry about the same thing writes the same state.
@@ -199,7 +209,7 @@ pub fn spawn(state: AppState) {
             if let Err(err) = drain(&state).await {
                 eprintln!("outbox: {err}");
             }
-            tokio::time::sleep(POLL).await;
+            let _ = tokio::time::timeout(POLL, WAKE.notified()).await;
         }
     });
 }
