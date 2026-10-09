@@ -1,5 +1,5 @@
 ---
-status: implementing
+status: blocked
 impact: cross-cutting
 depends-on: [attendee-sign-in]
 branch: feature/conference-space
@@ -1309,3 +1309,23 @@ held up.
    record (N+1). **Fix:** load keys once per sync.
 5. **[nit]** `parse_iso` can panic on a non-ASCII fraction. **Fix:**
    check digits before slicing.
+
+Rework (`5233157`): all five fixed, with Rust tests. `pnpm check` green.
+The join on open admits only through the attendee list; `checkUserAccess`
+loads the conference first and expects its organization as issuer; the
+apps record carries a `seq` and only the latest counts.
+
+### Blocked: review limit reached (2026-10-09)
+
+Five rounds are done and round 5's findings are fixed, but round 5 wasn't
+clean, so the build stops here for the user. What kept coming back:
+
+- **The core held** from round 3 on: precedence, the decisions log,
+  signatures and `checkUserAccess`'s rules.
+- **Majors by round:** 4, 2, 1, 2, 1. The later ones were at edges that
+  earlier fixes opened: the automatic list join on open (rounds 3–5) and
+  binding signed records to their space and version (rounds 2, 4, 5).
+- **Still waiting on the user:** dating records by PDS rev (round 1 #4)
+  and the address without `country` (round 2 #1).
+
+**Asking:** raise the review limit so rounds 6+ can run.
