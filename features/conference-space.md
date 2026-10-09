@@ -1188,3 +1188,35 @@ Rework (`a0c90ca`): findings 1, 2, 3, 5, 6, 7, 8 and 9 fixed as described;
 4 left as approved. `pnpm check` green. The records index, sync,
 `notifyWrite` registration and the `sync::on_ingest` hook for feeds are in
 `conference/sync.rs`.
+
+### Round 2
+
+Reviewed `162128a`. `pnpm check` green; frozen files unchanged apart from
+the approved `other-app.ts` fix.
+
+1. **[major]** The public event's address has no `country`, which
+   `community.lexicon.location.address` requires. **Fix:** leave the
+   address out unless `--country` is given; don't repeat the city as
+   `name`.
+2. **[major]** The outbox lease can expire during one slow entry, so a
+   second drain can apply the same subject and an older state can land
+   last. **Fix:** after writing, re-check that the subject's latest `seq`
+   is the one applied, and re-apply if not; renew the lease while
+   applying.
+3. **[minor]** `attest::keys()` generates a key and writes on every call,
+   including every anonymous `did.json`. **Fix:** ensure the key at start
+   only; `keys()` only reads.
+4. **[minor]** A forged service JWT forces a DID refetch every time.
+   **Fix:** refetch at most once per DID per interval.
+5. **[minor]** A withdrawn signed record re-put into the org's repo
+   counts again. **Fix:** a signed record counts only if its `seq` is the
+   subject's current decision and its rkey is the subject.
+6. **[minor]** `authorized()` has no rule for the authority, which the
+   design says is always a writer. **Fix:** allow the authority.
+7. **[minor]** Backfill reads every admitted repo every 30 s. **Fix:**
+   rely on `notifyWrite`, backfill stale repos on a long interval, with
+   bounded concurrency.
+8. **[minor]** `--starts`/`--ends` are stored as typed, not normalized,
+   and `ends < starts` isn't refused. **Fix:** store RFC 3339 and refuse.
+9. **[nit]** An outbox comment claims ordering across drains that
+   doesn't hold. **Fix:** correct the comment.
