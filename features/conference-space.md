@@ -776,13 +776,41 @@ term. We could use a custom PDS (event host?) long term."
 
   The event host would be its own feature, specced when it's needed.
 
-**Test cases this changes** (the wording is proposed, and needs the
-user's approval):
+**Test cases this changes** (approved by the user with the red tests,
+2026-10-09):
 
 - **TC-1** becomes "Creating a conference makes eventside its managing
   app".
 - **TC-37:** signatures verify against a key in eventside's DID
   document, and eventside is the space's managing app.
+
+### Red-test approval (2026-10-09)
+
+The user approved the red tests ("approve let's go"), and with them:
+
+- **The rewordings** of TC-1, TC-30 and TC-37 above.
+- **Changes to frozen [`attendee-sign-in`](attendee-sign-in.md) tests**,
+  committed with this feature's red tests:
+  - TC-7 and TC-18 (`sign-in.test.ts`, `session.test.ts`) asserted the
+    granted scopes were exactly `['atproto']`. They now accept `atproto`
+    plus this feature's `app.eventside.*` space scopes
+    (`tests/support/scopes.ts`).
+  - TC-9 still asserts the exact client ID, now computed the way sign-in
+    builds it for a scope list other than `atproto`.
+- **TC-41, dating records.** A record counts by the revision its PDS
+  assigned it, checked against membership at that revision, not by when
+  eventside received it. (Vivarium stores a removed member's write, and
+  sync finds it after they rejoin; dating by receipt would count it.)
+  This replaces "the time eventside received or indexed the record" in
+  the design.
+- **TC-18:** vivarium words the two refusals differently
+  (`UserNotAuthorized`, `SpaceNotFound`), so the test checks only that
+  both are refused.
+- **TC-24:** vivarium still stores a removed member's write, so the test
+  checks that the space never takes it in.
+- **Contract details:** the space is created with `appAccess: #open`, so
+  the PDS always asks eventside; the organization's OAuth grant includes
+  space create and write scopes; the CLI gains `records list`.
 
 ## Test cases
 
@@ -802,7 +830,7 @@ The scenario is AtmosphereConf 2027 in Amsterdam:
 
 #### TC-1: Creating a conference makes eventside its managing app
 
-*(Reworded in design round 2; awaiting approval.)*
+*(Reworded in design round 2; approved 2026-10-09.)*
 
 - **Given** the organization's account on its PDS, connected with the CLI
 - **When** Olga creates the conference
@@ -1008,7 +1036,7 @@ The scenario is AtmosphereConf 2027 in Amsterdam:
 - **When** each tries to rejoin with the shared code
 - **Then** Ruud gets back in
 - **And** Joost is refused until an owner admits him *(reworded during
-  the build to match the precedence table; awaiting approval)*
+  the build to match the precedence table; approved 2026-10-09)*
 
 #### TC-31: Only owners act on admins
 
@@ -1058,7 +1086,7 @@ The scenario is AtmosphereConf 2027 in Amsterdam:
 - **Then** it finds Ana as an attendee and Pim as staff
 - **And** each record's signature verifies against a key in eventside's
   DID document, and eventside is the space's managing app *(reworded in
-  design round 2; awaiting approval)*
+  design round 2; approved 2026-10-09)*
 
 #### TC-38: Records that aren't properly signed don't count
 
