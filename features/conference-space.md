@@ -1183,3 +1183,8 @@ the approved `other-app.ts` fix.
    outside the window.
 9. **[nit]** Every decision reads the whole log to count owners. **Fix**
    if cheap.
+
+Rework (`a0c90ca`): findings 1, 2, 3, 5, 6, 7, 8 and 9 fixed as described;
+4 left as approved. `pnpm check` green. The records index, sync,
+`notifyWrite` registration and the `sync::on_ingest` hook for feeds are in
+`conference/sync.rs`.
