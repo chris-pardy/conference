@@ -1,0 +1,107 @@
+@import "../theme/tokens.css";
+
+.conference {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: var(--g-space-5) var(--g-space-4);
+  color: var(--g-color-text);
+  font-family: var(--g-font-body);
+}
+
+.conference h1 {
+  margin: 0 0 var(--g-space-2);
+  font-family: var(--g-font-display);
+  color: var(--g-color-primary);
+  overflow-wrap: anywhere;
+}
+
+.conference__header {
+  margin-bottom: var(--g-space-5);
+}
+
+.conference__facts {
+  margin: 0 0 var(--g-space-3);
+  font-weight: 600;
+}
+
+.conference__description {
+  margin: 0;
+  color: var(--g-color-muted);
+}
+
+.conference__muted {
+  color: var(--g-color-muted);
+}
+
+.conference__panel {
+  display: grid;
+  gap: var(--g-space-3);
+  padding: var(--g-space-4);
+  border: 1px solid var(--g-color-border);
+  border-radius: var(--g-radius-lg);
+  background: var(--g-color-surface);
+}
+
+.conference__panel p {
+  margin: 0;
+}
+
+.conference__status {
+  font-weight: 600;
+}
+
+.conference__join {
+  display: grid;
+  gap: var(--g-space-2);
+}
+
+.conference__join label {
+  font-weight: 600;
+}
+
+.conference__join input {
+  padding: var(--g-space-2) var(--g-space-3);
+  border: 1px solid var(--g-color-border);
+  border-radius: var(--g-radius-md);
+  background: var(--g-color-sunken);
+  color: var(--g-color-text);
+  font: inherit;
+}
+
+.conference__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--g-space-2);
+}
+
+.conference__primary,
+.conference__secondary {
+  padding: var(--g-space-2) var(--g-space-3);
+  border-radius: var(--g-radius-md);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.conference__primary {
+  border: none;
+  background: var(--g-color-primary);
+  color: var(--g-color-on-primary);
+}
+
+.conference__secondary {
+  border: 1px solid var(--g-color-primary);
+  background: transparent;
+  color: var(--g-color-primary);
+}
+
+.conference__primary:disabled,
+.conference__secondary:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.conference__panel a {
+  color: var(--g-color-primary);
+  font-weight: 600;
+}

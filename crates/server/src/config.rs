@@ -4,7 +4,31 @@ use std::time::Duration;
 
 /// The scopes asked for at sign-in. A feature that needs more adds them here;
 /// sessions granted fewer are asked to sign in again.
-pub const LOGIN_SCOPES: &[&str] = &["atproto"];
+///
+/// conference-space: attendees write their own records into any
+/// conference's space, but never read it: eventside serves what they see.
+pub const LOGIN_SCOPES: &[&str] = &["atproto", CONFERENCE_WRITE_SCOPE];
+
+/// Writing your own records into any conference space (whose authority is
+/// the organization, so `authority=*`), without reading it.
+pub const CONFERENCE_WRITE_SCOPE: &str =
+    "space:app.eventside.private?authority=*&action=create&action=update&action=delete";
+
+/// The scopes an admin connects with (`admin connect`): identity only. The
+/// session proves who runs a command `--as` them; eventside writes as the
+/// organization.
+pub const ADMIN_SCOPES: &[&str] = &["atproto"];
+
+/// The scopes an organization's account connects with (`admin org connect`):
+/// its public calendar events and sidecars, and its conference spaces, which
+/// eventside creates, writes its records into, and reads (a delegation for
+/// eventside's own credential).
+pub const ORG_SCOPES: &[&str] = &[
+    "atproto",
+    "repo:community.lexicon.calendar.event",
+    "repo:app.eventside.conference.sidecar",
+    "space:app.eventside.private?action=read&action=create&action=update&action=delete&manage=create",
+];
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -164,7 +188,7 @@ mod tests {
 
     #[test]
     fn the_scope_list_must_include_atproto_once() {
-        assert_eq!(scopes(None), Ok(vec!["atproto".to_owned()]));
+        assert_eq!(scopes(None), Ok(LOGIN_SCOPES.iter().map(|s| (*s).to_owned()).collect()));
         assert_eq!(
             scopes(Some(" atproto  transition:generic ")),
             Ok(vec!["atproto".to_owned(), "transition:generic".to_owned()])
@@ -175,6 +199,13 @@ mod tests {
         assert!(scopes(Some("atproto \"quoted\"")).is_err());
         let long = format!("atproto {}", "x".repeat(2048));
         assert!(scopes(Some(&long)).unwrap_err().contains("2048"));
+    }
+
+    #[test]
+    fn the_admin_and_organization_scope_lists_are_well_formed() {
+        assert!(crate::oauth::well_formed_scope(&ADMIN_SCOPES.join(" ")));
+        assert!(crate::oauth::well_formed_scope(&ORG_SCOPES.join(" ")));
+        assert!(crate::oauth::well_formed_scope(&LOGIN_SCOPES.join(" ")));
     }
 
     #[test]

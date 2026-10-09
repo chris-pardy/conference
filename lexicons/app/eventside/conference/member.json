@@ -1,0 +1,29 @@
+{
+  "lexicon": 1,
+  "id": "app.eventside.conference.member",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "A member of a conference and their role, written by eventside into the organization's repo in the conference's space, as the decisions log has it. Deleted when they leave or are removed.",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["subject", "role", "decidedBy", "decidedRank", "seq", "decidedAt", "createdAt", "signatures"],
+        "properties": {
+          "subject": { "type": "string", "format": "did" },
+          "role": { "type": "ref", "ref": "app.eventside.conference.defs#role" },
+          "method": { "type": "string", "knownValues": ["code", "list", "open", "admin"] },
+          "decidedBy": { "type": "string", "format": "did" },
+          "decidedRank": { "type": "ref", "ref": "app.eventside.conference.defs#rank" },
+          "seq": { "type": "integer", "minimum": 1 },
+          "decidedAt": { "type": "string", "format": "datetime" },
+          "createdAt": { "type": "string", "format": "datetime" },
+          "signatures": {
+            "type": "array",
+            "items": { "type": "ref", "ref": "app.eventside.conference.defs#signature" }
+          }
+        }
+      }
+    }
+  }
+}

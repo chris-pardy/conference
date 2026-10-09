@@ -1,5 +1,7 @@
 //! The sign-in routes: `/oauth/login`, `/oauth/signup`, `/oauth/callback`,
-//! `/oauth/logout`, the client's metadata and keys, and `getSession`.
+//! `/oauth/logout`, the client's metadata and keys, and `getSession`; and
+//! `/oauth/connect`, where the admin CLI's `connect` and `org connect` send
+//! a browser.
 
 use std::collections::HashMap;
 
@@ -100,7 +102,12 @@ pub async fn login(State(state): State<AppState>, Query(params): Params) -> Resp
     };
     // The handle as typed, normalized; it resolved, so it's a valid handle.
     let hint = normalize_handle(handle).unwrap_or_else(|| did.clone());
-    start(&state, &server, Kind::Login, Some(&did), Some(&hint), None, &return_to).await
+    let request = Start {
+        expected_did: Some(&did),
+        login_hint: Some(&hint),
+        ..Start::new(Kind::Login, &return_to)
+    };
+    start(&state, &server, request).await
 }
 
 pub async fn signup(State(state): State<AppState>, Query(params): Params) -> Response {
@@ -112,13 +119,91 @@ pub async fn signup(State(state): State<AppState>, Query(params): Params) -> Res
             return fail(why.code(), &return_to, &[]);
         }
     };
-    start(&state, &server, Kind::Signup, None, None, Some("create"), &return_to).await
+    let request = Start { prompt: Some("create"), ..Start::new(Kind::Signup, &return_to) };
+    start(&state, &server, request).await
 }
 
-#[derive(Clone, Copy)]
+/// `/oauth/connect?id=…`: where `admin connect` and `admin org connect` send
+/// a browser. Signs the account in with the scopes the CLI asked for, into a
+/// session of its own that the browser never holds.
+pub async fn connect(State(state): State<AppState>, Query(params): Params) -> Response {
+    let id = params.get("id").map(String::as_str).unwrap_or_default();
+    let row = sqlx::query_as::<_, (String, String, String, String, i64, Option<i64>)>(
+        "SELECT kind, did, handle, scopes, expires_at, completed_at FROM admin_connects WHERE id = $1",
+    )
+    .bind(id)
+    .fetch_optional(&state.db)
+    .await;
+    let (kind, did, handle, scopes) = match row {
+        Ok(Some((kind, did, handle, scopes, expires_at, None))) if expires_at > now_ms() => {
+            (kind, did, handle, scopes)
+        }
+        Ok(_) => {
+            return page(
+                StatusCode::NOT_FOUND,
+                "This link has expired. Run the connect command again.",
+            );
+        }
+        Err(err) => {
+            eprintln!("connect: {err}");
+            return page(StatusCode::INTERNAL_SERVER_ERROR, "Something went wrong. Try again.");
+        }
+    };
+    let failed = |why: String| {
+        let state = state.clone();
+        async move {
+            eprintln!("connect: {why}");
+            let _ = sqlx::query("UPDATE admin_connects SET error = $1 WHERE id = $2")
+                .bind(&why)
+                .bind(id)
+                .execute(&state.db)
+                .await;
+            page(StatusCode::BAD_GATEWAY, &format!("Couldn't connect: {why}"))
+        }
+    };
+    let kind = if kind == session::ORG { Kind::Org } else { Kind::Admin };
+    let identity = match state.resolver.resolve_did(&did).await {
+        Ok(identity) => identity,
+        Err(err) => return failed(format!("{err:?}")).await,
+    };
+    let server = match state.oauth.discover(&identity.pds).await {
+        Ok(server) => server,
+        Err(why) => return failed(why.to_string()).await,
+    };
+    let request = Start {
+        expected_did: Some(&did),
+        login_hint: Some(&handle),
+        scope: Some(&scopes),
+        context: Some(id),
+        ..Start::new(kind, "/")
+    };
+    start(&state, &server, request).await
+}
+
+/// A small HTML page, for the browser an admin connects from.
+fn page(status: StatusCode, message: &str) -> Response {
+    let escaped = message.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+    let body = format!(
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>Eventside</title></head><body><p>{escaped}</p></body></html>"
+    );
+    let mut res = (status, body).into_response();
+    let headers = res.headers_mut();
+    headers.insert(
+        axum::http::header::CONTENT_TYPE,
+        HeaderValue::from_static("text/html; charset=utf-8"),
+    );
+    headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    res
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {
     Login,
     Signup,
+    /// An admin connecting from the CLI.
+    Admin,
+    /// An organization's account connecting from the CLI.
+    Org,
 }
 
 impl Kind {
@@ -126,21 +211,52 @@ impl Kind {
         match self {
             Self::Login => "login",
             Self::Signup => "signup",
+            Self::Admin => session::ADMIN,
+            Self::Org => session::ORG,
+        }
+    }
+
+    /// The kind of session a finished request of this kind makes.
+    fn session_kind(kind: &str) -> &'static str {
+        match kind {
+            session::ADMIN => session::ADMIN,
+            session::ORG => session::ORG,
+            _ => session::ATTENDEE,
+        }
+    }
+}
+
+/// An authorization request to start.
+struct Start<'a> {
+    kind: Kind,
+    expected_did: Option<&'a str>,
+    login_hint: Option<&'a str>,
+    prompt: Option<&'a str>,
+    return_to: &'a str,
+    /// Another scope list than sign-in's.
+    scope: Option<&'a str>,
+    /// What the callback finishes with: the `admin_connects` row.
+    context: Option<&'a str>,
+}
+
+impl<'a> Start<'a> {
+    fn new(kind: Kind, return_to: &'a str) -> Self {
+        Self {
+            kind,
+            expected_did: None,
+            login_hint: None,
+            prompt: None,
+            return_to,
+            scope: None,
+            context: None,
         }
     }
 }
 
 /// Pushes the authorization request, stores it as pending, and sends the
 /// browser off with a pre-auth cookie that only it can bring back.
-async fn start(
-    state: &AppState,
-    server: &AuthServer,
-    kind: Kind,
-    expected_did: Option<&str>,
-    login_hint: Option<&str>,
-    prompt: Option<&str>,
-    return_to: &str,
-) -> Response {
+async fn start(state: &AppState, server: &AuthServer, request: Start<'_>) -> Response {
+    let Start { kind, expected_did, login_hint, prompt, return_to, scope, context } = request;
     let secure = state.secure_cookies();
     let flow = kind.as_str();
     let request_state = random_token(24);
@@ -154,24 +270,26 @@ async fn start(
         login_hint,
         prompt,
     };
-    let authorize_url = match state.oauth.par(server, &par).await {
+    let scope = scope.unwrap_or(&state.oauth.scope);
+    let client_id = state.oauth.client_id_for(scope);
+    let authorize_url = match state.oauth.par_for(server, &par, scope).await {
         Ok(url) => url,
         Err(err) => {
             eprintln!("{flow}: pushed authorization request failed: {err}");
             return fail("server_unavailable", return_to, &[]);
         }
     };
-    // `kind` (login or signup) is diagnostic only, for reading the table:
-    // the callback treats both flows alike. The client ID is the one `par`
+    // `kind` says how the callback finishes: login and signup alike, or an
+    // admin's or organization's connection. The client ID is the one `par`
     // pushed the request as; the callback redeems the code as it, whichever
     // instance (and scope list) answers.
     let stored = sqlx::query(
         "INSERT INTO oauth_requests (state, kind, client_id, pkce_verifier, dpop_key, issuer, expected_did, \
-         preauth_hash, return_to, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+         preauth_hash, return_to, expires_at, context) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
     )
     .bind(&request_state)
     .bind(flow)
-    .bind(&state.oauth.client_id)
+    .bind(&client_id)
     .bind(&verifier)
     .bind(dpop_key.private_jwk())
     .bind(&server.issuer)
@@ -179,6 +297,7 @@ async fn start(
     .bind(sha256_b64(&preauth))
     .bind(return_to)
     .bind(now_ms() + PENDING_MS)
+    .bind(context)
     .execute(&state.db)
     .await;
     if let Err(err) = stored {
@@ -190,6 +309,8 @@ async fn start(
 
 #[derive(sqlx::FromRow)]
 struct Pending {
+    kind: String,
+    context: Option<String>,
     client_id: String,
     pkce_verifier: String,
     dpop_key: String,
@@ -215,8 +336,8 @@ pub async fn callback(
 
     // Consume the pending request: whoever deletes it is the only one to use it.
     let pending = sqlx::query_as::<_, Pending>(
-        "SELECT client_id, pkce_verifier, dpop_key, issuer, expected_did, preauth_hash, return_to, expires_at \
-         FROM oauth_requests WHERE state = $1",
+        "SELECT kind, context, client_id, pkce_verifier, dpop_key, issuer, expected_did, preauth_hash, return_to, \
+         expires_at FROM oauth_requests WHERE state = $1",
     )
     .bind(request_state)
     .fetch_optional(&state.db)
@@ -265,7 +386,38 @@ pub async fn callback(
     }
     let Some(code) = params.get("code") else { return fail("invalid_request", &return_to, &clear) };
 
+    let connecting = Kind::session_kind(&pending.kind) != session::ATTENDEE;
+    let connection = pending.context.clone().unwrap_or_default();
     match complete(&state, &headers, &pending, code).await {
+        Ok(_) if connecting => {
+            let done = sqlx::query(
+                "UPDATE admin_connects SET completed_at = $1 WHERE id = $2 AND completed_at IS NULL",
+            )
+            .bind(now_ms())
+            .bind(&connection)
+            .execute(&state.db)
+            .await;
+            if let Err(err) = done {
+                eprintln!("callback: could not record the connection: {err}");
+                return page(StatusCode::INTERNAL_SERVER_ERROR, "Something went wrong. Try again.");
+            }
+            let mut res = page(StatusCode::OK, "Connected. You can close this tab.");
+            if let Ok(value) = HeaderValue::from_str(&clear[0]) {
+                res.headers_mut().append(SET_COOKIE, value);
+            }
+            res
+        }
+        Err(code) if connecting => {
+            let _ = sqlx::query("UPDATE admin_connects SET error = $1 WHERE id = $2")
+                .bind(code)
+                .bind(&connection)
+                .execute(&state.db)
+                .await;
+            page(
+                StatusCode::BAD_REQUEST,
+                &format!("Couldn't connect ({code}). Run the connect command again."),
+            )
+        }
         Ok(cookie) => {
             let max_age = state.config.session_idle_timeout + TOMBSTONE;
             redirect(
@@ -373,6 +525,7 @@ async fn complete(
             token_expires_at: tokens.expires_at(now_ms()),
             scopes: &scopes,
             client_id,
+            kind: Kind::session_kind(&pending.kind),
         },
     )
     .await;
@@ -385,6 +538,25 @@ async fn complete(
             return Err("server_error");
         }
     };
+    let kind = Kind::session_kind(&pending.kind);
+    if kind != session::ATTENDEE {
+        // One admin (or organization) session per account: connecting again
+        // replaces the last. The browser's own session is left alone.
+        let id_hash = sha256_b64(&cookie);
+        let older = sqlx::query_as::<_, (String,)>(
+            "SELECT id_hash FROM sessions WHERE did = $1 AND kind = $2 AND ended_at IS NULL AND id_hash <> $3",
+        )
+        .bind(&did)
+        .bind(kind)
+        .bind(&id_hash)
+        .fetch_all(&state.db)
+        .await
+        .unwrap_or_default();
+        for (old,) in older {
+            retire(state, &old).await;
+        }
+        return Ok(cookie);
+    }
     // Only now is whatever session this browser had replaced, never promoted.
     if let Some(old) = cookies::session(headers, state.secure_cookies()) {
         retire(state, &sha256_b64(&old)).await;

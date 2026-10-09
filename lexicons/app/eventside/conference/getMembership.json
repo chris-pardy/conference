@@ -1,0 +1,20 @@
+{
+  "lexicon": 1,
+  "id": "app.eventside.conference.getMembership",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "Whether the signed-in person is a member of a conference now, and in which role.",
+      "parameters": {
+        "type": "params",
+        "required": ["conference"],
+        "properties": { "conference": { "type": "string", "description": "The conference's space URI." } }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": { "type": "ref", "ref": "app.eventside.conference.defs#viewer" }
+      },
+      "errors": [{ "name": "AuthRequired" }, { "name": "SessionExpired" }]
+    }
+  }
+}

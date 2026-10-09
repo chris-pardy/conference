@@ -1,0 +1,22 @@
+{
+  "lexicon": 1,
+  "id": "app.eventside.conference.leave",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "The signed-in person leaves a conference. What they wrote stays in their repo; eventside stops serving it while they're not a member.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["conference"],
+          "properties": { "conference": { "type": "string", "description": "The conference's space URI." } }
+        }
+      },
+      "errors": [
+        { "name": "NotFound" },
+        { "name": "LastOwner", "description": "The conference's only owner can't leave." }
+      ]
+    }
+  }
+}

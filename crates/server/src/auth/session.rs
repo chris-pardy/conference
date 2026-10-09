@@ -33,16 +33,32 @@ pub struct SessionRow {
     pub csrf_token: String,
     pub last_seen_at: i64,
     pub ended_at: Option<i64>,
+    /// `attendee` (behind a cookie), or `admin` or `org` (cookieless, made
+    /// by the admin CLI's `connect` and `org connect`).
+    pub kind: String,
 }
 
+/// A browser's session, behind a cookie.
+pub const ATTENDEE: &str = "attendee";
+/// An admin's session: proves who runs an admin command `--as` them.
+pub const ADMIN: &str = "admin";
+/// An organization's account, which eventside writes its conference records as.
+pub const ORG: &str = "org";
+
 impl SessionRow {
+    /// An admin's or an organization's session: never behind a cookie, and
+    /// never ended for being idle.
+    pub fn is_cookieless(&self) -> bool {
+        self.kind != ATTENDEE
+    }
+
     pub fn scope_list(&self) -> Vec<String> {
         self.scopes.split_whitespace().map(str::to_owned).collect()
     }
 }
 
 const COLUMNS: &str = "id_hash, did, handle, display_name, avatar, pds, dpop_key, issuer, access_token, \
-    refresh_token, token_expires_at, scopes, client_id, csrf_token, last_seen_at, ended_at";
+    refresh_token, token_expires_at, scopes, client_id, csrf_token, last_seen_at, ended_at, kind";
 
 /// Where a browser's session stands.
 pub enum Lookup {
@@ -66,6 +82,8 @@ pub struct NewSession<'a> {
     pub token_expires_at: i64,
     pub scopes: &'a str,
     pub client_id: &'a str,
+    /// `ATTENDEE`, `ADMIN` or `ORG`.
+    pub kind: &'a str,
 }
 
 /// Stores a new session, returning the cookie value that names it.
@@ -74,8 +92,8 @@ pub async fn create(db: &Db, s: NewSession<'_>) -> Result<String, sqlx::Error> {
     let now = now_ms();
     sqlx::query(
         "INSERT INTO sessions (id_hash, did, handle, display_name, avatar, pds, dpop_key, issuer, access_token, \
-         refresh_token, token_expires_at, scopes, client_id, csrf_token, created_at, last_seen_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)",
+         refresh_token, token_expires_at, scopes, client_id, csrf_token, created_at, last_seen_at, kind) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)",
     )
     .bind(sha256_b64(&id))
     .bind(s.did)
@@ -93,6 +111,7 @@ pub async fn create(db: &Db, s: NewSession<'_>) -> Result<String, sqlx::Error> {
     .bind(random_token(24))
     .bind(now)
     .bind(now)
+    .bind(s.kind)
     .execute(db)
     .await?;
     Ok(id)
@@ -114,6 +133,11 @@ pub async fn lookup(state: &AppState, headers: &HeaderMap) -> Result<Lookup, sql
     let Some(row) = load(&state.db, &sha256_b64(&cookie)).await? else {
         return Ok(Lookup::None);
     };
+    // Admin and organization sessions never get a cookie; one that somehow
+    // names one is no session.
+    if row.is_cookieless() {
+        return Ok(Lookup::None);
+    }
     if row.ended_at.is_some() {
         return Ok(Lookup::Expired(row));
     }
@@ -144,13 +168,18 @@ pub async fn touch(state: &AppState, row: &SessionRow) -> Result<(), sqlx::Error
 }
 
 /// Whether a session's grant is outdated, so the person signs in again: it
-/// lacks a scope this instance asks for at sign-in. Nothing else counts: a
+/// lacks a scope this instance asks for at sign-in (or, for an admin's or an
+/// organization's session, when connecting). Nothing else counts: a
 /// grant with more scopes, or issued to another client ID (another scope
 /// list, e.g. from an instance on another version during a rolling deploy),
 /// is still good, and is refreshed and revoked as its own client ID.
 pub fn outdated(state: &AppState, row: &SessionRow) -> bool {
     let granted: Vec<&str> = row.scopes.split_whitespace().collect();
-    state.config.scopes.iter().any(|s| !granted.contains(&s.as_str()))
+    match row.kind.as_str() {
+        ADMIN => crate::config::ADMIN_SCOPES.iter().any(|s| !granted.contains(s)),
+        ORG => crate::config::ORG_SCOPES.iter().any(|s| !granted.contains(s)),
+        _ => state.config.scopes.iter().any(|s| !granted.contains(&s.as_str())),
+    }
 }
 
 /// Ends a session: its tokens and keys are wiped, but the row keeps who it
@@ -281,9 +310,13 @@ pub async fn sweep(state: &AppState) -> Result<(), sqlx::Error> {
         .bind(cutoff)
         .execute(&state.db)
         .await?;
-    sqlx::query("DELETE FROM sessions WHERE ended_at IS NULL AND last_seen_at < $1")
-        .bind(cutoff)
-        .execute(&state.db)
-        .await?;
+    // Admin and organization sessions don't idle out: the CLI and the
+    // server use them, not a browser.
+    sqlx::query(
+        "DELETE FROM sessions WHERE ended_at IS NULL AND last_seen_at < $1 AND kind = 'attendee'",
+    )
+    .bind(cutoff)
+    .execute(&state.db)
+    .await?;
     Ok(())
 }

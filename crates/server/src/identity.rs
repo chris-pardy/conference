@@ -89,7 +89,8 @@ impl Resolver {
         Ok(Identity { did: did.to_owned(), handle, pds })
     }
 
-    async fn did_document(&self, did: &str) -> Result<Value, IdentityError> {
+    /// A DID's document: from the PLC directory, or a host-level `did:web`'s.
+    pub async fn did_document(&self, did: &str) -> Result<Value, IdentityError> {
         let unresolvable = |why: String| IdentityError::Unresolvable(format!("{did}: {why}"));
         let res = if did.starts_with("did:plc:") {
             self.http.trusted.get(format!("{}/{did}", self.plc_url)).send().await

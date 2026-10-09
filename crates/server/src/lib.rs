@@ -8,6 +8,7 @@ use axum::{Json, Router, extract::State, middleware};
 pub mod auth;
 pub mod conference;
 pub mod config;
+pub mod crypto;
 pub mod db;
 pub mod identity;
 pub mod keys;
@@ -118,6 +119,7 @@ fn routes() -> Router<AppState> {
         .route("/oauth/jwks.json", get(routes::jwks))
         .route("/oauth/login", get(routes::login))
         .route("/oauth/signup", get(routes::signup))
+        .route("/oauth/connect", get(routes::connect))
         .route("/oauth/callback", get(routes::callback))
         .route("/oauth/logout", post(routes::logout))
         .route("/xrpc/app.eventside.auth.getSession", get(routes::get_session))
@@ -245,6 +247,7 @@ mod tests {
                 token_expires_at: i64::MAX,
                 scopes: "atproto",
                 client_id: &state.oauth.client_id,
+                kind: session::ATTENDEE,
             },
         )
         .await
@@ -277,6 +280,7 @@ mod tests {
                 token_expires_at: i64::MAX,
                 scopes: "atproto",
                 client_id: &state.oauth.client_id,
+                kind: session::ATTENDEE,
             },
         )
         .await
@@ -328,6 +332,7 @@ mod tests {
                 token_expires_at: i64::MAX,
                 scopes,
                 client_id,
+                kind: session::ATTENDEE,
             },
         )
         .await

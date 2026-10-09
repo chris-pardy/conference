@@ -1,0 +1,45 @@
+{
+  "lexicon": 1,
+  "id": "app.eventside.conference.get",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "A conference's public view, and, when signed in, whether the viewer is a member and in which role.",
+      "parameters": {
+        "type": "params",
+        "required": ["conference"],
+        "properties": {
+          "conference": {
+            "type": "string",
+            "description": "The conference's space URI, or its public event's AT-URI (the organization named by DID or handle)."
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["space", "name", "join"],
+          "properties": {
+            "space": { "type": "string" },
+            "event": { "type": "string", "format": "at-uri" },
+            "url": { "type": "string", "format": "uri" },
+            "name": { "type": "string" },
+            "startsAt": { "type": "string", "format": "datetime" },
+            "endsAt": { "type": "string", "format": "datetime" },
+            "locations": { "type": "array", "items": { "type": "unknown" } },
+            "description": { "type": "string" },
+            "theme": { "type": "unknown" },
+            "join": {
+              "type": "object",
+              "required": ["methods"],
+              "properties": { "methods": { "type": "array", "items": { "type": "string" } } }
+            },
+            "viewer": { "type": "ref", "ref": "app.eventside.conference.defs#viewer" }
+          }
+        }
+      },
+      "errors": [{ "name": "NotFound" }]
+    }
+  }
+}

@@ -13,6 +13,8 @@ const proxy = {
   '^/xrpc/': serverUrl,
   '^/oauth/': serverUrl,
   '^/oauth-client-metadata\\.json(\\?|$)': serverUrl,
+  // Eventside's did:web document, which conference spaces' PDSes resolve.
+  '^/\\.well-known/did\\.json$': serverUrl,
 }
 
 export default defineConfig({
@@ -28,6 +30,7 @@ export default defineConfig({
           /^\/health(\?|$)/,
           /^\/oauth\//,
           /^\/oauth-client-metadata\.json(\?|$)/,
+          /^\/\.well-known\//,
         ],
       },
       injectRegister: 'script',

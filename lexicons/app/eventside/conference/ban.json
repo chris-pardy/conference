@@ -1,0 +1,27 @@
+{
+  "lexicon": 1,
+  "id": "app.eventside.conference.ban",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "A ban from a conference, written by eventside into the organization's repo in the conference's space. Deleted when it's lifted.",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["subject", "decidedBy", "decidedRank", "seq", "decidedAt", "createdAt", "signatures"],
+        "properties": {
+          "subject": { "type": "string", "format": "did" },
+          "decidedBy": { "type": "string", "format": "did" },
+          "decidedRank": { "type": "ref", "ref": "app.eventside.conference.defs#rank" },
+          "seq": { "type": "integer", "minimum": 1 },
+          "decidedAt": { "type": "string", "format": "datetime" },
+          "createdAt": { "type": "string", "format": "datetime" },
+          "signatures": {
+            "type": "array",
+            "items": { "type": "ref", "ref": "app.eventside.conference.defs#signature" }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "lexicon": 1,
+  "id": "app.eventside.conference.join",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Joins the signed-in person to a conference, by whichever of its join methods admits them.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["conference"],
+          "properties": {
+            "conference": { "type": "string", "description": "The conference's space URI." },
+            "code": { "type": "string", "maxLength": 200 }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["status"],
+          "properties": {
+            "status": { "type": "string", "knownValues": ["joined", "pending", "emailNeeded", "refused"] },
+            "conference": { "type": "string" }
+          }
+        }
+      },
+      "errors": [
+        { "name": "NotFound" },
+        { "name": "RateLimitExceeded", "description": "Too many refused attempts lately." }
+      ]
+    }
+  }
+}

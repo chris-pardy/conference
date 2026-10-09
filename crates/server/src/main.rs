@@ -2,7 +2,7 @@ use std::io::Write;
 use std::process::ExitCode;
 
 use conference_server::config::Config;
-use conference_server::{AppState, auth, router};
+use conference_server::{AppState, auth, conference, router};
 use tokio::net::TcpListener;
 
 #[tokio::main]
@@ -33,7 +33,14 @@ async fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    if let Err(err) = conference::attest::ensure_key(&state.db).await {
+        eprintln!("conference-server: {err}");
+        return ExitCode::FAILURE;
+    }
     auth::renew::spawn(state.clone());
+    // Writes what decisions left for the organizations' repos, starting with
+    // anything an earlier run (or a stopped CLI) didn't get to.
+    conference::outbox::spawn(state.clone());
 
     // Tests and tooling wait for this exact line to learn the port.
     let mut stdout = std::io::stdout();

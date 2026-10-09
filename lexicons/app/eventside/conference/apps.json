@@ -1,0 +1,35 @@
+{
+  "lexicon": 1,
+  "id": "app.eventside.conference.apps",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "The other apps a conference allows, and for what. Eventside is always allowed. One per conference, rkey `self`, in the organization's repo in the space.",
+      "key": "literal:self",
+      "record": {
+        "type": "object",
+        "required": ["apps", "createdAt", "signatures"],
+        "properties": {
+          "apps": { "type": "array", "items": { "type": "ref", "ref": "#app" } },
+          "createdAt": { "type": "string", "format": "datetime" },
+          "signatures": {
+            "type": "array",
+            "items": { "type": "ref", "ref": "app.eventside.conference.defs#signature" }
+          }
+        }
+      }
+    },
+    "app": {
+      "type": "object",
+      "required": ["uses"],
+      "properties": {
+        "client": { "type": "string", "format": "uri", "description": "An OAuth client ID." },
+        "service": { "type": "string", "format": "did" },
+        "uses": {
+          "type": "array",
+          "items": { "type": "string", "knownValues": ["read", "cardProvider", "feedGenerator"] }
+        }
+      }
+    }
+  }
+}

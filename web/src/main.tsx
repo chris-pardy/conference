@@ -7,6 +7,7 @@ import Shell from './Shell'
 // The block gallery is a page of its own, loaded only when visited.
 const BlockGallery = lazy(() => import('./routes/dev/blocks'))
 const SignIn = lazy(() => import('./routes/signin'))
+const Conference = lazy(() => import('./routes/conference'))
 
 createRoot(document.getElementById('root') as HTMLElement).render(
   <StrictMode>
@@ -19,6 +20,14 @@ createRoot(document.getElementById('root') as HTMLElement).render(
             element={
               <Suspense fallback={null}>
                 <SignIn />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/c/:actor/:rkey"
+            element={
+              <Suspense fallback={null}>
+                <Conference />
               </Suspense>
             }
           />

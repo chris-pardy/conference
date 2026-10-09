@@ -1459,6 +1459,403 @@ export const schemaDict = {
       },
     },
   },
+  AppEventsideConferenceApps: {
+    lexicon: 1,
+    id: 'app.eventside.conference.apps',
+    defs: {
+      main: {
+        type: 'record',
+        description:
+          "The other apps a conference allows, and for what. Eventside is always allowed. One per conference, rkey `self`, in the organization's repo in the space.",
+        key: 'literal:self',
+        record: {
+          type: 'object',
+          required: ['apps', 'createdAt', 'signatures'],
+          properties: {
+            apps: {
+              type: 'array',
+              items: {
+                type: 'ref',
+                ref: 'lex:app.eventside.conference.apps#app',
+              },
+            },
+            createdAt: {
+              type: 'string',
+              format: 'datetime',
+            },
+            signatures: {
+              type: 'array',
+              items: {
+                type: 'ref',
+                ref: 'lex:app.eventside.conference.defs#signature',
+              },
+            },
+          },
+        },
+      },
+      app: {
+        type: 'object',
+        required: ['uses'],
+        properties: {
+          client: {
+            type: 'string',
+            format: 'uri',
+            description: 'An OAuth client ID.',
+          },
+          service: {
+            type: 'string',
+            format: 'did',
+          },
+          uses: {
+            type: 'array',
+            items: {
+              type: 'string',
+              knownValues: ['read', 'cardProvider', 'feedGenerator'],
+            },
+          },
+        },
+      },
+    },
+  },
+  AppEventsideConferenceBan: {
+    lexicon: 1,
+    id: 'app.eventside.conference.ban',
+    defs: {
+      main: {
+        type: 'record',
+        description:
+          "A ban from a conference, written by eventside into the organization's repo in the conference's space. Deleted when it's lifted.",
+        key: 'any',
+        record: {
+          type: 'object',
+          required: [
+            'subject',
+            'decidedBy',
+            'decidedRank',
+            'seq',
+            'decidedAt',
+            'createdAt',
+            'signatures',
+          ],
+          properties: {
+            subject: {
+              type: 'string',
+              format: 'did',
+            },
+            decidedBy: {
+              type: 'string',
+              format: 'did',
+            },
+            decidedRank: {
+              type: 'ref',
+              ref: 'lex:app.eventside.conference.defs#rank',
+            },
+            seq: {
+              type: 'integer',
+              minimum: 1,
+            },
+            decidedAt: {
+              type: 'string',
+              format: 'datetime',
+            },
+            createdAt: {
+              type: 'string',
+              format: 'datetime',
+            },
+            signatures: {
+              type: 'array',
+              items: {
+                type: 'ref',
+                ref: 'lex:app.eventside.conference.defs#signature',
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  AppEventsideConferenceDefs: {
+    lexicon: 1,
+    id: 'app.eventside.conference.defs',
+    defs: {
+      signature: {
+        type: 'object',
+        description:
+          "An inline attestation (badge.blue format) by an #eventside_attest key in the signer's DID document. It signs the CIDv1 (dag-cbor, sha2-256) of the record without `signatures`, plus `$sig`: this entry without `signature`, plus `repository`, the DID of the repo holding the record.",
+        required: ['key', 'signedAt', 'signature'],
+        properties: {
+          key: {
+            type: 'string',
+            description:
+              "The signing key, as `{signer did}#eventside_attest…`. The signer is the conference space's managing app.",
+          },
+          signedAt: {
+            type: 'string',
+            format: 'datetime',
+          },
+          signature: {
+            type: 'bytes',
+            description: 'A low-S P-256 signature, 64 bytes r||s.',
+          },
+        },
+      },
+      role: {
+        type: 'string',
+        knownValues: ['owner', 'staff', 'speaker', 'attendee'],
+      },
+      rank: {
+        type: 'string',
+        description:
+          "The weight a decision was made with, kept whatever happens to its maker's role later.",
+        knownValues: ['owner', 'staff', 'self'],
+      },
+      viewer: {
+        type: 'object',
+        required: ['member'],
+        properties: {
+          member: {
+            type: 'boolean',
+          },
+          role: {
+            type: 'ref',
+            ref: 'lex:app.eventside.conference.defs#role',
+          },
+        },
+      },
+    },
+  },
+  AppEventsideConferenceGetMembership: {
+    lexicon: 1,
+    id: 'app.eventside.conference.getMembership',
+    defs: {
+      main: {
+        type: 'query',
+        description:
+          'Whether the signed-in person is a member of a conference now, and in which role.',
+        parameters: {
+          type: 'params',
+          required: ['conference'],
+          properties: {
+            conference: {
+              type: 'string',
+              description: "The conference's space URI.",
+            },
+          },
+        },
+        output: {
+          encoding: 'application/json',
+          schema: {
+            type: 'ref',
+            ref: 'lex:app.eventside.conference.defs#viewer',
+          },
+        },
+        errors: [
+          {
+            name: 'AuthRequired',
+          },
+          {
+            name: 'SessionExpired',
+          },
+        ],
+      },
+    },
+  },
+  AppEventsideConferenceJoin: {
+    lexicon: 1,
+    id: 'app.eventside.conference.join',
+    defs: {
+      main: {
+        type: 'procedure',
+        description:
+          'Joins the signed-in person to a conference, by whichever of its join methods admits them.',
+        input: {
+          encoding: 'application/json',
+          schema: {
+            type: 'object',
+            required: ['conference'],
+            properties: {
+              conference: {
+                type: 'string',
+                description: "The conference's space URI.",
+              },
+              code: {
+                type: 'string',
+                maxLength: 200,
+              },
+            },
+          },
+        },
+        output: {
+          encoding: 'application/json',
+          schema: {
+            type: 'object',
+            required: ['status'],
+            properties: {
+              status: {
+                type: 'string',
+                knownValues: ['joined', 'pending', 'emailNeeded', 'refused'],
+              },
+              conference: {
+                type: 'string',
+              },
+            },
+          },
+        },
+        errors: [
+          {
+            name: 'NotFound',
+          },
+          {
+            name: 'RateLimitExceeded',
+            description: 'Too many refused attempts lately.',
+          },
+        ],
+      },
+    },
+  },
+  AppEventsideConferenceLeave: {
+    lexicon: 1,
+    id: 'app.eventside.conference.leave',
+    defs: {
+      main: {
+        type: 'procedure',
+        description:
+          "The signed-in person leaves a conference. What they wrote stays in their repo; eventside stops serving it while they're not a member.",
+        input: {
+          encoding: 'application/json',
+          schema: {
+            type: 'object',
+            required: ['conference'],
+            properties: {
+              conference: {
+                type: 'string',
+                description: "The conference's space URI.",
+              },
+            },
+          },
+        },
+        errors: [
+          {
+            name: 'NotFound',
+          },
+          {
+            name: 'LastOwner',
+            description: "The conference's only owner can't leave.",
+          },
+        ],
+      },
+    },
+  },
+  AppEventsideConferenceMember: {
+    lexicon: 1,
+    id: 'app.eventside.conference.member',
+    defs: {
+      main: {
+        type: 'record',
+        description:
+          "A member of a conference and their role, written by eventside into the organization's repo in the conference's space, as the decisions log has it. Deleted when they leave or are removed.",
+        key: 'any',
+        record: {
+          type: 'object',
+          required: [
+            'subject',
+            'role',
+            'decidedBy',
+            'decidedRank',
+            'seq',
+            'decidedAt',
+            'createdAt',
+            'signatures',
+          ],
+          properties: {
+            subject: {
+              type: 'string',
+              format: 'did',
+            },
+            role: {
+              type: 'ref',
+              ref: 'lex:app.eventside.conference.defs#role',
+            },
+            method: {
+              type: 'string',
+              knownValues: ['code', 'list', 'open', 'admin'],
+            },
+            decidedBy: {
+              type: 'string',
+              format: 'did',
+            },
+            decidedRank: {
+              type: 'ref',
+              ref: 'lex:app.eventside.conference.defs#rank',
+            },
+            seq: {
+              type: 'integer',
+              minimum: 1,
+            },
+            decidedAt: {
+              type: 'string',
+              format: 'datetime',
+            },
+            createdAt: {
+              type: 'string',
+              format: 'datetime',
+            },
+            signatures: {
+              type: 'array',
+              items: {
+                type: 'ref',
+                ref: 'lex:app.eventside.conference.defs#signature',
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  AppEventsideConferenceSidecar: {
+    lexicon: 1,
+    id: 'app.eventside.conference.sidecar',
+    defs: {
+      main: {
+        type: 'record',
+        description:
+          "Eventside's settings for a public conference, next to its community.lexicon.calendar.event (same rkey) in the organization's public repo.",
+        key: 'any',
+        record: {
+          type: 'object',
+          required: ['event', 'space', 'methods', 'createdAt'],
+          properties: {
+            event: {
+              type: 'string',
+              format: 'at-uri',
+            },
+            space: {
+              type: 'string',
+              description: "The conference's space URI.",
+            },
+            methods: {
+              type: 'array',
+              items: {
+                type: 'string',
+                knownValues: ['code', 'list', 'open'],
+              },
+            },
+            theme: {
+              type: 'unknown',
+              description: 'Theme tokens by name, without the `--g-` prefix.',
+            },
+            template: {
+              type: 'string',
+            },
+            createdAt: {
+              type: 'string',
+              format: 'datetime',
+            },
+          },
+        },
+      },
+    },
+  },
 } as const satisfies Record<string, LexiconDoc>
 export const schemas = Object.values(schemaDict) satisfies LexiconDoc[]
 export const lexicons: Lexicons = new Lexicons(schemas)
@@ -1495,4 +1892,12 @@ export const ids = {
   AppEventsideAuthGetSession: 'app.eventside.auth.getSession',
   AppEventsideBlockCard: 'app.eventside.block.card',
   AppEventsideBlockDefs: 'app.eventside.block.defs',
+  AppEventsideConferenceApps: 'app.eventside.conference.apps',
+  AppEventsideConferenceBan: 'app.eventside.conference.ban',
+  AppEventsideConferenceDefs: 'app.eventside.conference.defs',
+  AppEventsideConferenceGetMembership: 'app.eventside.conference.getMembership',
+  AppEventsideConferenceJoin: 'app.eventside.conference.join',
+  AppEventsideConferenceLeave: 'app.eventside.conference.leave',
+  AppEventsideConferenceMember: 'app.eventside.conference.member',
+  AppEventsideConferenceSidecar: 'app.eventside.conference.sidecar',
 } as const

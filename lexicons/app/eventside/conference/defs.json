@@ -1,0 +1,36 @@
+{
+  "lexicon": 1,
+  "id": "app.eventside.conference.defs",
+  "defs": {
+    "signature": {
+      "type": "object",
+      "description": "An inline attestation (badge.blue format) by an #eventside_attest key in the signer's DID document. It signs the CIDv1 (dag-cbor, sha2-256) of the record without `signatures`, plus `$sig`: this entry without `signature`, plus `repository`, the DID of the repo holding the record.",
+      "required": ["key", "signedAt", "signature"],
+      "properties": {
+        "key": {
+          "type": "string",
+          "description": "The signing key, as `{signer did}#eventside_attest…`. The signer is the conference space's managing app."
+        },
+        "signedAt": { "type": "string", "format": "datetime" },
+        "signature": { "type": "bytes", "description": "A low-S P-256 signature, 64 bytes r||s." }
+      }
+    },
+    "role": {
+      "type": "string",
+      "knownValues": ["owner", "staff", "speaker", "attendee"]
+    },
+    "rank": {
+      "type": "string",
+      "description": "The weight a decision was made with, kept whatever happens to its maker's role later.",
+      "knownValues": ["owner", "staff", "self"]
+    },
+    "viewer": {
+      "type": "object",
+      "required": ["member"],
+      "properties": {
+        "member": { "type": "boolean" },
+        "role": { "type": "ref", "ref": "#role" }
+      }
+    }
+  }
+}
