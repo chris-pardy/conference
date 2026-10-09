@@ -1220,3 +1220,12 @@ the approved `other-app.ts` fix.
    and `ends < starts` isn't refused. **Fix:** store RFC 3339 and refuse.
 9. **[nit]** An outbox comment claims ordering across drains that
    doesn't hold. **Fix:** correct the comment.
+
+Rework (`ff5a34f`): findings 2–9 fixed as described. `pnpm check` green.
+Finding 1 **partly fixed**: the city is no longer repeated as `name`, and
+`country` is set when `--country` is given. **The rest is declined for
+now:** frozen TC-2 checks that the event's locations contain the city,
+and the frozen `createConference` helper never passes `--country`, so
+leaving the address out would fail TC-2. Making the address always valid
+needs the user's approval of a test change (e.g. the helper passing
+`--country NL`); it's raised in the PR.
