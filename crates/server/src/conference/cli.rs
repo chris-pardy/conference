@@ -320,16 +320,19 @@ async fn conference_create(state: &AppState, args: &Args) -> Result<Done, String
     let org = args.need("org")?.to_owned();
     repo::org_session(state, &org).await?;
     let name = args.need("name")?.trim().to_owned();
-    let starts = args.need("starts")?.to_owned();
-    let ends = args.need("ends")?.to_owned();
-    let city = args.need("city")?.trim().to_owned();
-    for (flag, value) in [("starts", &starts), ("ends", &ends)] {
-        if parse_iso(value).is_none() {
-            return Err(format!(
-                "--{flag} must be a date and time like 2027-04-29T09:00:00+02:00, not {value}"
-            ));
-        }
+    let time = |flag: &str| -> Result<i64, String> {
+        let value = args.need(flag)?;
+        parse_iso(value).ok_or_else(|| {
+            format!("--{flag} must be a date and time like 2027-04-29T09:00:00+02:00, not {value}")
+        })
+    };
+    let (starts_ms, ends_ms) = (time("starts")?, time("ends")?);
+    if ends_ms < starts_ms {
+        return Err("--ends can't be before --starts".into());
     }
+    // Kept and published as RFC 3339, in UTC.
+    let (starts, ends) = (iso(starts_ms), iso(ends_ms));
+    let city = args.need("city")?.trim().to_owned();
     if name.is_empty() || city.is_empty() {
         return Err("--name and --city can't be empty".into());
     }
@@ -402,8 +405,7 @@ async fn conference_create(state: &AppState, args: &Args) -> Result<Done, String
         Err(why) => return Err(why),
     }
     let page = format!("{}/c/{org}/{rkey}", state.oauth.public_url);
-    let mut address =
-        json!({ "$type": "community.lexicon.location.address", "name": city, "locality": city });
+    let mut address = json!({ "$type": "community.lexicon.location.address", "locality": city });
     if let Some(country) = args.flag("country") {
         address["country"] = json!(country);
     }

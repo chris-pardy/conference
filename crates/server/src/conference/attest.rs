@@ -42,9 +42,9 @@ pub async fn ensure_key(db: &Db) -> Result<(), String> {
     .map_err(|e| format!("could not make eventside's signing key: {e}"))
 }
 
-/// Every attestation key, oldest first: `(fragment, key)`.
+/// Every attestation key, oldest first: `(fragment, key)`. Only reads:
+/// the server and the CLI make the first key when they start ([`ensure_key`]).
 pub async fn keys(db: &Db) -> Result<Vec<(String, EcKey)>, String> {
-    ensure_key(db).await?;
     let rows = sqlx::query_as::<_, (String, String, i64)>(
         "SELECT fragment, private_jwk, created_at FROM attest_keys",
     )

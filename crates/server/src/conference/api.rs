@@ -225,6 +225,7 @@ pub struct AccessParams {
 ///   then gives them their own records; eventside serves the rest).
 /// - **read, as another client:** the client is allowed to read, and the
 ///   user is an owner or staff member.
+/// - The space's authority, the organization, always may.
 /// - Anyone else is denied.
 pub async fn check_user_access(
     State(state): State<AppState>,
@@ -269,6 +270,10 @@ pub async fn authorized(
     client_id: Option<&str>,
 ) -> Result<bool, String> {
     let Some(conference) = super::load(&state.db, space).await? else { return Ok(false) };
+    // The authority always reads and writes its own space.
+    if user == conference.org {
+        return Ok(matches!(access, "read" | "write"));
+    }
     let role = decide::role(&state.db, &conference.space, user).await?;
     Ok(match access {
         "write" => role.is_some(),
@@ -347,19 +352,25 @@ const KEY_TTL_MS: i64 = 5 * 60 * 1000;
 static SIGNING_KEYS: std::sync::Mutex<Option<std::collections::HashMap<String, (PublicKey, i64)>>> =
     std::sync::Mutex::new(None);
 
+/// How soon a DID's key may be fetched again to retry a token that didn't
+/// verify: a forged token can't make eventside refetch more often.
+const REFETCH_MS: i64 = 60 * 1000;
+
 /// A DID's `#atproto` signing key, from its document: cached for a few
-/// minutes, unless `fresh`.
+/// minutes. `fresh` asks for it again, unless it was fetched in the last
+/// [`REFETCH_MS`].
 async fn signing_key(state: &AppState, did: &str, fresh: bool) -> Result<PublicKey, String> {
     let now = crate::db::now_ms();
-    if !fresh
-        && let Some((key, at)) = SIGNING_KEYS
-            .lock()
-            .expect("the key cache isn't poisoned")
-            .as_ref()
-            .and_then(|keys| keys.get(did).cloned())
-        && now - at < KEY_TTL_MS
-    {
-        return Ok(key);
+    let cached = SIGNING_KEYS
+        .lock()
+        .expect("the key cache isn't poisoned")
+        .as_ref()
+        .and_then(|keys| keys.get(did).cloned());
+    if let Some((key, at)) = cached {
+        let age = now - at;
+        if (!fresh && age < KEY_TTL_MS) || (fresh && age < REFETCH_MS) {
+            return Ok(key);
+        }
     }
     let doc = state.resolver.did_document(did).await.map_err(|e| format!("{e:?}"))?;
     let multibase = doc

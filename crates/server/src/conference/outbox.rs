@@ -1,15 +1,18 @@
 //! The outbox: what decisions, new conferences and changes of apps still
 //! have to write into the organization's repo in the space. Entries are
 //! added in the same transaction as what caused them, and applied after it
-//! commits, in order, by one drain at a time: within a process a mutex
-//! keeps drains apart, and between processes (the server and the CLI) a
-//! lease in the database does, held by a token per drain. The CLI applies
-//! its own entries before it exits; the server applies whatever is left, on
-//! start, whenever a request [`kick`]s it, and every half second.
+//! commits. A drain applies entries in `seq` order. Drains are kept apart
+//! (a mutex within a process, and between processes, the server and the
+//! CLI, a lease in the database, renewed while a drain runs), but that's a
+//! best effort: a lease can still lapse, so two drains may overlap. The CLI
+//! applies its own entries before it exits; the server applies whatever is
+//! left, on start, whenever a request [`kick`]s it, and every half second.
 //!
-//! Applying a member entry writes the subject's records as the decisions
-//! log has them *now*, so entries can be applied twice, or late, and the
-//! records still end up matching the last decision.
+//! What makes overlapping or late drains safe: applying a member entry
+//! writes the subject's records as the decisions log has them *now*, then
+//! checks that the log's latest decision about them is still the one it
+//! wrote, and writes again if not. Whichever drain writes last finishes on
+//! the latest state.
 
 use std::collections::HashSet;
 use std::time::Duration;
@@ -101,6 +104,25 @@ pub async fn drain(state: &AppState) -> Result<bool, String> {
 }
 
 async fn drain_leased(state: &AppState, holder: &str) -> Result<(), String> {
+    // Keep the lease while a slow entry is applied.
+    let renewer = {
+        let state = state.clone();
+        let holder = holder.to_owned();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_millis(LEASE_MS as u64 / 3)).await;
+                if !matches!(take_lease(&state, &holder).await, Ok(true)) {
+                    return;
+                }
+            }
+        })
+    };
+    let result = drain_entries(state, holder).await;
+    renewer.abort();
+    result
+}
+
+async fn drain_entries(state: &AppState, holder: &str) -> Result<(), String> {
     // A conference whose entry failed waits for its turn again, so its
     // records are still written in order.
     let mut failed: HashSet<String> = HashSet::new();
@@ -236,8 +258,30 @@ async fn signed(state: &AppState, space: &str, mut record: Value) -> Result<Valu
     Ok(record)
 }
 
-/// A person's member and ban records, as their standing is now.
+/// How many times a member entry writes again when decisions keep landing.
+const REWRITES: usize = 10;
+
+/// A person's member and ban records, as their standing is now: written,
+/// then checked against the log, and written again if a later decision
+/// landed meanwhile (or another drain wrote an older state).
 async fn write_member(state: &AppState, conference: &str, subject: &str) -> Result<(), String> {
+    for _ in 0..REWRITES {
+        let written = write_member_once(state, conference, subject).await?;
+        let latest =
+            decide::decisions_about(&state.db, conference, subject).await?.last().map(|d| d.seq);
+        if latest == written {
+            return Ok(());
+        }
+    }
+    Err(format!("{subject}'s decisions kept changing while their records were written"))
+}
+
+/// Writes a person's records once, returning the latest decision it wrote from.
+async fn write_member_once(
+    state: &AppState,
+    conference: &str,
+    subject: &str,
+) -> Result<Option<i64>, String> {
     let decisions = decide::decisions_about(&state.db, conference, subject).await?;
     let standing = decide::standing(&decisions, subject, None);
     match (standing.role, &standing.membership) {
@@ -266,7 +310,7 @@ async fn write_member(state: &AppState, conference: &str, subject: &str) -> Resu
         }
         None => {}
     }
-    Ok(())
+    Ok(decisions.last().map(|d| d.seq))
 }
 
 /// The fields every decision's record carries.

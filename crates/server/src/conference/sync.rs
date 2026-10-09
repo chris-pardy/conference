@@ -6,8 +6,9 @@
 //! - **Write notifications:** eventside registers at the space's host for
 //!   them (`registerNotify`, at its `#eventside_access` service), and reads
 //!   the writer's new ops when one arrives ([`notify_write`]).
-//! - **Backfill:** the server reads every conference's writers on start and
-//!   every so often after ([`spawn`]), and `records list` reads them first.
+//! - **Backfill:** on start, and then for repos not read in a while (in
+//!   case a notification was missed), the server reads writers a few at a
+//!   time ([`spawn`]); `records list` reads them all first.
 //! - **Ingest:** each record version goes through [`counts`], the rule other
 //!   features rely on: a member's record counts if they were a member at the
 //!   revision their PDS gave it; the organization's records count, and the
@@ -39,8 +40,13 @@ use crate::db::now_ms;
 /// with a valid signature.
 const SIGNED: &[&str] = &[MEMBER, BAN, APPS];
 
-/// How often the server backfills every conference.
-const BACKFILL: Duration = Duration::from_secs(30);
+/// How often the server looks for conferences to register for and repos to backfill.
+const BACKFILL: Duration = Duration::from_secs(60);
+/// A writer's repo not read for this long is read again, in case a write
+/// notification was missed.
+const STALE_MS: i64 = 15 * 60 * 1000;
+/// How many repos the server reads at once when backfilling.
+const BACKFILL_CONCURRENCY: usize = 4;
 /// How often eventside registers again for write notifications (they last a day).
 const REGISTER_MS: i64 = 6 * 60 * 60 * 1000;
 
@@ -75,6 +81,7 @@ pub async fn counts(
     conference: &Conference,
     repo: &str,
     collection: &str,
+    rkey: &str,
     rev: &str,
     value: &Value,
 ) -> Result<bool, String> {
@@ -88,7 +95,23 @@ pub async fn counts(
             .map(|(fragment, key)| (fragment, key.verifying_key()))
             .collect();
         let signer = eventside_did(&state.oauth.public_url);
-        return Ok(!attest::verify(value, &conference.org, &signer, &keys).is_empty());
+        if attest::verify(value, &conference.org, &signer, &keys).is_empty() {
+            return Ok(false);
+        }
+        if collection == APPS {
+            return Ok(rkey == "self");
+        }
+        // A member or ban record counts only while it's the subject's
+        // current decision: one withdrawn, then put back, doesn't.
+        let Some(subject) = value.get("subject").and_then(Value::as_str) else { return Ok(false) };
+        if subject != rkey {
+            return Ok(false);
+        }
+        let decisions = decide::decisions_about(&state.db, &conference.space, subject).await?;
+        let standing = decide::standing(&decisions, subject, None);
+        let current = if collection == MEMBER { standing.membership } else { standing.ban };
+        let seq = value.get("seq").and_then(Value::as_i64);
+        return Ok(current.is_some_and(|d| Some(d.seq) == seq));
     }
     // Only eventside, in the organization's repo, says who's in.
     if SIGNED.contains(&collection) {
@@ -117,7 +140,7 @@ pub async fn sync_repo(
     .await
     .map_err(|e| e.to_string())?;
     let ops = repo::repo_ops(state, &conference.space, writer, since.as_deref()).await?;
-    let Some(latest) = ops.iter().map(|op| op.rev.clone()).max() else { return Ok(0) };
+    let latest = ops.iter().map(|op| op.rev.clone()).max().unwrap_or_default();
     // The last op on each record is the version to keep.
     let mut last: BTreeMap<(&str, &str), &repo::Op> = BTreeMap::new();
     for op in &ops {
@@ -132,7 +155,9 @@ pub async fn sync_repo(
             (Some(_), None) => continue,
         };
         let counted = match value {
-            Some(value) => counts(state, conference, writer, collection, &op.rev, value).await?,
+            Some(value) => {
+                counts(state, conference, writer, collection, rkey, &op.rev, value).await?
+            }
             None => false,
         };
         let stored = sqlx::query(
@@ -173,8 +198,8 @@ pub async fn sync_repo(
     }
     sqlx::query(
         "INSERT INTO space_repos (space, repo, synced_rev, synced_at) VALUES ($1, $2, $3, $4) \
-         ON CONFLICT (space, repo) DO UPDATE SET synced_rev = excluded.synced_rev, synced_at = excluded.synced_at \
-         WHERE space_repos.synced_rev < excluded.synced_rev",
+         ON CONFLICT (space, repo) DO UPDATE SET synced_at = excluded.synced_at, synced_rev = \
+         CASE WHEN space_repos.synced_rev < excluded.synced_rev THEN excluded.synced_rev ELSE space_repos.synced_rev END",
     )
     .bind(&conference.space)
     .bind(writer)
@@ -190,6 +215,47 @@ pub async fn sync_repo(
 /// ever admitted (whose writes the host may have refused), and the
 /// organization. A writer that can't be read is skipped this time.
 pub async fn sync_space(state: &AppState, conference: &Conference) -> Result<(), String> {
+    for writer in all_writers(state, conference).await? {
+        if let Err(why) = sync_repo(state, conference, &writer).await {
+            eprintln!("sync: couldn't read {writer} in {}: {why}", conference.space);
+        }
+    }
+    mark_synced(state, conference).await
+}
+
+/// Backfills only the writers not read lately, a few at a time: write
+/// notifications keep the rest current.
+async fn backfill(state: &AppState, conference: &Conference) -> Result<(), String> {
+    let fresh: Vec<String> = sqlx::query_scalar::<_, String>(
+        "SELECT repo FROM space_repos WHERE space = $1 AND synced_at > $2",
+    )
+    .bind(&conference.space)
+    .bind(now_ms() - STALE_MS)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| e.to_string())?;
+    let stale: Vec<String> =
+        all_writers(state, conference).await?.into_iter().filter(|w| !fresh.contains(w)).collect();
+    let mut running = tokio::task::JoinSet::new();
+    for writer in stale {
+        while running.len() >= BACKFILL_CONCURRENCY {
+            running.join_next().await;
+        }
+        let (state, conference) = (state.clone(), conference.clone());
+        running.spawn(async move {
+            if let Err(why) = sync_repo(&state, &conference, &writer).await {
+                eprintln!("sync: couldn't read {writer} in {}: {why}", conference.space);
+            }
+        });
+    }
+    while running.join_next().await.is_some() {}
+    mark_synced(state, conference).await
+}
+
+/// Everyone who may have written in a conference's space: the organization,
+/// everyone ever admitted (whose writes the host may have refused), and
+/// every writer the space's host lists.
+async fn all_writers(state: &AppState, conference: &Conference) -> Result<Vec<String>, String> {
     let mut writers = vec![conference.org.clone()];
     let decisions = decide::decisions(&state.db, &conference.space).await?;
     for d in decisions.iter().filter(|d| d.action == "admit") {
@@ -207,11 +273,10 @@ pub async fn sync_space(state: &AppState, conference: &Conference) -> Result<(),
         }
         Err(why) => return Err(format!("couldn't list {}'s writers: {why}", conference.space)),
     }
-    for writer in writers {
-        if let Err(why) = sync_repo(state, conference, &writer).await {
-            eprintln!("sync: couldn't read {writer} in {}: {why}", conference.space);
-        }
-    }
+    Ok(writers)
+}
+
+async fn mark_synced(state: &AppState, conference: &Conference) -> Result<(), String> {
     sqlx::query(
         "INSERT INTO space_sync (space, registered_at, synced_at) VALUES ($1, 0, $2) \
          ON CONFLICT (space) DO UPDATE SET synced_at = excluded.synced_at",
@@ -285,8 +350,8 @@ pub async fn counted_records(
 }
 
 /// Keeps every conference's index current for as long as the server runs:
-/// registers for write notifications and backfills, on start and every
-/// [`BACKFILL`] after.
+/// registers for write notifications, and backfills the repos not read in
+/// the last [`STALE_MS`], checking every [`BACKFILL`].
 pub fn spawn(state: AppState) {
     tokio::spawn(async move {
         loop {
@@ -301,7 +366,7 @@ pub fn spawn(state: AppState) {
                 if let Err(why) = ensure_registered(&state, &conference).await {
                     eprintln!("sync: {why}");
                 }
-                if let Err(why) = sync_space(&state, &conference).await {
+                if let Err(why) = backfill(&state, &conference).await {
                     eprintln!("sync: {why}");
                 }
             }
