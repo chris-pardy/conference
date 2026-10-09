@@ -10,6 +10,12 @@ tests-commit:
 
 ## Summary
 
+> **Superseded (2026-10-09).** This feature was folded into
+> [`conference-space`](conference-space.md) in its design review round 1.
+> The salvaged space host already holds eventside's credentials,
+> syncer registration, backfill, the records index and the ingest hook.
+> Nothing depends on this file any more; it's kept as a record.
+
 This is the appview's own access to permissioned spaces. The appview:
 
 - has an identity of its own
