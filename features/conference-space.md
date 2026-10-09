@@ -697,6 +697,71 @@ The draft was critiqued before being presented. Folded in:
   The test cases cover the slice. The fast-follow methods get their own
   feature.
 
+### Round 2: hosting through the managing-app policy (during the build, 2026-10-09)
+
+**What the red tests found.** Vivarium 0.0.3 treats itself as the space
+host for any account it hosts, and ignores `#atproto_space_host` in the
+DID document (`resolveSpaceHost` returns its own URL for a local
+account). A real PDS that supports spaces, like vlpds, will very likely
+do the same. Eventside can't be the space host for an organization that
+has an ordinary account.
+
+**The user's decision:** "Do we need to be a space host? That was to let
+us create spaces at will. With a reduced list of spaces we can use
+simple-spaces and just be the managing app policy." So eventside is
+**not** a space host.
+
+**What changes:**
+
+- **The space lives on the organization's own PDS.** At conference
+  creation, eventside calls `com.atproto.simplespace.createSpace` with the
+  organization's session, with policy `managingAppPolicy {managingApp:
+  <eventside did>#eventside_access}`. That's one space per conference, so
+  creating it under the authority's session is fine.
+- **Eventside's DID** is the server's `did:web`. Its DID document lists:
+  - an `#eventside_access` service, which answers
+    `com.atproto.simplespace.checkUserAccess`;
+  - the `#eventside_attest` keys.
+- **`checkUserAccess(space, user, access, clientId)`** is where the access
+  rules live. The PDS calls it with a service JWT from the authority, and
+  treats an unreachable eventside, or any non-2xx answer, as a denial.
+  Eventside answers from the decisions log:
+  - **write:** the user is a member now.
+  - **read** with eventside's own client: the user is a member. They get
+    only their own records; eventside serves everything else itself.
+  - **read** with another client: the client is on the allowed-apps
+    record for `read`, **and** the user is an owner or staff member.
+  - **Anyone else** is denied.
+- **No PLC update.** The organization's DID document is untouched.
+  Signatures use the `#eventside_attest` keys in eventside's own DID
+  document. A reader checks that the signing DID is the space's
+  `managingApp`. Rotation adds keys there.
+- **Removal takes effect** at the next `checkUserAccess`, plus the BFF's
+  per-request membership check. Revoking credentials at writers' PDSes is
+  no longer eventside's job.
+- **Dropped from the salvage:**
+  - the space host (`spacehost/credential.rs` and `notify.rs`, the writer
+    set, minting the organization's DID);
+  - the host-side read endpoints.
+- **Kept:**
+  - `attest.rs`;
+  - `sync.rs`, which reads writers' records with eventside's own read
+    access;
+  - the index;
+  - the join flows and the CLI.
+- **`org connect`** is now an OAuth connection to the organization's
+  account, with no PLC token.
+- **Delegated mode** moves into scope. "Hosted by eventside" is out of
+  scope.
+
+**Test cases this changes** (the wording is proposed, and needs the
+user's approval):
+
+- **TC-1** becomes "Creating a conference makes eventside its managing
+  app".
+- **TC-37:** signatures verify against a key in eventside's DID
+  document, and eventside is the space's managing app.
+
 ## Test cases
 
 These cover the Nov 1 slice (design review round 1). Email matching,
@@ -713,13 +778,15 @@ The scenario is AtmosphereConf 2027 in Amsterdam:
 
 ### The organization and its conference
 
-#### TC-1: Connecting the organization makes eventside its space host
+#### TC-1: Creating a conference makes eventside its managing app
 
-- **Given** the organization's account on its PDS
-- **When** the operator connects it with the CLI
-- **Then** its DID document names eventside as its space host, and lists
-  a decision-signing key
-- **And** its repo stays on its own PDS
+*(Reworded in design round 2; awaiting approval.)*
+
+- **Given** the organization's account on its PDS, connected with the CLI
+- **When** Olga creates the conference
+- **Then** its space exists on the organization's own PDS
+- **And** the space's policy names eventside as its managing app, so the
+  PDS asks eventside who may read and write
 
 #### TC-2: A public conference publishes an event other calendar apps can read
 
@@ -918,7 +985,8 @@ The scenario is AtmosphereConf 2027 in Amsterdam:
 - **Given** Pim removed Ruud, and Olga removed Joost
 - **When** each tries to rejoin with the shared code
 - **Then** Ruud gets back in
-- **And** Joost is refused until an owner or staff member admits him
+- **And** Joost is refused until an owner admits him *(reworded during
+  the build to match the precedence table; awaiting approval)*
 
 #### TC-31: Only owners act on admins
 
@@ -966,8 +1034,9 @@ The scenario is AtmosphereConf 2027 in Amsterdam:
 - **Given** an allowed app with Olga's delegation
 - **When** it reads the membership and role records in the space
 - **Then** it finds Ana as an attendee and Pim as staff
-- **And** each record's signature verifies against a key in the
-  organization's DID document
+- **And** each record's signature verifies against a key in eventside's
+  DID document, and eventside is the space's managing app *(reworded in
+  design round 2; awaiting approval)*
 
 #### TC-38: Records that aren't properly signed don't count
 
