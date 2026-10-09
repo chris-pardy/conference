@@ -14,7 +14,6 @@ import {
   storedTokens,
   tokenActive,
 } from '../support/auth.ts'
-import { isDefaultScopeList } from '../support/scopes.ts'
 import { spawnServer } from '../support/server.ts'
 
 const serverUrl = () => inject('serverUrl')
@@ -75,8 +74,7 @@ test('TC-7: who is signed in, as the app sees it', async ({ viv }) => {
 
   const { status, body } = await getSession(serverUrl(), flow.jar)
   expect(status).toBe(200)
-  expect(body).toMatchObject({ did: ana.did, handle: ana.handle, displayName: 'Ana de Vries' })
-  expect(isDefaultScopeList(body.scopes), JSON.stringify(body.scopes)).toBe(true)
+  expect(body).toMatchObject({ did: ana.did, handle: ana.handle, displayName: 'Ana de Vries', scopes: ['atproto'] })
   expect(body.avatar).toMatch(/^https?:\/\//)
   expect(body.csrfToken).toBeTypeOf('string')
   expect(body.csrfToken.length).toBeGreaterThanOrEqual(16)
@@ -159,12 +157,8 @@ test('TC-9: creating an account asks the sign-up PDS for its sign-up screen', as
     const par = pushed[0]
     expect(par.get('prompt')).toBe('create')
     expect(par.has('login_hint')).toBe(false)
-    // The client ID is the metadata document for the default scope list.
-    const scope = par.get('scope') ?? ''
-    expect(isDefaultScopeList(scope.split(' ')), scope).toBe(true)
-    const clientId = par.get('client_id') ?? ''
-    expect(clientId.startsWith(`${server.url}/oauth-client-metadata.json`)).toBe(true)
-    expect(await (await fetch(clientId)).json()).toMatchObject({ client_id: clientId, scope })
+    expect(par.get('client_id')).toBe(`${server.url}/oauth-client-metadata.json`)
+    expect(par.get('scope')).toBe('atproto')
     expect(par.get('code_challenge_method')).toBe('S256')
     expect(par.get('client_assertion_type')).toBe('urn:ietf:params:oauth:client-assertion-type:jwt-bearer')
     expect(par.get('client_assertion')).toBeTruthy()
