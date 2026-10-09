@@ -1,5 +1,5 @@
 ---
-status: implementing
+status: blocked
 impact: cross-cutting
 depends-on: [attendee-sign-in]
 branch: feature/conference-space
@@ -812,7 +812,28 @@ The user approved the red tests ("approve let's go"), and with them:
   the PDS always asks eventside; the organization's OAuth grant includes
   space create and write scopes; the CLI gains `records list`.
 
-## Test cases
+### Blocked: frozen TC-18 can't pass (2026-10-09)
+
+The implementation passes every other test (73 of 74 integration tests,
+all e2e, unit, Rust and tooling suites), but TC-18 fails whatever the
+code does:
+
+- The test asks for a credential for a space that doesn't exist. The
+  helper `requestCredential` (`tests/support/other-app.ts`) first gets a
+  delegation token from Mallory's PDS, and `delegationToken` throws on any
+  answer other than 200.
+- The organization's account is on the same vivarium, and vivarium's
+  `getDelegationToken` checks that the space exists, so it answers
+  `400 SpaceNotFound` before eventside is ever asked:
+  `Error: getDelegationToken answered 400: {"error":"SpaceNotFound",…}`.
+- The red-test approval expected that refusal from `getSpaceCredential`,
+  one step later.
+
+**Proposed fix, awaiting approval:** `requestCredential` returns the
+delegation-token refusal as its answer (status and body) instead of
+throwing, so TC-18's "refused, no credential" check sees it. The test
+itself doesn't change.
+
 
 These cover the Nov 1 slice (design review round 1). Email matching,
 request and approve, personal codes, invite-only and key removal are a
