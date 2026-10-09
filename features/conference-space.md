@@ -754,6 +754,28 @@ simple-spaces and just be the managing app policy." So eventside is
 - **Delegated mode** moves into scope. "Hosted by eventside" is out of
   scope.
 
+**Horizon** (the user, 2026-10-09): "let's plan this approach medium
+term. We could use a custom PDS (event host?) long term."
+
+- **Medium term:** the managing-app policy on the organization's own PDS,
+  as above. It works on any PDS that supports simple-spaces, and keeps
+  the number of spaces small (one per conference).
+- **Long term:** an **event host**, a PDS we run for organizations and
+  events. It would host their repos and spaces natively, apply
+  eventside's rules without a `checkUserAccess` round trip, and create
+  spaces at will (per plan, per group, per poll). That's what being a
+  space host was meant to give us.
+- **Keeping the move open:**
+  - Keep the access rules behind one interface: today eventside answers
+    `checkUserAccess`, and later the event host calls the same code
+    in-process.
+  - Keep membership and role records signed and self-describing, so
+    they move unchanged.
+  - Avoid depending on anything that only works because the space sits
+    on someone else's PDS.
+
+  The event host would be its own feature, specced when it's needed.
+
 **Test cases this changes** (the wording is proposed, and needs the
 user's approval):
 
