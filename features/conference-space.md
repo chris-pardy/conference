@@ -1150,3 +1150,36 @@ The scenario is AtmosphereConf 2027 in Amsterdam:
   before joining
 
 ## Review log
+
+### Round 1
+
+Reviewed `9aa0932`. `pnpm check` green; frozen files unchanged apart from
+the approved `other-app.ts` fix.
+
+1. **[major]** `decide.rs`: staff could undo an owner's removal by banning
+   and then unbanning. **Fix:** a ban keeps the higher of the removal's
+   and the ban's rank, and unban restores the removal in force before
+   the ban; unit test for the sequence.
+2. **[major]** `outbox.rs`: the lease is per process, so the background
+   loop and `kick()` drain at once and a stale put can land after a
+   delete. **Fix:** one drain per process behind a mutex, woken by
+   `kick()`; the lease token is per drain.
+3. **[major]** The folded-in `space-sync` parts (records index, sync and
+   backfill, ingest hook) weren't built; `is_member_at` and
+   `attest::verify` had no callers. **Fix:** build the index, sync and the
+   ingest hook the design names, and have `records list` read the index.
+4. **[major]** Dating by PDS rev lets a self-hosted PDS backdate a record,
+   and clock skew can drop a genuine one. **Declined for now:** dating by
+   rev is the rule the user approved at the red-test gate (2026-10-09).
+   Changing it needs their decision, so it's raised in the PR.
+5. **[minor]** `checkUserAccess` accepts a service JWT with no `lxm`.
+   **Fix:** require it.
+6. **[minor]** `checkUserAccess` fetches the authority's DID document on
+   every call. **Fix:** cache with a short TTL, refetch once on a verify
+   failure.
+7. **[minor]** `conference create` isn't atomic or safe to retry. **Fix:**
+   record the conference as pending first, and finish it on rerun.
+8. **[minor]** `join_attempts` rows are never pruned. **Fix:** prune
+   outside the window.
+9. **[nit]** Every decision reads the whole log to count owners. **Fix**
+   if cheap.
