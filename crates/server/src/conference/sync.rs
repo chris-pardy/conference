@@ -75,9 +75,29 @@ pub fn on_ingest(hook: Hook) {
     HOOKS.lock().expect("the ingest hooks aren't poisoned").push(hook);
 }
 
+/// Eventside as a signer: its DID and its keys as its DID document lists
+/// them, loaded once per sync rather than once per record.
+pub struct Signer {
+    pub did: String,
+    pub keys: Vec<(String, crate::crypto::PublicKey)>,
+}
+
+impl Signer {
+    pub async fn load(state: &AppState) -> Result<Self, String> {
+        let keys = attest::keys(&state.db)
+            .await?
+            .into_iter()
+            .map(|(fragment, key)| (fragment, key.verifying_key()))
+            .collect();
+        Ok(Self { did: eventside_did(&state.oauth.public_url), keys })
+    }
+}
+
 /// The ingest rule: whether a record version in a conference's space counts.
+#[allow(clippy::too_many_arguments)]
 pub async fn counts(
     state: &AppState,
+    signer: &Signer,
     conference: &Conference,
     repo: &str,
     collection: &str,
@@ -89,17 +109,16 @@ pub async fn counts(
         if !SIGNED.contains(&collection) {
             return Ok(true);
         }
-        let keys: Vec<_> = attest::keys(&state.db)
-            .await?
-            .into_iter()
-            .map(|(fragment, key)| (fragment, key.verifying_key()))
-            .collect();
-        let signer = eventside_did(&state.oauth.public_url);
-        if attest::verify(value, &conference.org, &conference.space, &signer, &keys).is_empty() {
+        let verified =
+            attest::verify(value, &conference.org, &conference.space, &signer.did, &signer.keys);
+        if verified.is_empty() {
             return Ok(false);
         }
+        let seq = value.get("seq").and_then(Value::as_i64);
         if collection == APPS {
-            return Ok(rkey == "self");
+            // Only the latest version: one withdrawn, then put back, doesn't.
+            let latest = super::outbox::apps_seq(&state.db, &conference.space).await?;
+            return Ok(rkey == "self" && seq.is_some() && seq == latest);
         }
         // A member or ban record counts only while it's the subject's
         // current decision: one withdrawn, then put back, doesn't.
@@ -110,7 +129,6 @@ pub async fn counts(
         let decisions = decide::decisions_about(&state.db, &conference.space, subject).await?;
         let standing = decide::standing(&decisions, subject, None);
         let current = if collection == MEMBER { standing.membership } else { standing.ban };
-        let seq = value.get("seq").and_then(Value::as_i64);
         return Ok(current.is_some_and(|d| Some(d.seq) == seq));
     }
     // Only eventside, in the organization's repo, says who's in.
@@ -146,6 +164,7 @@ pub async fn sync_repo(
     for op in &ops {
         last.insert((op.collection.as_str(), op.rkey.as_str()), op);
     }
+    let signer = Signer::load(state).await?;
     let mut taken = 0;
     for ((collection, rkey), op) in last {
         let value = match (&op.cid, &op.value) {
@@ -156,7 +175,7 @@ pub async fn sync_repo(
         };
         let counted = match value {
             Some(value) => {
-                counts(state, conference, writer, collection, rkey, &op.rev, value).await?
+                counts(state, &signer, conference, writer, collection, rkey, &op.rev, value).await?
             }
             None => false,
         };
@@ -461,4 +480,63 @@ fn schedule(state: AppState, conference: Conference, writer: String) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::conference::test_support::{conference, state};
+
+    /// An apps record at version `seq`, signed by eventside as the outbox signs it.
+    async fn apps_record(state: &AppState, conference: &Conference, seq: i64) -> Value {
+        let mut record = json!({
+            "$type": APPS,
+            "space": conference.space,
+            "apps": [],
+            "seq": seq,
+            "createdAt": "2027-04-29T07:00:00.000Z",
+        });
+        let (fragment, key) = attest::current(&state.db).await.unwrap();
+        let key_id = format!("{}#{fragment}", eventside_did(&state.oauth.public_url));
+        attest::sign(&mut record, &key_id, &key, &conference.org).unwrap();
+        record
+    }
+
+    async fn apps_change(state: &AppState, conference: &Conference, seq: i64) {
+        sqlx::query(
+            "INSERT INTO outbox (seq, conference, kind, created_at, attempts) VALUES ($1, $2, 'apps', 0, 0)",
+        )
+        .bind(seq)
+        .bind(&conference.space)
+        .execute(&state.db)
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn only_the_latest_apps_record_counts() {
+        let (state, _dir) = state().await;
+        attest::ensure_key(&state.db).await.unwrap();
+        let conference = conference(&state, "code").await;
+        apps_change(&state, &conference, 1).await;
+        apps_change(&state, &conference, 2).await;
+        let signer = Signer::load(&state).await.unwrap();
+        let org = conference.org.clone();
+        let rev = "3kxaaaaaaaaaa";
+        let counts_at = |seq| {
+            let (state, signer, conference, org) = (&state, &signer, &conference, &org);
+            async move {
+                let record = apps_record(state, conference, seq).await;
+                counts(state, signer, conference, org, APPS, "self", rev, &record).await.unwrap()
+            }
+        };
+        // A withdrawn version, put back, doesn't count; the latest does.
+        assert!(!counts_at(1).await);
+        assert!(counts_at(2).await);
+        // Not at its rkey, it doesn't either.
+        let latest = apps_record(&state, &conference, 2).await;
+        assert!(
+            !counts(&state, &signer, &conference, &org, APPS, "other", rev, &latest).await.unwrap()
+        );
+    }
 }

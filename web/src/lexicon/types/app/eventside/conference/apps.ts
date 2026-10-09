@@ -20,6 +20,8 @@ export interface Main {
   /** The conference space this record is about. Signed with it, so it counts only when read from that space. */
   space: string
   apps: App[]
+  /** The version of the conference's allowed apps; only the latest counts. */
+  seq: number
   createdAt: string
   signatures: AppEventsideConferenceDefs.Signature[]
   [k: string]: unknown

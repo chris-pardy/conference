@@ -345,19 +345,45 @@ async fn write_main_feed(state: &AppState, conference: &str) -> Result<(), Strin
 
 /// The conference's allowed apps, signed.
 async fn write_apps(state: &AppState, conference: &str) -> Result<(), String> {
-    let rows = sqlx::query_as::<_, (String, String)>(
-        "SELECT client_id, uses FROM conference_apps WHERE conference = $1 ORDER BY client_id",
+    for _ in 0..REWRITES {
+        let seq = apps_seq(&state.db, conference).await?;
+        let rows = sqlx::query_as::<_, (String, String)>(
+            "SELECT client_id, uses FROM conference_apps WHERE conference = $1 ORDER BY client_id",
+        )
+        .bind(conference)
+        .fetch_all(&state.db)
+        .await
+        .map_err(|e| e.to_string())?;
+        let apps: Vec<Value> = rows
+            .into_iter()
+            .map(|(client, uses)| json!({ "client": client, "uses": super::split_methods(&uses) }))
+            .collect();
+        let record = json!({
+            "$type": APPS,
+            "space": conference,
+            "apps": apps,
+            "seq": seq.unwrap_or(0),
+            "createdAt": iso(now_ms()),
+        });
+        let record = signed(state, conference, record).await?;
+        repo::put(state, conference, APPS, "self", record).await?;
+        // Changed again meanwhile (or another drain wrote an older list): again.
+        if apps_seq(&state.db, conference).await? == seq {
+            return Ok(());
+        }
+    }
+    Err("the allowed apps kept changing while their record was written".into())
+}
+
+/// The version of a conference's allowed apps: the `seq` of the latest
+/// change's outbox entry, made in the same transaction as the change.
+pub async fn apps_seq(db: &crate::db::Db, conference: &str) -> Result<Option<i64>, String> {
+    sqlx::query_scalar::<_, Option<i64>>(
+        "SELECT MAX(seq) FROM outbox WHERE conference = $1 AND kind = $2",
     )
     .bind(conference)
-    .fetch_all(&state.db)
+    .bind(APPS_ENTRY)
+    .fetch_one(db)
     .await
-    .map_err(|e| e.to_string())?;
-    let apps: Vec<Value> = rows
-        .into_iter()
-        .map(|(client, uses)| json!({ "client": client, "uses": super::split_methods(&uses) }))
-        .collect();
-    let record =
-        json!({ "$type": APPS, "space": conference, "apps": apps, "createdAt": iso(now_ms()) });
-    let record = signed(state, conference, record).await?;
-    repo::put(state, conference, APPS, "self", record).await
+    .map_err(|e| e.to_string())
 }

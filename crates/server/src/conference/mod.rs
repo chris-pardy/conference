@@ -29,6 +29,8 @@ pub mod join;
 pub mod outbox;
 pub mod repo;
 pub mod sync;
+#[cfg(test)]
+pub mod test_support;
 
 use serde_json::Value;
 

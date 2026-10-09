@@ -1470,7 +1470,7 @@ export const schemaDict = {
         key: 'literal:self',
         record: {
           type: 'object',
-          required: ['space', 'apps', 'createdAt', 'signatures'],
+          required: ['space', 'apps', 'seq', 'createdAt', 'signatures'],
           properties: {
             space: {
               type: 'string',
@@ -1484,6 +1484,12 @@ export const schemaDict = {
                 type: 'ref',
                 ref: 'lex:app.eventside.conference.apps#app',
               },
+            },
+            seq: {
+              type: 'integer',
+              minimum: 0,
+              description:
+                "The version of the conference's allowed apps; only the latest counts.",
             },
             createdAt: {
               type: 'string',

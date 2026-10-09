@@ -729,6 +729,9 @@ pub fn parse_iso(text: &str) -> Option<i64> {
     let seconds = t.next().unwrap_or("0");
     let (whole, fraction) = seconds.split_once('.').unwrap_or((seconds, ""));
     let second: i64 = whole.parse().ok()?;
+    if !fraction.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
     let millis: i64 = if fraction.is_empty() {
         0
     } else {
@@ -781,6 +784,8 @@ mod tests {
         assert_eq!(parse_iso("tomorrow"), None);
         assert_eq!(parse_iso("2027-13-01T00:00:00Z"), None);
         assert_eq!(parse_iso("2027-02-31T00:00:00Z"), None);
+        assert_eq!(parse_iso("2027-01-01T00:00:00.\u{e9}1Z"), None);
+        assert_eq!(parse_iso("2027-01-01T00:00:00.1\u{1F600}Z"), None);
         assert_eq!(parse_iso("2027-04-31T00:00:00Z"), None);
         assert_eq!(parse_iso("2027-02-29T00:00:00Z"), None);
         assert!(parse_iso("2028-02-29T00:00:00Z").is_some());

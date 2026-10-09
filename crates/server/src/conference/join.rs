@@ -78,7 +78,7 @@ pub async fn join(
             .await
             .map_err(|e| e.to_string())?;
     }
-    let outcome = match method(&mut tx, conference, did, code).await? {
+    let outcome = match method(&mut tx, conference, did, code, on_open).await? {
         Some(method) => {
             let action = Action::Admit { role: Role::Attendee, method: method.to_owned() };
             let outcome =
@@ -137,14 +137,19 @@ pub async fn join(
 }
 
 /// The method that admits a person, if any: a valid code they entered, the
-/// attendee list, or open joining, among the methods that are on.
+/// attendee list, or open joining, among the methods that are on. When the
+/// app joins someone as they open the page, only the list.
 async fn method(
     tx: &mut Transaction<'static, Any>,
     conference: &Conference,
     did: &str,
     code: Option<&str>,
+    on_open: bool,
 ) -> Result<Option<&'static str>, String> {
-    if conference.has_method("code")
+    // Opening the page only checks the attendee list: an open conference
+    // still takes someone asking to join.
+    if !on_open
+        && conference.has_method("code")
         && let Some(code) = code.filter(|c| !c.trim().is_empty())
     {
         let found = sqlx::query_as::<_, (Option<i64>, Option<i64>, i64)>(
@@ -176,7 +181,7 @@ async fn method(
             return Ok(Some("list"));
         }
     }
-    if conference.has_method("open") {
+    if conference.has_method("open") && !on_open {
         return Ok(Some("open"));
     }
     Ok(None)
@@ -210,57 +215,7 @@ async fn refused_lately(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Config;
-
-    /// A directory removed when the test ends, pass or fail.
-    struct TempDir(std::path::PathBuf);
-
-    impl Drop for TempDir {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
-    }
-
-    async fn state() -> (AppState, TempDir) {
-        let dir = TempDir(
-            std::env::temp_dir().join(format!("eventside-join-{}", crate::keys::random_token(8))),
-        );
-        let local = "http://127.0.0.1:1".to_owned();
-        let config = Config {
-            port: 0,
-            atproto_url: local.clone(),
-            public_url: None,
-            database_url: format!("sqlite://{}/eventside.db?mode=rwc", dir.0.display()),
-            signing_key: None,
-            scopes: vec!["atproto".into()],
-            signup_pds_url: local.clone(),
-            plc_url: local.clone(),
-            handle_resolver_url: local,
-            allow_private_network: true,
-            session_idle_timeout: std::time::Duration::from_secs(60),
-            token_renew_interval: std::time::Duration::from_secs(60),
-            token_refresh_skew: std::time::Duration::from_secs(60),
-        };
-        let state = AppState::build(config, "http://127.0.0.1:3100".into()).await.unwrap();
-        (state, dir)
-    }
-
-    /// A conference taking the given join methods.
-    async fn conference(state: &AppState, methods: &str) -> Conference {
-        let space = super::super::SpaceUri::conference("did:plc:aaaaaaaaaaaaaaaaaaaaaaaa", "3kx");
-        sqlx::query(
-            "INSERT INTO conferences (space, org, rkey, event, name, starts_at, ends_at, city, theme, \
-             methods, created_by, created_at) VALUES ($1, 'did:plc:aaaaaaaaaaaaaaaaaaaaaaaa', '3kx', \
-             'at://x/y/3kx', 'Conf', '2027-04-29T07:00:00.000Z', '2027-05-02T16:00:00.000Z', \
-             'Amsterdam', '{}', $2, 'did:plc:aaaaaaaaaaaaaaaaaaaaaaaa', 0)",
-        )
-        .bind(&space)
-        .bind(methods)
-        .execute(&state.db)
-        .await
-        .unwrap();
-        super::super::load(&state.db, &space).await.unwrap().unwrap()
-    }
+    use crate::conference::test_support::{conference, state};
 
     const ANA: &str = "did:plc:nnnnnnnnnnnnnnnnnnnnnnnn";
 
@@ -287,6 +242,16 @@ mod tests {
         assert_eq!(join(&state, &conference, ANA, None, true).await.unwrap(), Joined::Refused);
         assert!(!decide::is_member_now(&state.db, &conference.space, ANA).await.unwrap());
         // …asking does.
+        assert_eq!(join(&state, &conference, ANA, None, false).await.unwrap(), Joined::Joined);
+    }
+
+    #[tokio::test]
+    async fn opening_an_open_conference_doesnt_join_anyone_off_the_list() {
+        let (state, _dir) = state().await;
+        let conference = conference(&state, "list,open").await;
+        assert_eq!(join(&state, &conference, ANA, None, true).await.unwrap(), Joined::Refused);
+        assert!(!decide::is_member_now(&state.db, &conference.space, ANA).await.unwrap());
+        // Asking still joins her.
         assert_eq!(join(&state, &conference, ANA, None, false).await.unwrap(), Joined::Joined);
     }
 

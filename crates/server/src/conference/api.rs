@@ -242,13 +242,23 @@ pub async fn check_user_access(
             "space, user and access are required",
         );
     };
-    let Some(parsed) = SpaceUri::parse(&space) else {
+    if SpaceUri::parse(&space).is_none() {
         return xrpc_error(StatusCode::BAD_REQUEST, "InvalidRequest", "space must be a space URI");
+    }
+    // A space that isn't one of eventside's conferences is denied without
+    // asking anyone anything: no DID is fetched for a caller's say-so.
+    let conference = match super::load(&state.db, &space).await {
+        Ok(Some(conference)) => conference,
+        Ok(None) => return Json(json!({ "authorized": false })).into_response(),
+        Err(why) => return server_error(&why),
     };
+    if !crate::identity::is_valid_did(&conference.org) || !crate::identity::is_valid_did(&user) {
+        return Json(json!({ "authorized": false })).into_response();
+    }
     if let Err(why) = check_service_auth(
         &state,
         &headers,
-        &parsed.authority,
+        &conference.org,
         "com.atproto.simplespace.checkUserAccess",
     )
     .await
@@ -430,4 +440,45 @@ pub async fn did_document(State(state): State<AppState>) -> Response {
         }],
     }))
     .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::conference::test_support::{conference, state};
+
+    async fn ask(state: &AppState, space: &str, auth: Option<&str>) -> (u16, Value) {
+        let mut headers = HeaderMap::new();
+        if let Some(auth) = auth {
+            headers.insert("authorization", auth.parse().unwrap());
+        }
+        let params = AccessParams {
+            space: Some(space.to_owned()),
+            user: Some("did:plc:nnnnnnnnnnnnnnnnnnnnnnnn".into()),
+            access: Some("write".into()),
+            client_id: None,
+        };
+        let res = check_user_access(State(state.clone()), headers, Query(params)).await;
+        let status = res.status().as_u16();
+        let bytes = axum::body::to_bytes(res.into_body(), 1 << 16).await.unwrap();
+        (status, serde_json::from_slice(&bytes).unwrap())
+    }
+
+    #[tokio::test]
+    async fn an_unknown_space_is_denied_without_fetching_anything() {
+        let (state, _dir) = state().await;
+        // The identity services point nowhere (127.0.0.1:1): any fetch
+        // would fail, and turn the answer into an error.
+        let unknown = "at://did:plc:zzzzzzzzzzzzzzzzzzzzzzzz/space/app.eventside.private/nope";
+        let (status, body) = ask(&state, unknown, Some("Bearer not.a.jwt")).await;
+        assert_eq!((status, body), (200, json!({ "authorized": false })));
+    }
+
+    #[tokio::test]
+    async fn a_conference_space_needs_the_organizations_service_auth() {
+        let (state, _dir) = state().await;
+        let conference = conference(&state, "code").await;
+        let (status, _) = ask(&state, &conference.space, None).await;
+        assert_eq!(status, 401);
+    }
 }
