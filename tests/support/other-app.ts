@@ -251,7 +251,10 @@ export class AppSession {
   async requestCredential(space: string): Promise<XrpcAnswer> {
     const authority = authorityOf(space)
     const host = await spaceHostOf(this.vivariumUrl, authority)
-    const delegation = await this.delegationToken(space)
+    // The person's PDS may refuse the delegation itself (e.g. no such space); that refusal is the answer.
+    const token = await this.atPds('com.atproto.space.getDelegationToken', { space })
+    if (token.status !== 200) return token
+    const delegation = token.body.token
     return xrpc(host, 'com.atproto.space.getSpaceCredential', {
       body: { space, clientAttestation: this.app.attestation(authority) },
       headers: spaceSignatureHeaders(this.app.appKey, `Bearer ${delegation}`),
