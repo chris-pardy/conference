@@ -1,7 +1,8 @@
 //! The outbox: what decisions, new conferences and changes of apps still
 //! have to write into the organization's repo in the space. Entries are
 //! added in the same transaction as what caused them, and applied after it
-//! commits. A drain applies entries in `seq` order. Drains are kept apart
+//! commits. A drain applies each conference's entries in `seq` order; a
+//! failing entry backs off its own conference alone. Drains are kept apart
 //! (a mutex within a process, and between processes, the server and the
 //! CLI, a lease in the database, renewed while a drain runs), but that's a
 //! best effort: a lease can still lapse, so two drains may overlap. The CLI
@@ -14,7 +15,6 @@
 //! wrote, and writes again if not. Whichever drain writes last finishes on
 //! the latest state.
 
-use std::collections::HashSet;
 use std::time::Duration;
 
 use tokio::sync::{Mutex, Notify};
@@ -123,37 +123,41 @@ async fn drain_leased(state: &AppState, holder: &str) -> Result<(), String> {
 }
 
 async fn drain_entries(state: &AppState, holder: &str) -> Result<(), String> {
-    // A conference whose entry failed waits for its turn again, so its
-    // records are still written in order.
-    let mut failed: HashSet<String> = HashSet::new();
     loop {
+        // The first unapplied entry of each conference, if it's due: one
+        // that failed holds back its own conference's later entries (so its
+        // records are still written in order), and no other conference's.
         let entries = sqlx::query_as::<_, Entry>(
-            "SELECT seq, conference, kind, subject, attempts FROM outbox \
-             WHERE applied_at IS NULL AND (retry_at IS NULL OR retry_at <= $1) ORDER BY seq LIMIT $2",
+            "SELECT seq, conference, kind, subject, attempts FROM outbox o \
+             WHERE applied_at IS NULL AND (retry_at IS NULL OR retry_at <= $1) \
+             AND seq = (SELECT MIN(seq) FROM outbox f WHERE f.conference = o.conference AND f.applied_at IS NULL) \
+             ORDER BY seq LIMIT $2",
         )
         .bind(now_ms())
         .bind(BATCH)
         .fetch_all(&state.db)
         .await
         .map_err(|e| e.to_string())?;
-        let entries: Vec<Entry> =
-            entries.into_iter().filter(|e| !failed.contains(&e.conference)).collect();
         if entries.is_empty() {
             return Ok(());
         }
-        for (i, entry) in entries.iter().enumerate() {
-            if failed.contains(&entry.conference) {
-                continue;
-            }
+        for entry in &entries {
             if !take_lease(state, holder).await? {
                 return Ok(());
             }
             // A later entry about the same thing writes the same state.
-            let superseded = entries[i + 1..].iter().any(|later| {
-                later.conference == entry.conference
-                    && later.kind == entry.kind
-                    && later.subject == entry.subject
-            });
+            let superseded = sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM outbox WHERE applied_at IS NULL AND seq > $1 AND conference = $2 \
+                 AND kind = $3 AND COALESCE(subject, '') = COALESCE($4, '')",
+            )
+            .bind(entry.seq)
+            .bind(&entry.conference)
+            .bind(&entry.kind)
+            .bind(&entry.subject)
+            .fetch_one(&state.db)
+            .await
+            .map_err(|e| e.to_string())?
+                > 0;
             let applied = if superseded { Ok(()) } else { apply(state, entry).await };
             match applied {
                 Ok(()) => {
@@ -181,7 +185,6 @@ async fn drain_entries(state: &AppState, holder: &str) -> Result<(), String> {
                     .execute(&state.db)
                     .await
                     .map_err(|e| e.to_string())?;
-                    failed.insert(entry.conference.clone());
                 }
             }
         }

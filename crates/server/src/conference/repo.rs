@@ -183,6 +183,20 @@ pub fn space_signature(
 /// Eventside's own space credentials, by space, with when they run out.
 static CREDENTIALS: Mutex<Option<HashMap<String, (String, i64)>>> = Mutex::new(None);
 
+/// Credentials being fetched: one at a time.
+static FETCHING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// A credential for the space that's still good, if there is one.
+fn cached_credential(space: &str) -> Option<String> {
+    CREDENTIALS
+        .lock()
+        .expect("the credential cache isn't poisoned")
+        .as_ref()
+        .and_then(|c| c.get(space).cloned())
+        .filter(|(_, until)| *until > now_ms())
+        .map(|(credential, _)| credential)
+}
+
 /// How long eventside uses a credential: well within the 10 minutes a PDS
 /// issues them for.
 const CREDENTIAL_MS: i64 = 5 * 60 * 1000;
@@ -190,16 +204,15 @@ const CREDENTIAL_MS: i64 = 5 * 60 * 1000;
 /// Eventside's credential for reading a conference's space, delegated by
 /// the organization (the space's authority, always authorized).
 pub async fn credential(state: &AppState, space: &str) -> Result<String, String> {
-    let now = now_ms();
-    if let Some((credential, until)) = CREDENTIALS
-        .lock()
-        .expect("the credential cache isn't poisoned")
-        .as_ref()
-        .and_then(|c| c.get(space).cloned())
-        && until > now
-    {
+    if let Some(credential) = cached_credential(space) {
         return Ok(credential);
     }
+    // One fetch at a time: syncs that start together share the first one's.
+    let _one = FETCHING.lock().await;
+    if let Some(credential) = cached_credential(space) {
+        return Ok(credential);
+    }
+    let now = now_ms();
     let org = authority(space)?;
     let client = org_client(state, &org).await?;
     let delegation = call(

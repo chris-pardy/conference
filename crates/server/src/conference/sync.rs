@@ -419,10 +419,46 @@ pub async fn notify_write(
     {
         return xrpc_error(StatusCode::UNAUTHORIZED, "AuthenticationRequired", &why);
     }
+    schedule(state, conference, writer);
+    Json(json!({})).into_response()
+}
+
+/// Repos with a read running, by (space, writer), and whether another
+/// notification came in since it started.
+static QUEUED: Mutex<Option<std::collections::HashMap<(String, String), bool>>> = Mutex::new(None);
+/// How many notified repos are read at once.
+const NOTIFIED_CONCURRENCY: usize = 4;
+static READING: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(NOTIFIED_CONCURRENCY);
+
+/// Reads a notified writer's repo, coalescing notifications: while a read
+/// of the same repo is queued or running, another notification only makes
+/// it read once more afterwards. At most [`NOTIFIED_CONCURRENCY`] run at once.
+fn schedule(state: AppState, conference: Conference, writer: String) {
+    let key = (conference.space.clone(), writer.clone());
+    {
+        let mut queued = QUEUED.lock().expect("the sync queue isn't poisoned");
+        let queued = queued.get_or_insert_with(std::collections::HashMap::new);
+        if let Some(again) = queued.get_mut(&key) {
+            *again = true;
+            return;
+        }
+        queued.insert(key.clone(), false);
+    }
     tokio::spawn(async move {
-        if let Err(why) = sync_repo(&state, &conference, &writer).await {
-            eprintln!("sync: couldn't read {writer} in {}: {why}", conference.space);
+        let Ok(_permit) = READING.acquire().await else { return };
+        loop {
+            if let Err(why) = sync_repo(&state, &conference, &writer).await {
+                eprintln!("sync: couldn't read {writer} in {}: {why}", conference.space);
+            }
+            let mut queued = QUEUED.lock().expect("the sync queue isn't poisoned");
+            let queued = queued.get_or_insert_with(std::collections::HashMap::new);
+            match queued.get_mut(&key) {
+                Some(again) if *again => *again = false,
+                _ => {
+                    queued.remove(&key);
+                    return;
+                }
+            }
         }
     });
-    Json(json!({})).into_response()
 }

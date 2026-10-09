@@ -183,6 +183,13 @@ function Inside({ conference, reload }: { conference: ConferenceView; reload: ()
   )
 }
 
+/** Why joining didn't work, in terms of how they tried. */
+function refusal(withCode: boolean, methods: Set<string>): string {
+  if (withCode) return 'That code didn’t get you in. Check it and try again.'
+  if (methods.has('list')) return 'You’re not on this conference’s attendee list.'
+  return 'You can’t join this conference right now.'
+}
+
 /** How someone who isn't a member gets in, by the methods the conference has on. */
 function WayIn({ conference, reload }: { conference: ConferenceView; reload: () => void }) {
   const { session } = useSession()
@@ -194,6 +201,27 @@ function WayIn({ conference, reload }: { conference: ConferenceView; reload: () 
   const [message, setMessage] = useState<string | undefined>()
   const methods = new Set(conference.join?.methods ?? [])
   const canJoin = methods.has('code') || methods.has('list') || methods.has('open')
+  const viewer = session.kind === 'signedIn' ? session.user.did : undefined
+  const byList = methods.has('list')
+
+  // Someone on the attendee list is in as soon as they open the page.
+  useEffect(() => {
+    if (!viewer || !byList) return
+    let cancelled = false
+    api('/xrpc/app.eventside.conference.join', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ conference: conference.space }),
+    })
+      .then(async (res) => {
+        const answer = res.ok ? await res.json().catch(() => ({})) : {}
+        if (!cancelled && answer.status === 'joined') reload()
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [viewer, byList, conference.space, reload])
 
   if (session.kind !== 'signedIn') {
     const signIn = `/signin?${new URLSearchParams({ return_to: location.pathname + location.search })}`
@@ -232,7 +260,7 @@ function WayIn({ conference, reload }: { conference: ConferenceView; reload: () 
       if (res.status === 429) return setMessage('Too many tries. Wait a few minutes and try again.')
       if (!res.ok) return setMessage('Joining didn’t work. Please try again.')
       const answer = await res.json().catch(() => ({}))
-      if (answer.status !== 'joined') return setMessage('That didn’t get you in. Check the code and try again.')
+      if (answer.status !== 'joined') return setMessage(refusal(input.code !== undefined, methods))
       reload()
     } catch {
       setMessage('Joining didn’t work. Check your connection and try again.')

@@ -522,14 +522,15 @@ async fn join_set(state: &AppState, args: &Args) -> Result<Done, String> {
     if let Some(unknown) = methods.iter().find(|m| !METHODS.contains(&m.as_str())) {
         return Err(format!("unknown join method {unknown}: use code, list or open"));
     }
+    // The public sidecar first: if it can't be written, nothing changes.
+    conference.methods = methods.clone();
+    write_sidecar(state, &conference).await?;
     sqlx::query("UPDATE conferences SET methods = $1 WHERE space = $2")
         .bind(methods.join(","))
         .bind(&conference.space)
         .execute(&state.db)
         .await
         .map_err(|e| e.to_string())?;
-    conference.methods = methods.clone();
-    write_sidecar(state, &conference).await?;
     done(
         format!(
             "Join methods: {}",
