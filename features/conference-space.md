@@ -2,7 +2,7 @@
 status: ready
 impact: cross-cutting
 depends-on: [attendee-sign-in]
-branch:
+branch: feature/conference-space
 tests-commit:
 ---
 
