@@ -1280,3 +1280,9 @@ the approved `other-app.ts` fix.
    space, with a short backoff after a failure.
 5. **[nit]** `parse_iso` accepts impossible dates like 31 February.
    **Fix:** check the day against the month.
+
+Rework (`580e9c1`): all five fixed, with Rust tests. `pnpm check` green.
+`join` gains an `onOpen` flag: the page's automatic list join admits only
+someone the conference has never decided about. Member, ban and apps
+records carry a required, signed `space`, and verification requires it
+to match the space the record was read from.
