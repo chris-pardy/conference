@@ -1229,3 +1229,26 @@ and the frozen `createConference` helper never passes `--country`, so
 leaving the address out would fail TC-2. Making the address always valid
 needs the user's approval of a test change (e.g. the helper passing
 `--country NL`); it's raised in the PR.
+
+### Round 3
+
+Reviewed `4aee0d5`. `pnpm check` green; frozen files unchanged apart from
+the approved `other-app.ts` fix. Precedence, `checkUserAccess`, OAuth
+connect and signature checks held up.
+
+1. **[major]** The join-attempt limit is check-then-act: 40 concurrent
+   wrong codes gave 39 code checks and one 429. **Fix:** count and record
+   the attempt inside the decision transaction, before checking the code.
+2. **[minor]** One failing conference can starve the outbox for the
+   others (`LIMIT` before the per-conference filter). **Fix:** pick due
+   entries per conference in SQL; back off a failed conference's later
+   entries too; correct the comment.
+3. **[minor]** Each `notifyWrite` spawns its own unbounded sync. **Fix:**
+   coalesce per (space, writer) with a bounded worker; single-flight the
+   credential fetch.
+4. **[minor]** A listed attendee still has to press Join (TC-11 says
+   they're a member on opening), and refusals mention a code when there's
+   no code method. **Fix:** join without a code on open when `list` is a
+   method; word refusals by method.
+5. **[nit]** `join set` changes the database before writing the sidecar.
+   **Fix:** write the sidecar first.
