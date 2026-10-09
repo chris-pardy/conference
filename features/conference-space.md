@@ -1,5 +1,5 @@
 ---
-status: design-review
+status: test-cases
 impact: cross-cutting
 depends-on: [attendee-sign-in]
 branch:
@@ -613,8 +613,8 @@ approval):
 **Risks.**
 
 - **The demo network.** bsky.social doesn't implement
-  `com.atproto.space.*`, so the demo's organization account needs a PDS
-  that supports spaces.
+  `com.atproto.space.*`. The demo's organization account is on vlpds
+  (round 1).
 - **Schedule.**
   - Nov 1 is 24 days away, and feeds comes after this.
   - Proposed Nov 1 slice:
@@ -674,7 +674,28 @@ The draft was critiqued before being presented. Folded in:
   feeds, so before feeds lands, the test for it checks that the main
   feed record exists.
 
-Awaiting the user's review.
+**The user's feedback:**
+
+- The demo organization's account is on **vlpds**.
+- Precedence, admin sign-in and everything else: approved.
+  - That includes the five edits to `feeds`, folding in `space-sync`,
+    and the Nov 1 slice.
+
+### Round 1 (approved)
+
+- **The demo organization's account is on vlpds,** the PDS that supports
+  spaces for the demo.
+- **The five `feeds` edits** are applied in `feeds.md`, under "Changes
+  from conference-space", and add feeds' TC-43.
+- **`space-sync` is marked superseded.**
+- **The Nov 1 slice** is accepted:
+  - **In:** organization account, public conference, shared code, open
+    joining, attendee list by handle, the CLI, precedence, adding keys.
+  - **Fast-follow:** email matching, request and approve, personal
+    codes, invite-only, removing keys.
+
+  The test cases cover the slice. The fast-follow methods get their own
+  feature.
 
 ## Test cases
 
