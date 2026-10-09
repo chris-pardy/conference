@@ -1286,3 +1286,26 @@ Rework (`580e9c1`): all five fixed, with Rust tests. `pnpm check` green.
 someone the conference has never decided about. Member, ban and apps
 records carry a required, signed `space`, and verification requires it
 to match the space the record was read from.
+
+### Round 5
+
+Reviewed `2d68381`. `pnpm check` green; frozen files unchanged apart from
+the approved `other-app.ts` fix. Precedence, the join limit, outbox
+re-checks, the signed `space`, OAuth connect and `checkUserAccess` rules
+held up.
+
+1. **[major]** With methods `list,open`, the page's join on open admits
+   any signed-in visitor through `open`. **Fix:** on open, admit only
+   through `list`.
+2. **[minor]** `checkUserAccess` fetches the DID document of any
+   authority a caller names before checking the space is a conference.
+   **Fix:** load the conference first, deny unknown spaces without a
+   fetch, expect the conference's org as issuer, validate DIDs.
+3. **[minor]** The signed apps record has no `seq`, so a withdrawn one
+   put back still counts, and `write_apps` has no re-check after writing.
+   **Fix:** add `seq`, count only the latest, re-check as `write_member`
+   does.
+4. **[minor]** `counts()` loads and parses every key for each signed
+   record (N+1). **Fix:** load keys once per sync.
+5. **[nit]** `parse_iso` can panic on a non-ASCII fraction. **Fix:**
+   check digits before slicing.
