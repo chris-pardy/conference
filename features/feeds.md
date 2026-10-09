@@ -1,7 +1,7 @@
 ---
 status: ready
 impact: cross-cutting
-depends-on: [ui-blocks, attendee-sign-in, conference-space, space-sync]
+depends-on: [ui-blocks, attendee-sign-in, conference-space]
 branch:
 tests-commit:
 ---
@@ -66,7 +66,9 @@ algorithmic and need no hand pinning.
 ## Data
 
 - **One private space per conference**, hosted by eventside, e.g.
-  `at://did:web:eventside.app/space/app.eventside.private/<conference>`.
+  `at://<organization did>/space/app.eventside.private/<conference>`.
+  The authority is the organization's account (see
+  [`conference-space`](conference-space.md)).
   - Attendees can write to it but not read it. Eventside reads all of it,
     and so can any other app the organizer allows.
   - Everything in this feature lives there, organizer posts included:
@@ -342,7 +344,9 @@ experience builds on, sets the app's navigation, changes the premise of
      - it was accepted into at least one feed whose audience includes the
        viewer;
      - it either has no audience of its own, or the viewer is in that
-       audience too.
+       audience too;
+     - its author is a member of the conference now. Someone who leaves,
+       is removed or is banned isn't shown until they rejoin.
 
      Hidden, deleted and unknown entries are dropped.
   4. **Apply the moderators' pins**, on the first page only:
@@ -376,8 +380,9 @@ Beyond that:
 **Who may write what** (eventside checks at write time, and again at
 ingest for direct writes):
 
-- **Feed records** count only from eventside's own repo. Eventside writes
-  them:
+- **Feed records** count only from the authority's repo. Eventside
+  writes them there, as the organization, through `conference-space`'s
+  authority write API:
   - the main feed, from the conference's template;
   - a scoped feed whenever a session, room, plan or group appears. Its
     rkey comes from the subject, so creating it again is harmless.
@@ -392,7 +397,8 @@ ingest for direct writes):
 - **Scopes.** Attendees' sessions get `space:` `create` and `delete` on
   `app.eventside.feed.post` only. Pins and labels are written with
   moderators' sessions, which add those collections. Feed records are
-  written by eventside as the authority.
+  written by eventside as the authority. Someone who becomes a moderator
+  is asked to sign in again the first time they try a moderator action.
 
 **Components.**
 
@@ -454,7 +460,7 @@ ingest for direct writes):
   Kinds are resolved by the features that own them. Until `groups`,
   `plans` and `program-import` provide theirs, `#group` and `#attendees`
   match nobody.
-- **`app.eventside.feed.feed`** (eventside's repo):
+- **`app.eventside.feed.feed`** (the authority's repo):
   - `name`, `kind` and `subject?`;
   - `algorithm`: `#builtin{name, params}`, `#service{did,
     sendViewer}`, or the reserved `#declarative` and `#wasm`. A card
@@ -779,6 +785,25 @@ The draft was critiqued before being presented. Folded in:
     [`ui-blocks`](ui-blocks.md) are built as part of feeds;
   - the Nov 1 slice defers live updates, push and the offline cache.
 
+### Changes from conference-space (approved 2026-10-09)
+
+`conference-space` design round 1, approved by the user, changed five
+things here:
+
+- **The authority.** The private space's authority is the organization's
+  own account, not eventside's `did:web`.
+- **Feed records** live in the authority's repo, written through
+  `conference-space`'s authority write API.
+- **Dependencies.** `space-sync` is dropped from `depends-on`; it was
+  folded into `conference-space`.
+- **The visibility filter** requires the author to be a member now.
+- **New moderators** are asked to sign in again on their first moderator
+  action.
+
+Older passages above that mention eventside's `did:web` as the authority,
+or `space-sync`, are superseded by these changes. TC-43 covers the new
+filter.
+
 ## Test cases
 
 The scenario is AtmosphereConf 2027 in Amsterdam:
@@ -1090,6 +1115,15 @@ organizers, and an organizer's list of allowed apps.
 - **When** Ana opens "Buzz"
 - **Then** she sees those Bluesky posts as cards, with their authors'
   avatars, mixed with the posts made to "Buzz"
+
+### Membership
+
+#### TC-43: Someone who leaves isn't shown until they rejoin
+
+- **Given** Bram posted in the "Grote Zaal" chat
+- **When** Bram leaves the conference
+- **Then** his post isn't shown to anyone
+- **And** when he rejoins, it's shown again
 
 ### Regressions
 
