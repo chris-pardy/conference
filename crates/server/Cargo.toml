@@ -18,4 +18,5 @@ sha2 = "0.10"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "any", "sqlite", "postgres", "migrate", "macros"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time", "sync"] }
 url = "2"
+wasmi = { version = "2", default-features = false, features = ["std", "validate", "auto-dispatch"] }
 

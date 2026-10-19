@@ -6,7 +6,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 cargo build --manifest-path cards/Cargo.toml --target wasm32-unknown-unknown --release
 mkdir -p crates/server/demo
-for m in dice quiz; do
+for m in std dice quiz event; do
   cp "cards/target/wasm32-unknown-unknown/release/card_$m.wasm" "crates/server/demo/$m.wasm"
 done
 ls -l crates/server/demo/*.wasm

@@ -1,25 +1,26 @@
-import { type FormEvent, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { useSession } from '../auth/session'
-import { type GroupSummary, groups } from './api'
+import { type EventSummary, events } from './api'
+import { EventForm, EventTile } from './parts'
 import './groups.css'
 
-/** Signed out: what this is. Signed in: your groups. */
+/** Signed out: what this is. Signed in: events. */
 export default function Home() {
   const { session } = useSession()
   if (session.kind === 'loading') return <main className="gx-page" />
   if (session.kind !== 'signedIn') return <Welcome />
-  return <MyGroups />
+  return <MyEvents />
 }
 
 function Welcome() {
   return (
     <main className="gx-page gx-welcome">
       <p className="gx-eyebrow">Eventside</p>
-      <h1 className="gx-welcome__title">Your group, live.</h1>
+      <h1 className="gx-welcome__title">Your event, live.</h1>
       <p className="gx-welcome__lede">
-        Groups have feeds. Feeds have cards. Polls, questions, sign-ups and games update for everyone as people tap.
-        Sign in with your atmosphere account (Bluesky or any PDS) to join AtmosphereConf 2027.
+        Say you’re going, and the event opens up: live polls, questions and games, and the plans people make inside it.
+        Sign in with your atmosphere account (Bluesky or any PDS) to RSVP to AtmosphereConf 2027.
       </p>
       <Link className="gx-button gx-button--primary" to="/signin?return_to=%2F">
         Sign in
@@ -59,98 +60,102 @@ function HealthLine() {
   )
 }
 
-function MyGroups() {
+function MyEvents() {
   const navigate = useNavigate()
-  const [list, setList] = useState<GroupSummary[] | null>(null)
+  const [list, setList] = useState<EventSummary[] | null>(null)
   const [failed, setFailed] = useState(false)
-  const [name, setName] = useState('')
-  const [invite, setInvite] = useState('')
-  const [error, setError] = useState<string | null>(null)
+  const [creating, setCreating] = useState(false)
 
   useEffect(() => {
-    groups
+    events
       .list()
       .then(setList)
       .catch(() => setFailed(true))
   }, [])
 
-  const create = (e: FormEvent) => {
-    e.preventDefault()
-    if (!name.trim()) return
-    groups
-      .create(name.trim(), '')
-      .then(({ id }) => navigate(`/g/${id}`))
-      .catch((err: Error) => setError(err.message))
-  }
-
-  const join = (e: FormEvent) => {
-    e.preventDefault()
-    if (!invite.trim()) return
-    groups
-      .join(invite.trim())
-      .then(({ id }) => navigate(`/g/${id}`))
-      .catch((err: Error) => setError(err.message))
+  const topLevel = (list ?? []).filter((e) => !e.parent)
+  const going = topLevel.filter((e) => e.rsvp === 'going')
+  const upcoming = topLevel.filter((e) => e.rsvp !== 'going')
+  // Plans inside events you're going to, under their event.
+  const plans = new Map<string, { title: string; events: EventSummary[] }>()
+  for (const e of list ?? []) {
+    if (!e.parent) continue
+    const group = plans.get(e.parent.id) ?? { title: e.parent.title, events: [] }
+    group.events.push(e)
+    plans.set(e.parent.id, group)
   }
 
   return (
     <main className="gx-page">
-      <h1 className="gx-title">Your groups</h1>
-      {failed && <p className="gx-muted">Couldn’t load your groups. Try reloading.</p>}
-      {list === null && !failed && <p className="gx-muted">Loading…</p>}
-      <ul className="gx-groups">
-        {list?.map((g) => (
-          <li key={g.id}>
-            <Link className="gx-group" to={`/g/${g.id}`}>
-              <span className="gx-group__name">{g.name}</span>
-              {g.description && <span className="gx-group__desc">{g.description}</span>}
-              <span className="gx-group__meta">
-                {g.memberCount} {g.memberCount === 1 ? 'person' : 'people'} · {g.feedCount}{' '}
-                {g.feedCount === 1 ? 'feed' : 'feeds'}
-                {g.role === 'owner' && ' · yours'}
-              </span>
-            </Link>
-          </li>
-        ))}
-      </ul>
-
-      <div className="gx-forms">
-        <form className="gx-inline-form" onSubmit={create}>
-          <label htmlFor="new-group">Start a group</label>
-          <div className="gx-inline-form__row">
-            <input
-              id="new-group"
-              className="gx-input"
-              placeholder="Group name"
-              value={name}
-              maxLength={100}
-              onChange={(e) => setName(e.target.value)}
-            />
-            <button type="submit" className="gx-button gx-button--primary">
-              Create
-            </button>
-          </div>
-        </form>
-        <form className="gx-inline-form" onSubmit={join}>
-          <label htmlFor="invite">Join with an invite code</label>
-          <div className="gx-inline-form__row">
-            <input
-              id="invite"
-              className="gx-input gx-input--code"
-              placeholder="ABC123"
-              value={invite}
-              onChange={(e) => setInvite(e.target.value.toUpperCase())}
-            />
-            <button type="submit" className="gx-button">
-              Join
-            </button>
-          </div>
-        </form>
-        {error && (
-          <p className="gx-error" role="alert">
-            {error}
-          </p>
+      <div className="gx-page-head">
+        <h1 className="gx-title">Events</h1>
+        {!creating && (
+          <button type="button" className="gx-button gx-button--primary" onClick={() => setCreating(true)}>
+            Create an event
+          </button>
         )}
       </div>
+      {creating && (
+        <section className="gx-panel" aria-label="Create an event">
+          <h2 className="gx-panel__title">Create an event</h2>
+          <EventForm
+            submitLabel="Create event"
+            onCancel={() => setCreating(false)}
+            onSubmit={async (event) => {
+              const created = await events.create(event)
+              navigate(`/e/${created.id}`)
+            }}
+          />
+        </section>
+      )}
+      {failed && <p className="gx-muted">Couldn’t load events. Try reloading.</p>}
+      {list === null && !failed && <p className="gx-muted">Loading…</p>}
+
+      {going.length > 0 && (
+        <section className="gx-section" aria-labelledby="going-head">
+          <h2 id="going-head" className="gx-section__title">
+            Going
+          </h2>
+          <ul className="gx-event-list">
+            {going.map((e) => (
+              <li key={e.id}>
+                <EventTile event={e} />
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {[...plans.entries()].map(([parentId, group]) => (
+        <section key={parentId} className="gx-section" aria-labelledby={`plans-${parentId}`}>
+          <h2 id={`plans-${parentId}`} className="gx-section__title">
+            Inside {group.title}
+          </h2>
+          <ul className="gx-event-list">
+            {group.events.map((e) => (
+              <li key={e.id}>
+                <EventTile event={e} showParent={false} />
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
+
+      {upcoming.length > 0 && (
+        <section className="gx-section" aria-labelledby="upcoming-head">
+          <h2 id="upcoming-head" className="gx-section__title">
+            Upcoming
+          </h2>
+          <ul className="gx-event-list">
+            {upcoming.map((e) => (
+              <li key={e.id}>
+                <EventTile event={e} />
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {list?.length === 0 && <p className="gx-muted">No events yet. Create the first one.</p>}
     </main>
   )
 }

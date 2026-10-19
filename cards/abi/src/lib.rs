@@ -1,29 +1,35 @@
-//! The card module ABI, and helpers for building card-kit blocks.
+//! The card module ABI (v2), and helpers for building card-kit blocks.
 //!
-//! A card module is a wasm bundle with three exports:
+//! A card is redux: `(state, action) -> (state', actions[])`. The same
+//! module runs in the browser (`env: "client"`) and on the server
+//! (`env: "server"`); see DEMO.md for the whole model.
+//!
+//! A module is a wasm bundle with four exports:
 //!
 //! - `memory`
 //! - `alloc(len: i32) -> i32`: room for the host to write the input
-//! - `update(ptr: i32, len: i32) -> i64`: reads the input JSON and returns
-//!   the output JSON, packed as `(ptr << 32) | len`
+//! - `reduce(ptr: i32, len: i32) -> i64`
+//! - `view(ptr: i32, len: i32) -> i64`
 //!
-//! The input is `{event, ui, base, data, local, viewer, seed}`:
+//! Both take JSON and return JSON packed as `(ptr << 32) | len`. There are
+//! no imports: the host passes `seed` (u32) and `now` (epoch ms).
 //!
-//! - `event`: `{type: "init"}`, `{type: "data"}` (the server's data changed)
-//!   or `{type: "action", blockId, actionId, value, item?}`
-//! - `ui`: the card-kit card on screen now; `base`: the card as authored
-//! - `data`: the server's data for this card, as this viewer sees it
-//! - `local`: whatever the module returned as `local` last time (null at first)
-//! - `seed`: a fresh random u32, since a module has no clock or RNG
+//! `reduce` gets `{env, state, shared, action, config, base, context, viewer, seed, now}`:
+//! `state` is this device's local state on the client and the shared state
+//! on the server; `action` is `{type, payload, meta: {id, actor, at, origin,
+//! blockId?, item?}}`. It returns `{state?, actions?}`: a missing `state`
+//! means unchanged. Actions the client emits go to the server; actions the
+//! server emits go to clients (everyone, or `to` one did), except types
+//! starting with `@`, which are platform effects.
 //!
-//! The output is `{ui?, local?, forward?}`. `ui` replaces what's on screen,
-//! `local` is kept for the next call, and `forward` says whether an action
-//! also goes to the server: `true` (the default for actions), `false`, or
-//! `{actionId?, value?}` to send something else.
+//! `view` gets `{shared, local, config, base, context, viewer, now}` and
+//! returns `{ui?, data?}`: the card-kit card to show (default: `base`) and
+//! what the card's `data` source binds to.
 //!
-//! Use [`card_module!`] to export a function `fn(&Value) -> Value`.
+//! Use [`card_module!`] to export `reduce` and `view` functions of type
+//! `fn(&Value) -> Value`.
 
-pub use serde_json::{Value, json};
+pub use serde_json::{Map, Value, json};
 
 #[doc(hidden)]
 pub fn alloc(len: i32) -> i32 {
@@ -45,29 +51,94 @@ pub fn call(ptr: i32, len: i32, f: fn(&Value) -> Value) -> i64 {
     (ptr << 32) | len
 }
 
-/// Exports `alloc` and `update` for a module whose logic is `f`.
+/// Exports `alloc`, `reduce` and `view`:
+/// `card_module! { reduce: my_reduce, view: my_view }`.
 #[macro_export]
 macro_rules! card_module {
-    ($f:path) => {
+    (reduce: $reduce:path, view: $view:path $(,)?) => {
         #[unsafe(no_mangle)]
         pub extern "C" fn alloc(len: i32) -> i32 {
             $crate::alloc(len)
         }
         #[unsafe(no_mangle)]
-        pub extern "C" fn update(ptr: i32, len: i32) -> i64 {
-            $crate::call(ptr, len, $f)
+        pub extern "C" fn reduce(ptr: i32, len: i32) -> i64 {
+            $crate::call(ptr, len, $reduce)
+        }
+        #[unsafe(no_mangle)]
+        pub extern "C" fn view(ptr: i32, len: i32) -> i64 {
+            $crate::call(ptr, len, $view)
         }
     };
 }
 
-/// The event's type: "init", "data" or "action".
-pub fn event_type(input: &Value) -> &str {
-    input["event"]["type"].as_str().unwrap_or("")
+/// Where the reducer runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Env {
+    Client,
+    Server,
 }
 
-/// The action id, for an action event.
-pub fn action_id(input: &Value) -> &str {
-    input["event"]["actionId"].as_str().unwrap_or("")
+/// The reducer's environment: `Server` when the host says so, else `Client`.
+pub fn env(input: &Value) -> Env {
+    if input["env"] == "server" { Env::Server } else { Env::Client }
+}
+
+/// The action's type, e.g. "roll" or "@init".
+pub fn action_type(input: &Value) -> &str {
+    input["action"]["type"].as_str().unwrap_or("")
+}
+
+/// The action's payload.
+pub fn payload(input: &Value) -> &Value {
+    &input["action"]["payload"]
+}
+
+/// The action's meta: `{id, actor, at, origin, blockId?, item?}`.
+pub fn meta(input: &Value) -> &Value {
+    &input["action"]["meta"]
+}
+
+/// Who dispatched the action (stamped by the server, so trusted there).
+pub fn actor_did(input: &Value) -> &str {
+    meta(input)["actor"]["did"].as_str().unwrap_or("")
+}
+
+/// The actor's handle, falling back to their did.
+pub fn actor_handle(input: &Value) -> &str {
+    meta(input)["actor"]["handle"].as_str().unwrap_or_else(|| actor_did(input))
+}
+
+/// The viewer's did (client side).
+pub fn viewer_did(input: &Value) -> &str {
+    input["viewer"]["did"].as_str().unwrap_or("")
+}
+
+/// The state, or `default` when it is null (before `@init`) or not an object.
+pub fn state_or(input: &Value, default: Value) -> Value {
+    match &input["state"] {
+        s @ Value::Object(_) => s.clone(),
+        _ => default,
+    }
+}
+
+/// An action to emit.
+pub fn emit(kind: &str, payload: Value) -> Value {
+    json!({ "type": kind, "payload": payload })
+}
+
+/// An action the server sends to one person only.
+pub fn emit_to(did: &str, kind: &str, payload: Value) -> Value {
+    json!({ "type": kind, "payload": payload, "to": did })
+}
+
+/// A reduce output: the new state and the actions to emit.
+pub fn out(state: Value, actions: Vec<Value>) -> Value {
+    json!({ "state": state, "actions": actions })
+}
+
+/// A reduce output that changes nothing.
+pub fn unchanged() -> Value {
+    json!({})
 }
 
 /// A small PRNG seeded from the host's seed.
@@ -77,7 +148,7 @@ impl Rng {
     pub fn new(input: &Value) -> Self {
         Self((input["seed"].as_u64().unwrap_or(1) as u32) | 1)
     }
-    pub fn next(&mut self) -> u32 {
+    pub fn next_u32(&mut self) -> u32 {
         let mut x = self.0;
         x ^= x << 13;
         x ^= x >> 17;
@@ -87,8 +158,32 @@ impl Rng {
     }
     /// 1..=n
     pub fn roll(&mut self, n: u32) -> u32 {
-        self.next() % n + 1
+        self.next_u32() % n + 1
     }
+}
+
+/// Epoch milliseconds as an RFC 3339 UTC datetime, e.g. "2027-04-30T07:30:00.000Z".
+pub fn iso(ms: i64) -> String {
+    let secs = ms.div_euclid(1000);
+    let millis = ms.rem_euclid(1000);
+    let days = secs.div_euclid(86_400);
+    let rem = secs.rem_euclid(86_400);
+    // Civil from days (Howard Hinnant).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!(
+        "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}.{millis:03}Z",
+        rem / 3600,
+        rem % 3600 / 60,
+        rem % 60
+    )
 }
 
 /// Builders for card-kit blocks.
@@ -131,6 +226,7 @@ pub mod blocks {
         json!({ "$type": t("stat"), "label": label, "value": value })
     }
 
+    /// tone: neutral, info, warning, success or danger.
     pub fn badge(text: &str, tone: &str) -> Value {
         json!({ "$type": t("badge"), "text": text, "tone": tone })
     }
@@ -139,6 +235,7 @@ pub mod blocks {
         json!({ "$type": t("progress"), "label": label, "value": value, "max": max.max(1) })
     }
 
+    /// variant: default, primary or danger.
     pub fn button(id: &str, label: &str, action: &str, value: &str, variant: &str) -> Value {
         json!({
             "$type": t("button"), "id": id, "label": label,
@@ -146,19 +243,50 @@ pub mod blocks {
         })
     }
 
+    /// A button group: `options` are (label, value) pairs, unique by value.
     pub fn choices(id: &str, label: &str, action: &str, options: &[(&str, &str)]) -> Value {
-        let buttons: Vec<Value> =
-            options.iter().map(|(label, value)| json!({ "label": label, "value": value })).collect();
+        let buttons: Vec<Value> = options
+            .iter()
+            .map(|(label, value)| json!({ "label": label, "value": value }))
+            .collect();
         json!({ "$type": t("buttonGroup"), "id": id, "label": label, "action": action, "buttons": buttons })
     }
 
+    /// Up to four columns of blocks.
     pub fn columns(columns: Vec<Vec<Value>>) -> Value {
-        let columns: Vec<Value> = columns.into_iter().map(|blocks| json!({ "blocks": blocks })).collect();
+        let columns: Vec<Value> =
+            columns.into_iter().map(|blocks| json!({ "blocks": blocks })).collect();
         json!({ "$type": t("columns"), "columns": columns })
     }
 
     pub fn section(blocks: Vec<Value>) -> Value {
         json!({ "$type": t("section"), "blocks": blocks })
+    }
+
+    /// A person, by did (their profile is looked up by the client).
+    pub fn person(did: &str) -> Value {
+        json!({ "$type": t("person"), "did": did })
+    }
+
+    /// A place: a name and an optional detail line.
+    pub fn room(name: &str, detail: &str) -> Value {
+        let mut b = json!({ "$type": t("room"), "name": name });
+        if !detail.is_empty() {
+            b["detail"] = json!(detail);
+        }
+        b
+    }
+
+    /// A time, or a countdown to it, with RFC 3339 datetimes (see [`crate::iso`]).
+    pub fn time(label: &str, at: &str, end: Option<&str>, countdown: bool) -> Value {
+        let mut b = json!({
+            "$type": t("time"), "label": label, "at": at,
+            "mode": if countdown { "countdown" } else { "time" },
+        });
+        if let Some(end) = end {
+            b["end"] = json!(end);
+        }
+        b
     }
 
     /// A list over `source` at `path`, repeating `template`.
@@ -173,5 +301,16 @@ pub mod blocks {
     pub fn bound(mut block: Value, prop: &str, source: &str, path: &str) -> Value {
         block["bind"][prop] = json!({ "source": source, "path": path });
         block
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn iso_formats_epoch_ms() {
+        assert_eq!(iso(0), "1970-01-01T00:00:00.000Z");
+        assert_eq!(iso(1_809_070_200_000), "2027-04-30T07:30:00.000Z");
     }
 }

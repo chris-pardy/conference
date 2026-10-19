@@ -2,7 +2,7 @@
 # Its own workspace, built for wasm32 by scripts/build-card-modules.sh.
 [workspace]
 resolver = "3"
-members = ["abi", "dice", "quiz"]
+members = ["abi", "std", "dice", "quiz", "event"]
 
 [profile.release]
 opt-level = "s"

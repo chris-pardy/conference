@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router'
 import { ActionContext, type ActionHost, type ActionIntent } from '../blocks/ActionContext'
 import { BlockCard, type Card as CardUi } from '../blocks/BlockCard'
 import {
@@ -9,15 +10,15 @@ import {
   SourceResolverContext,
   type SourceState,
 } from '../blocks/SourceResolver'
-import { type CardView, cards, profile } from './api'
-import { type CardModule, loadModule, type ModuleOutput } from './wasm'
+import { type CardView, cards, profile, type ServerAction, STD_MODULE } from './api'
+import { type Action, type CardModule, loadModule, type ReduceOutput } from './wasm'
 
 const VIEW_SOURCE = 'app.eventside.block.defs#viewSource'
-/** The view a card binds to for its own data, as the server computes it for the viewer. */
+/** The view a card binds to for its own data: what its module's view returns as `data`. */
 export const CARD_DATA = 'app.eventside.card.data'
 
 /**
- * Answers a card's sources: its own data from the server (a viewSource of
+ * Answers a card's sources: its own data (a viewSource of
  * `app.eventside.card.data`), and people's profiles. Anything else is
  * unavailable.
  */
@@ -58,6 +59,26 @@ export class CardDataResolver implements SourceResolver {
   }
 }
 
+// Actions the server's reducer emits arrive on the event's stream; the page
+// hands them here, and each card picks up its own.
+type ServerActionsListener = (actions: ServerAction[]) => void
+const listeners = new Map<string, Set<ServerActionsListener>>()
+
+export const serverActions = {
+  deliver(cardId: string, actions: ServerAction[]): void {
+    for (const listener of listeners.get(cardId) ?? []) listener(actions)
+  },
+  listen(cardId: string, listener: ServerActionsListener): () => void {
+    let set = listeners.get(cardId)
+    if (!set) {
+      set = new Set()
+      listeners.set(cardId, set)
+    }
+    set.add(listener)
+    return () => set.delete(listener)
+  },
+}
+
 export interface Viewer {
   did: string
   handle: string
@@ -66,73 +87,243 @@ export interface Viewer {
 interface LiveCardProps {
   card: CardView
   viewer: Viewer
-  /** The server answered an action with the card as it is now. */
+  /** The server answered a dispatch with the card as it is now. */
   onUpdate(card: CardView): void
   onRemove?(): void
-  /** A preview: actions run through the module but never reach the server. */
+  /** May the viewer delete this card (its author, or the event's host)? */
+  canRemove?: boolean
+  /**
+   * A preview: no server. The same module runs here twice, as the client
+   * and as the server, so the preview behaves as the posted card will.
+   */
   preview?: boolean
 }
 
-type ModuleState = { kind: 'none' } | { kind: 'loading' } | { kind: 'ready'; module: CardModule } | { kind: 'failed' }
+type ModuleState = { kind: 'loading' } | { kind: 'ready'; module: CardModule } | { kind: 'failed' }
+
+/** One line of the card's action log. */
+interface LogEntry {
+  n: number
+  /** Where the action went or came from. */
+  where: 'tap' | 'client' | 'to server' | 'from server' | 'server (preview)' | 'effect'
+  type: string
+  payload: unknown
+}
+
+const LOG_SIZE = 20
+let logCounter = 0
 
 /**
- * A card from the server, live. Its blocks bind to the card's data, which
- * the server pushes down as people act. When the card carries a wasm
- * module, each action runs through the module first, on this device: it can
- * redraw the card at once, and decides whether the action goes to the server.
+ * Each card's local state and action log on this device, kept across page
+ * changes and reloads: local state belongs to the device, not to the page.
  */
-export function LiveCard({ card, viewer, onUpdate, onRemove, preview }: LiveCardProps) {
+const deviceStore = {
+  memory: new Map<string, { local: unknown; log: LogEntry[] }>(),
+  get(key: string | null) {
+    if (!key) return undefined
+    let found = this.memory.get(key)
+    if (!found) {
+      try {
+        const saved = localStorage.getItem(`card:${key}`)
+        if (saved) found = { local: JSON.parse(saved), log: [] }
+      } catch {
+        // No storage (private window, blocked): memory only.
+      }
+      if (found) this.memory.set(key, found)
+    }
+    return found
+  },
+  set(key: string | null, patch: Partial<{ local: unknown; log: LogEntry[] }>) {
+    if (!key) return
+    const next = { local: null, log: [], ...this.memory.get(key), ...patch }
+    this.memory.set(key, next)
+    if ('local' in patch) {
+      try {
+        localStorage.setItem(`card:${key}`, JSON.stringify(next.local))
+      } catch {
+        // Memory only.
+      }
+    }
+  },
+}
+
+const actor = (viewer: Viewer) => ({ did: viewer.did, handle: viewer.handle })
+
+/**
+ * A card from the server, live, as a little redux store on each side.
+ *
+ * - Shared state comes from the server; only the server's reducer changes it.
+ * - Local state lives on this device; only the client reducer changes it.
+ * - A tap becomes an action, reduced here first (`env: "client"`). Whatever
+ *   the client reducer emits goes to the server, which reduces it with the
+ *   same module (`env: "server"`), and may emit actions back down to us.
+ * - The module's view turns shared + local state into the card-kit UI and
+ *   the data its bindings read, after every change.
+ */
+export function LiveCard({ card, viewer, onUpdate, onRemove, canRemove, preview }: LiveCardProps) {
+  const moduleUrl = card.module ?? STD_MODULE
   // One resolver per card: new data is pushed into it, so bound blocks update in place.
   // biome-ignore lint/correctness/useExhaustiveDependencies: a new card id is a new resolver
-  const resolver = useMemo(() => new CardDataResolver(card.data), [card.id])
-  useEffect(() => resolver.set(card.data), [resolver, card.data])
+  const resolver = useMemo(() => new CardDataResolver({}), [card.id])
 
-  const [moduleState, setModuleState] = useState<ModuleState>(card.module ? { kind: 'loading' } : { kind: 'none' })
-  const [moduleUi, setModuleUi] = useState<CardUi | null>(null)
-  const local = useRef<unknown>(null)
-  const latest = useRef({ card, moduleUi })
-  latest.current = { card, moduleUi }
+  // Where this card's local state is kept on this device (a preview keeps none).
+  const storeKey = preview ? null : `${viewer.did}|${card.id}`
+  const [moduleState, setModuleState] = useState<ModuleState>({ kind: 'loading' })
+  const [local, setLocalState] = useState<unknown>(() => deviceStore.get(storeKey)?.local ?? null)
+  // In a preview, the shared state the in-browser "server" keeps.
+  const [previewShared, setPreviewShared] = useState<unknown>(null)
+  const shared = preview ? previewShared : card.state
+
+  // The latest of everything, for callbacks that outlive a render.
+  const latest = useRef({ card, local, shared })
+  latest.current = { card, local, shared }
+
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showSource, setShowSource] = useState(false)
-  const [lastRun, setLastRun] = useState<number | null>(null)
+  // How long the module took last time, in ms: shown on the card's chip.
+  const lastRun = useRef<number | null>(null)
+  const [log, setLog] = useState<LogEntry[]>(() => deviceStore.get(storeKey)?.log ?? [])
 
-  const apply = (out: ModuleOutput) => {
-    if (out.local !== undefined) local.current = out.local
-    if (out.ui && typeof out.ui === 'object') setModuleUi(out.ui)
+  const record = useCallback(
+    (where: LogEntry['where'], type: string, payload: unknown) => {
+      setLog((l) => {
+        const next = [{ n: ++logCounter, where, type, payload }, ...l].slice(0, LOG_SIZE)
+        deviceStore.set(storeKey, { log: next })
+        return next
+      })
+    },
+    [storeKey],
+  )
+
+  const setLocal = (next: unknown) => {
+    latest.current.local = next
+    deviceStore.set(storeKey, { local: next })
+    setLocalState(next)
+  }
+  const setShared = (next: unknown) => {
+    latest.current.shared = next
+    setPreviewShared(next)
   }
 
-  const run = (module: CardModule, event: Parameters<CardModule['update']>[0]['event']): ModuleOutput => {
-    const { card, moduleUi } = latest.current
+  const timed = <T,>(f: () => T): T => {
     const started = performance.now()
-    const out = module.update({
-      event,
-      ui: moduleUi ?? card.ui,
-      base: card.ui,
-      data: card.data,
-      local: local.current,
-      viewer,
-    })
-    setLastRun(performance.now() - started)
-    apply(out)
-    return out
+    try {
+      return f()
+    } finally {
+      lastRun.current = performance.now() - started
+    }
   }
 
-  // Load the module, and let it draw the card.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: runs once per module URL
-  useEffect(() => {
-    if (!card.module) {
-      setModuleState({ kind: 'none' })
-      setModuleUi(null)
+  /** Reduces an action on this device, and returns what it emitted. */
+  const reduceClient = (module: CardModule, action: Action): Action[] => {
+    const { card, local, shared } = latest.current
+    const out: ReduceOutput = timed(() =>
+      module.reduce({
+        env: 'client',
+        state: local,
+        shared,
+        action,
+        config: card.config,
+        base: card.ui,
+        context: card.context,
+        viewer,
+      }),
+    )
+    if (out.state !== undefined) setLocal(out.state)
+    return Array.isArray(out.actions) ? out.actions : []
+  }
+
+  /**
+   * The preview's stand-in for the server: the same module, reducing with
+   * `env: "server"` in the browser. Its emitted actions come back to this
+   * device as the server's would; effects (`@…`) need the real server.
+   */
+  const reduceServerHere = (module: CardModule, action: Action) => {
+    const { card, shared } = latest.current
+    const stamped: Action = {
+      ...action,
+      meta: {
+        ...action.meta,
+        id: `preview-${++logCounter}`,
+        actor: actor(viewer),
+        at: Date.now(),
+        origin: action.type === '@init' ? 'platform' : 'client',
+      },
+    }
+    const out: ReduceOutput = module.reduce({
+      env: 'server',
+      state: shared,
+      shared,
+      action: stamped,
+      config: card.config,
+      base: card.ui,
+      context: {},
+    })
+    if (out.state !== undefined) setShared(out.state)
+    for (const emitted of out.actions ?? []) {
+      if (emitted.type.startsWith('@')) {
+        record('effect', emitted.type, emitted.payload)
+        continue
+      }
+      if (emitted.to && emitted.to !== viewer.did) continue
+      record('from server', emitted.type, emitted.payload)
+      reduceClient(module, { ...emitted, meta: { ...emitted.meta, origin: 'server' } })
+    }
+  }
+
+  const send = (module: CardModule, emitted: Action[], from?: ActionIntent) => {
+    if (emitted.length === 0) return
+    for (const a of emitted) record(preview ? 'server (preview)' : 'to server', a.type, a.payload)
+    if (preview) {
+      for (const a of emitted) reduceServerHere(module, a)
       return
     }
+    setBusy(true)
+    setError(null)
+    cards
+      .dispatch(
+        card.id,
+        emitted.map((a) => ({
+          type: a.type,
+          payload: a.payload ?? null,
+          meta: {
+            blockId: a.meta?.blockId ?? from?.blockId,
+            item: a.meta?.item ?? from?.item,
+          },
+        })),
+      )
+      .then(onUpdate)
+      .catch((err: Error) => setError(err.message))
+      .finally(() => setBusy(false))
+  }
+
+  // Load the module, then start this device's local state (and, in a
+  // preview, the stand-in server's shared state).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs once per module and card
+  useEffect(() => {
     let live = true
     setModuleState({ kind: 'loading' })
-    loadModule(card.module)
+    loadModule(moduleUrl)
       .then((module) => {
         if (!live) return
-        setModuleState({ kind: 'ready', module })
-        run(module, { type: 'init' })
+        try {
+          if (preview) reduceServerHere(module, { type: '@init', payload: null })
+          // A card this device has seen before picks up where it left off.
+          const saved = deviceStore.get(storeKey)
+          if (saved) {
+            setLocal(saved.local)
+          } else {
+            setLocal(null)
+            const init: Action = { type: '@init', payload: null, meta: { origin: 'platform' } }
+            const emitted = reduceClient(module, init)
+            send(module, emitted)
+          }
+          setModuleState({ kind: 'ready', module })
+        } catch (err) {
+          console.error(err)
+          setModuleState({ kind: 'failed' })
+        }
       })
       .catch((err) => {
         console.error(err)
@@ -141,51 +332,77 @@ export function LiveCard({ card, viewer, onUpdate, onRemove, preview }: LiveCard
     return () => {
       live = false
     }
-  }, [card.module])
+  }, [moduleUrl, card.id, preview, storeKey])
 
-  // The server's data changed: the module may want to redraw.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reacts to new data only
+  // Actions the server emitted for this card, reduced on this device.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reduceClient reads the latest through a ref
   useEffect(() => {
-    if (moduleState.kind === 'ready') run(moduleState.module, { type: 'data' })
-  }, [card.data])
+    if (moduleState.kind !== 'ready' || preview) return
+    const module = moduleState.module
+    return serverActions.listen(card.id, (actions) => {
+      for (const action of actions) {
+        if (action.to && action.to !== viewer.did) continue
+        record('from server', action.type, action.payload)
+        try {
+          send(module, reduceClient(module, { ...action, meta: { ...action.meta, origin: 'server' } }))
+        } catch (err) {
+          console.error(err)
+          setError('This card’s module failed.')
+        }
+      }
+    })
+  }, [card.id, moduleState, preview, viewer.did])
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: run reads the latest card through a ref
+  // The view: shared + local state (and the platform's context) in, card-kit UI and bound data out.
+  const view = useMemo(() => {
+    const fallback = { ui: card.ui, data: { ...(shared as object), viewer } }
+    if (moduleState.kind !== 'ready') return { ...fallback, failed: false }
+    try {
+      const started = performance.now()
+      const out = moduleState.module.view({
+        shared,
+        local,
+        config: card.config,
+        base: card.ui,
+        context: card.context,
+        viewer,
+      })
+      lastRun.current = performance.now() - started
+      return {
+        ui: (out.ui && typeof out.ui === 'object' ? out.ui : card.ui) as CardUi,
+        data: out.data ?? fallback.data,
+        failed: false,
+      }
+    } catch (err) {
+      console.error(err)
+      return { ...fallback, failed: true }
+    }
+  }, [moduleState, shared, local, card.config, card.ui, card.context, viewer])
+
+  useEffect(() => resolver.set(view.data), [resolver, view.data])
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: send and reduceClient read the latest through a ref
   const host = useMemo<ActionHost>(
     () => ({
       onAction(intent: ActionIntent) {
-        let actionId = intent.actionId
-        let value = intent.value
-        const current = moduleState
-        if (current.kind === 'ready') {
-          let out: ModuleOutput
-          try {
-            out = run(current.module, {
-              type: 'action',
-              blockId: intent.blockId,
-              actionId,
-              value,
-              ...(intent.item ? { item: intent.item } : {}),
-            })
-          } catch (err) {
-            console.error(err)
-            setError('This card’s module failed.')
-            return
-          }
-          const forward = out.forward ?? true
-          if (forward === false) return
-          if (typeof forward === 'object') {
-            actionId = forward.actionId ?? actionId
-            if ('value' in forward) value = forward.value
-          }
+        if (moduleState.kind !== 'ready') return
+        const module = moduleState.module
+        const action: Action = {
+          type: intent.actionId,
+          payload: intent.value ?? null,
+          meta: { origin: 'ui', blockId: intent.blockId, ...(intent.item ? { item: intent.item } : {}) },
         }
-        if (preview) return
-        setBusy(true)
-        setError(null)
-        cards
-          .act({ cardId: card.id, blockId: intent.blockId, actionId, value, item: intent.item })
-          .then(onUpdate)
-          .catch((err: Error) => setError(err.message))
-          .finally(() => setBusy(false))
+        record('tap', action.type, action.payload)
+        let emitted: Action[]
+        try {
+          emitted = reduceClient(module, action)
+        } catch (err) {
+          console.error(err)
+          setError('This card’s module failed.')
+          return
+        }
+        if (emitted.length === 0) record('client', action.type, 'kept on this device')
+        send(module, emitted, intent)
       },
     }),
     [card.id, moduleState, onUpdate, preview],
@@ -195,28 +412,32 @@ export function LiveCard({ card, viewer, onUpdate, onRemove, preview }: LiveCard
     () => ({ uri: `eventside:card/${card.id}`, cid: String(card.version) }),
     [card.id, card.version],
   )
-  const shown = moduleUi ?? card.ui
-  const mine = card.author === viewer.did
+  // The server names the standard module by its alias.
+  const custom = card.module !== null && !card.module.includes('hash=std')
 
   return (
     <div className="live-card" data-card-id={card.id} data-busy={busy || undefined}>
       <SourceResolverContext value={resolver}>
         <ActionContext value={host}>
-          <BlockCard cardRef={cardRef} card={shown} surface="feed" />
+          <BlockCard cardRef={cardRef} card={view.ui} surface="feed" />
         </ActionContext>
       </SourceResolverContext>
       <div className="live-card__meta">
-        {card.module && (
-          <span
-            className={`live-card__chip live-card__chip--${moduleState.kind}`}
-            title="This card carries a wasm module that answers actions on your device"
-          >
-            wasm
-            {moduleState.kind === 'ready' && lastRun !== null && ` · ${lastRun < 1 ? '<1' : lastRun.toFixed(0)}ms`}
-            {moduleState.kind === 'loading' && ' · loading'}
-            {moduleState.kind === 'failed' && ' · failed'}
-          </span>
-        )}
+        <span
+          className={`live-card__chip live-card__chip--${view.failed ? 'failed' : moduleState.kind}`}
+          title={
+            custom
+              ? 'This card carries its own wasm module, run here and on the server'
+              : 'This card runs the standard wasm module, here and on the server'
+          }
+        >
+          {custom ? 'wasm' : 'std'}
+          {moduleState.kind === 'ready' &&
+            lastRun.current !== null &&
+            ` · ${lastRun.current < 1 ? '<1' : lastRun.current.toFixed(0)}ms`}
+          {moduleState.kind === 'loading' && ' · loading'}
+          {(moduleState.kind === 'failed' || view.failed) && ' · failed'}
+        </span>
         {busy && <span className="live-card__sync">sending…</span>}
         {error && (
           <span className="live-card__error" role="alert">
@@ -224,10 +445,15 @@ export function LiveCard({ card, viewer, onUpdate, onRemove, preview }: LiveCard
           </span>
         )}
         <span className="live-card__spacer" />
+        {card.eventId && card.context.event && (
+          <Link className="live-card__open" to={`/e/${card.eventId}`}>
+            Open plan →
+          </Link>
+        )}
         <button type="button" className="live-card__link" onClick={() => setShowSource((s) => !s)}>
           {showSource ? 'Hide source' : 'Source'}
         </button>
-        {mine && onRemove && (
+        {canRemove && onRemove && (
           <button
             type="button"
             className="live-card__link"
@@ -242,25 +468,45 @@ export function LiveCard({ card, viewer, onUpdate, onRemove, preview }: LiveCard
       {showSource && (
         <div className="live-card__source">
           <details open>
-            <summary>Card kit UI{moduleUi ? ' (as drawn by the module)' : ''}</summary>
-            <pre>{JSON.stringify(shown, null, 2)}</pre>
+            <summary>Actions</summary>
+            {log.length === 0 ? (
+              <p className="gx-muted">Tap something on the card.</p>
+            ) : (
+              <ol className="live-card__log">
+                {log.map((e) => (
+                  <li key={e.n}>
+                    <span className={`live-card__where live-card__where--${e.where.replace(/[^a-z]+/g, '-')}`}>
+                      {e.where}
+                    </span>
+                    <code>{e.type}</code>
+                    {e.payload !== null && e.payload !== undefined && (
+                      <code className="live-card__payload">{JSON.stringify(e.payload)}</code>
+                    )}
+                  </li>
+                ))}
+              </ol>
+            )}
           </details>
           <details open>
-            <summary>Data from the server</summary>
-            <pre>{JSON.stringify(card.data, null, 2)}</pre>
+            <summary>Shared state {preview ? '(the in-browser server)' : '(from the server)'}</summary>
+            <pre>{JSON.stringify(shared, null, 2)}</pre>
           </details>
-          {Object.keys(card.reducers).length > 0 && (
-            <details>
-              <summary>Reducers</summary>
-              <pre>{JSON.stringify(card.reducers, null, 2)}</pre>
-            </details>
-          )}
-          {moduleUi && local.current !== null && (
-            <details>
-              <summary>Module state (this device only)</summary>
-              <pre>{JSON.stringify(local.current, null, 2)}</pre>
-            </details>
-          )}
+          <details>
+            <summary>Local state (this device only)</summary>
+            <pre>{JSON.stringify(local, null, 2)}</pre>
+          </details>
+          <details>
+            <summary>Context</summary>
+            <pre>{JSON.stringify(card.context, null, 2)}</pre>
+          </details>
+          <details>
+            <summary>Config</summary>
+            <pre>{JSON.stringify(card.config, null, 2)}</pre>
+          </details>
+          <details>
+            <summary>Card kit UI{view.ui !== card.ui ? ' (as drawn by the view)' : ''}</summary>
+            <pre>{JSON.stringify(view.ui, null, 2)}</pre>
+          </details>
         </div>
       )}
     </div>

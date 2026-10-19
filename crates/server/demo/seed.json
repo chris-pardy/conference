@@ -1,9 +1,4 @@
 {
-  "group": {
-    "name": "AtmosphereConf 2027",
-    "description": "Amsterdam · 29 April – 2 May 2027",
-    "invite": "ATMOS27"
-  },
   "people": [
     {
       "did": "did:plc:sannedevries",
@@ -29,595 +24,778 @@
       "did": "did:plc:noorsmit",
       "handle": "noor.example",
       "displayName": "Noor Smit"
+    },
+    {
+      "did": "did:plc:atmosphereconf",
+      "handle": "atmosphereconf.example",
+      "displayName": "AtmosphereConf"
     }
   ],
-  "feeds": [
+  "events": [
     {
-      "slug": "main",
-      "name": "Main stage",
-      "cards": [
+      "id": "atmosphereconf",
+      "title": "AtmosphereConf 2027",
+      "description": "Four days of talks, hacking and borrels on the atmosphere. Say you're going to see the main stage, the hallway and everyone's plans.",
+      "startsAt": "2027-04-29T09:00:00+02:00",
+      "endsAt": "2027-05-02T18:00:00+02:00",
+      "location": "Amsterdam",
+      "host": "did:plc:atmosphereconf",
+      "going": [
+        "did:plc:sannedevries",
+        "did:plc:jorisbakker",
+        "did:plc:femkevisser",
+        "did:plc:pieterjansen",
+        "did:plc:noorsmit"
+      ],
+      "feeds": [
         {
-          "ui": {
-            "$type": "app.eventside.block.card",
-            "blocks": [
-              {
-                "$type": "app.eventside.block.defs#header",
-                "text": "Welkom in Amsterdam!"
-              },
-              {
-                "$type": "app.eventside.block.defs#richText",
-                "text": "Four days of talks, hacking and borrels on the atmosphere. This feed is the main stage: polls, questions and announcements show up here as they happen, live for everyone."
-              },
-              {
-                "$type": "app.eventside.block.defs#time",
-                "mode": "countdown",
-                "label": "Opening keynote",
-                "at": "2027-04-30T09:30:00+02:00",
-                "end": "2027-04-30T10:30:00+02:00"
-              },
-              {
-                "$type": "app.eventside.block.defs#room",
-                "name": "Main hall",
-                "detail": "Ground floor, past the coffee bar"
-              }
-            ],
-            "sources": [
-              {
-                "name": "data",
-                "ref": {
-                  "$type": "app.eventside.block.defs#viewSource",
-                  "view": "app.eventside.card.data"
-                }
-              }
-            ],
-            "timeZone": "Europe/Amsterdam",
-            "fallbackText": "Welcome to AtmosphereConf",
-            "createdAt": "2027-04-29T08:00:00.000Z"
-          }
-        },
-        {
-          "ui": {
-            "$type": "app.eventside.block.card",
-            "blocks": [
-              {
-                "$type": "app.eventside.block.defs#header",
-                "text": "What should the keynote dig into?"
-              },
-              {
-                "$type": "app.eventside.block.defs#context",
-                "text": "One vote each. Change your mind any time before 09:30."
-              },
-              {
-                "$type": "app.eventside.block.defs#buttonGroup",
-                "id": "topic",
-                "label": "Pick a topic",
-                "action": "topic",
-                "buttons": [
+          "slug": "main",
+          "name": "Main stage",
+          "cards": [
+            {
+              "ui": {
+                "$type": "app.eventside.block.card",
+                "blocks": [
                   {
-                    "label": "Spaces and private data",
-                    "value": "spaces"
+                    "$type": "app.eventside.block.defs#header",
+                    "text": "Welkom in Amsterdam!"
                   },
                   {
-                    "label": "Moderation at scale",
-                    "value": "moderation"
+                    "$type": "app.eventside.block.defs#richText",
+                    "text": "Four days of talks, hacking and borrels on the atmosphere. This feed is the main stage: polls, questions and announcements show up here as they happen, live for everyone."
                   },
                   {
-                    "label": "Building on the firehose",
-                    "value": "firehose"
-                  }
-                ]
-              },
-              {
-                "$type": "app.eventside.block.defs#progress",
-                "label": "Spaces and private data",
-                "max": 100,
-                "bind": {
-                  "value": {
-                    "source": "data",
-                    "path": "/topic/percent/spaces"
-                  }
-                }
-              },
-              {
-                "$type": "app.eventside.block.defs#progress",
-                "label": "Moderation at scale",
-                "max": 100,
-                "bind": {
-                  "value": {
-                    "source": "data",
-                    "path": "/topic/percent/moderation"
-                  }
-                }
-              },
-              {
-                "$type": "app.eventside.block.defs#progress",
-                "label": "Building on the firehose",
-                "max": 100,
-                "bind": {
-                  "value": {
-                    "source": "data",
-                    "path": "/topic/percent/firehose"
-                  }
-                }
-              },
-              {
-                "$type": "app.eventside.block.defs#stat",
-                "label": "people voted",
-                "bind": {
-                  "value": {
-                    "source": "data",
-                    "path": "/topic/total"
-                  }
-                }
-              }
-            ],
-            "sources": [
-              {
-                "name": "data",
-                "ref": {
-                  "$type": "app.eventside.block.defs#viewSource",
-                  "view": "app.eventside.card.data"
-                }
-              }
-            ],
-            "timeZone": "Europe/Amsterdam",
-            "fallbackText": "Keynote poll",
-            "createdAt": "2027-04-29T08:00:00.000Z"
-          },
-          "reducers": {
-            "topic": "vote"
-          },
-          "actions": [
-            {
-              "did": "did:plc:sannedevries",
-              "blockId": "topic",
-              "actionId": "topic",
-              "value": "spaces"
-            },
-            {
-              "did": "did:plc:jorisbakker",
-              "blockId": "topic",
-              "actionId": "topic",
-              "value": "firehose"
-            },
-            {
-              "did": "did:plc:femkevisser",
-              "blockId": "topic",
-              "actionId": "topic",
-              "value": "spaces"
-            },
-            {
-              "did": "did:plc:pieterjansen",
-              "blockId": "topic",
-              "actionId": "topic",
-              "value": "moderation"
-            },
-            {
-              "did": "did:plc:noorsmit",
-              "blockId": "topic",
-              "actionId": "topic",
-              "value": "spaces"
-            }
-          ]
-        },
-        {
-          "ui": {
-            "$type": "app.eventside.block.card",
-            "blocks": [
-              {
-                "$type": "app.eventside.block.defs#header",
-                "text": "Ask the keynote"
-              },
-              {
-                "$type": "app.eventside.block.defs#textInput",
-                "id": "question",
-                "label": "Your question",
-                "placeholder": "What would you like to ask?",
-                "required": true,
-                "maxLength": 280,
-                "multiline": true
-              },
-              {
-                "$type": "app.eventside.block.defs#submit",
-                "id": "ask",
-                "label": "Ask",
-                "action": "ask",
-                "variant": "primary"
-              },
-              {
-                "$type": "app.eventside.block.defs#divider"
-              },
-              {
-                "$type": "app.eventside.block.defs#list",
-                "items": {
-                  "source": "data",
-                  "path": "/ask/items"
-                },
-                "key": "/id",
-                "empty": "No questions yet. Ask the first one.",
-                "template": [
+                    "$type": "app.eventside.block.defs#time",
+                    "mode": "countdown",
+                    "label": "Opening keynote",
+                    "at": "2027-04-30T09:30:00+02:00",
+                    "end": "2027-04-30T10:30:00+02:00"
+                  },
                   {
-                    "$type": "app.eventside.block.defs#section",
-                    "blocks": [
+                    "$type": "app.eventside.block.defs#room",
+                    "name": "Main hall",
+                    "detail": "Ground floor, past the coffee bar"
+                  }
+                ],
+                "sources": [
+                  {
+                    "name": "data",
+                    "ref": {
+                      "$type": "app.eventside.block.defs#viewSource",
+                      "view": "app.eventside.card.data"
+                    }
+                  }
+                ],
+                "timeZone": "Europe/Amsterdam",
+                "fallbackText": "Welcome to AtmosphereConf",
+                "createdAt": "2027-04-29T08:00:00.000Z"
+              }
+            },
+            {
+              "ui": {
+                "$type": "app.eventside.block.card",
+                "blocks": [
+                  {
+                    "$type": "app.eventside.block.defs#header",
+                    "text": "What should the keynote dig into?"
+                  },
+                  {
+                    "$type": "app.eventside.block.defs#context",
+                    "text": "One vote each. Change your mind any time before 09:30."
+                  },
+                  {
+                    "$type": "app.eventside.block.defs#buttonGroup",
+                    "id": "topic",
+                    "label": "Pick a topic",
+                    "action": "topic",
+                    "buttons": [
                       {
-                        "$type": "app.eventside.block.defs#richText",
-                        "bind": {
-                          "text": {
-                            "source": "$item",
-                            "path": "/question"
-                          }
-                        }
+                        "label": "Spaces and private data",
+                        "value": "spaces"
                       },
                       {
-                        "$type": "app.eventside.block.defs#columns",
-                        "columns": [
+                        "label": "Moderation at scale",
+                        "value": "moderation"
+                      },
+                      {
+                        "label": "Building on the firehose",
+                        "value": "firehose"
+                      }
+                    ]
+                  },
+                  {
+                    "$type": "app.eventside.block.defs#progress",
+                    "label": "Spaces and private data",
+                    "max": 100,
+                    "bind": {
+                      "value": {
+                        "source": "data",
+                        "path": "/topic/percent/spaces"
+                      }
+                    }
+                  },
+                  {
+                    "$type": "app.eventside.block.defs#progress",
+                    "label": "Moderation at scale",
+                    "max": 100,
+                    "bind": {
+                      "value": {
+                        "source": "data",
+                        "path": "/topic/percent/moderation"
+                      }
+                    }
+                  },
+                  {
+                    "$type": "app.eventside.block.defs#progress",
+                    "label": "Building on the firehose",
+                    "max": 100,
+                    "bind": {
+                      "value": {
+                        "source": "data",
+                        "path": "/topic/percent/firehose"
+                      }
+                    }
+                  },
+                  {
+                    "$type": "app.eventside.block.defs#stat",
+                    "label": "people voted",
+                    "bind": {
+                      "value": {
+                        "source": "data",
+                        "path": "/topic/total"
+                      }
+                    }
+                  }
+                ],
+                "sources": [
+                  {
+                    "name": "data",
+                    "ref": {
+                      "$type": "app.eventside.block.defs#viewSource",
+                      "view": "app.eventside.card.data"
+                    }
+                  }
+                ],
+                "timeZone": "Europe/Amsterdam",
+                "fallbackText": "Keynote poll",
+                "createdAt": "2027-04-29T08:00:00.000Z"
+              },
+              "config": {
+                "topic": "vote"
+              },
+              "actions": [
+                {
+                  "did": "did:plc:sannedevries",
+                  "type": "topic",
+                  "payload": "spaces",
+                  "blockId": "topic"
+                },
+                {
+                  "did": "did:plc:jorisbakker",
+                  "type": "topic",
+                  "payload": "firehose",
+                  "blockId": "topic"
+                },
+                {
+                  "did": "did:plc:femkevisser",
+                  "type": "topic",
+                  "payload": "spaces",
+                  "blockId": "topic"
+                },
+                {
+                  "did": "did:plc:pieterjansen",
+                  "type": "topic",
+                  "payload": "moderation",
+                  "blockId": "topic"
+                },
+                {
+                  "did": "did:plc:noorsmit",
+                  "type": "topic",
+                  "payload": "spaces",
+                  "blockId": "topic"
+                }
+              ]
+            },
+            {
+              "ui": {
+                "$type": "app.eventside.block.card",
+                "blocks": [
+                  {
+                    "$type": "app.eventside.block.defs#header",
+                    "text": "Ask the keynote"
+                  },
+                  {
+                    "$type": "app.eventside.block.defs#textInput",
+                    "id": "question",
+                    "label": "Your question",
+                    "placeholder": "What would you like to ask?",
+                    "required": true,
+                    "maxLength": 280,
+                    "multiline": true
+                  },
+                  {
+                    "$type": "app.eventside.block.defs#submit",
+                    "id": "ask",
+                    "label": "Ask",
+                    "action": "ask",
+                    "variant": "primary"
+                  },
+                  {
+                    "$type": "app.eventside.block.defs#divider"
+                  },
+                  {
+                    "$type": "app.eventside.block.defs#list",
+                    "items": {
+                      "source": "data",
+                      "path": "/ask/items"
+                    },
+                    "key": "/id",
+                    "empty": "No questions yet. Ask the first one.",
+                    "template": [
+                      {
+                        "$type": "app.eventside.block.defs#section",
+                        "blocks": [
                           {
-                            "blocks": [
+                            "$type": "app.eventside.block.defs#richText",
+                            "bind": {
+                              "text": {
+                                "source": "$item",
+                                "path": "/question"
+                              }
+                            }
+                          },
+                          {
+                            "$type": "app.eventside.block.defs#columns",
+                            "columns": [
                               {
-                                "$type": "app.eventside.block.defs#person",
-                                "bind": {
-                                  "did": {
-                                    "source": "$item",
-                                    "path": "/did"
+                                "blocks": [
+                                  {
+                                    "$type": "app.eventside.block.defs#person",
+                                    "bind": {
+                                      "did": {
+                                        "source": "$item",
+                                        "path": "/did"
+                                      }
+                                    }
                                   }
-                                }
+                                ]
+                              },
+                              {
+                                "blocks": [
+                                  {
+                                    "$type": "app.eventside.block.defs#stat",
+                                    "label": "upvotes",
+                                    "bind": {
+                                      "value": {
+                                        "source": "$item",
+                                        "path": "/votes"
+                                      }
+                                    }
+                                  }
+                                ]
                               }
                             ]
                           },
                           {
-                            "blocks": [
-                              {
-                                "$type": "app.eventside.block.defs#stat",
-                                "label": "upvotes",
-                                "bind": {
-                                  "value": {
-                                    "source": "$item",
-                                    "path": "/votes"
-                                  }
-                                }
-                              }
-                            ]
+                            "$type": "app.eventside.block.defs#button",
+                            "id": "up",
+                            "label": "Upvote",
+                            "action": "up",
+                            "value": "up"
                           }
                         ]
-                      },
-                      {
-                        "$type": "app.eventside.block.defs#button",
-                        "id": "up",
-                        "label": "Upvote",
-                        "action": "up",
-                        "value": "up"
                       }
                     ]
                   }
-                ]
-              }
-            ],
-            "sources": [
-              {
-                "name": "data",
-                "ref": {
-                  "$type": "app.eventside.block.defs#viewSource",
-                  "view": "app.eventside.card.data"
+                ],
+                "sources": [
+                  {
+                    "name": "data",
+                    "ref": {
+                      "$type": "app.eventside.block.defs#viewSource",
+                      "view": "app.eventside.card.data"
+                    }
+                  }
+                ],
+                "timeZone": "Europe/Amsterdam",
+                "fallbackText": "Ask the keynote",
+                "createdAt": "2027-04-29T08:00:00.000Z"
+              },
+              "config": {
+                "ask": "append",
+                "up": "upvote:ask"
+              },
+              "actions": [
+                {
+                  "did": "did:plc:sannedevries",
+                  "type": "ask",
+                  "payload": {
+                    "question": "Will spaces work with existing PDS hosts, or do we all need to upgrade?"
+                  },
+                  "blockId": "ask",
+                  "as": "q1"
+                },
+                {
+                  "did": "did:plc:pieterjansen",
+                  "type": "ask",
+                  "payload": {
+                    "question": "How do you think about moderation for private groups?"
+                  },
+                  "blockId": "ask",
+                  "as": "q2"
+                },
+                {
+                  "did": "did:plc:noorsmit",
+                  "type": "ask",
+                  "payload": {
+                    "question": "Is the talk being recorded?"
+                  },
+                  "blockId": "ask",
+                  "as": "q3"
+                },
+                {
+                  "did": "did:plc:jorisbakker",
+                  "type": "up",
+                  "payload": "up",
+                  "blockId": "up",
+                  "on": "q1"
+                },
+                {
+                  "did": "did:plc:femkevisser",
+                  "type": "up",
+                  "payload": "up",
+                  "blockId": "up",
+                  "on": "q1"
+                },
+                {
+                  "did": "did:plc:noorsmit",
+                  "type": "up",
+                  "payload": "up",
+                  "blockId": "up",
+                  "on": "q1"
+                },
+                {
+                  "did": "did:plc:sannedevries",
+                  "type": "up",
+                  "payload": "up",
+                  "blockId": "up",
+                  "on": "q2"
                 }
+              ]
+            }
+          ]
+        },
+        {
+          "slug": "hallway",
+          "name": "Hallway",
+          "cards": [
+            {
+              "ui": {
+                "$type": "app.eventside.block.card",
+                "blocks": [
+                  {
+                    "$type": "app.eventside.block.defs#header",
+                    "text": "Pub quiz: the atmosphere edition"
+                  },
+                  {
+                    "$type": "app.eventside.block.defs#context",
+                    "text": "Loading the quiz…"
+                  }
+                ],
+                "sources": [
+                  {
+                    "name": "data",
+                    "ref": {
+                      "$type": "app.eventside.block.defs#viewSource",
+                      "view": "app.eventside.card.data"
+                    }
+                  }
+                ],
+                "timeZone": "Europe/Amsterdam",
+                "fallbackText": "Pub quiz",
+                "createdAt": "2027-04-29T08:00:00.000Z"
+              },
+              "module": "quiz",
+              "actions": [
+                {
+                  "did": "did:plc:jorisbakker",
+                  "type": "submit",
+                  "payload": {
+                    "answers": [
+                      "Authenticated Transfer",
+                      "A decentralized identifier",
+                      "In your PDS repo",
+                      "Schiphol",
+                      "Mayonnaise"
+                    ]
+                  }
+                },
+                {
+                  "did": "did:plc:femkevisser",
+                  "type": "submit",
+                  "payload": {
+                    "answers": [
+                      "Authenticated Transfer",
+                      "A decentralized identifier",
+                      "In your PDS repo",
+                      "Zaventem",
+                      "Mayonnaise"
+                    ]
+                  }
+                },
+                {
+                  "did": "did:plc:noorsmit",
+                  "type": "submit",
+                  "payload": {
+                    "answers": [
+                      "Authenticated Transfer",
+                      "A decentralized identifier",
+                      "In your PDS repo",
+                      "Schiphol",
+                      "Mustard"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "ui": {
+                "$type": "app.eventside.block.card",
+                "blocks": [
+                  {
+                    "$type": "app.eventside.block.defs#header",
+                    "text": "Who buys the next round?"
+                  },
+                  {
+                    "$type": "app.eventside.block.defs#context",
+                    "text": "Loading the dice…"
+                  }
+                ],
+                "sources": [
+                  {
+                    "name": "data",
+                    "ref": {
+                      "$type": "app.eventside.block.defs#viewSource",
+                      "view": "app.eventside.card.data"
+                    }
+                  }
+                ],
+                "timeZone": "Europe/Amsterdam",
+                "fallbackText": "Dice roller",
+                "createdAt": "2027-04-29T08:00:00.000Z"
+              },
+              "module": "dice",
+              "actions": [
+                {
+                  "did": "did:plc:sannedevries",
+                  "type": "share",
+                  "payload": {
+                    "a": 3,
+                    "b": 1
+                  }
+                },
+                {
+                  "did": "did:plc:pieterjansen",
+                  "type": "share",
+                  "payload": {
+                    "a": 6,
+                    "b": 5
+                  }
+                }
+              ]
+            },
+            {
+              "ui": {
+                "$type": "app.eventside.block.card",
+                "blocks": [
+                  {
+                    "$type": "app.eventside.block.defs#header",
+                    "text": "Wifi"
+                  },
+                  {
+                    "$type": "app.eventside.block.defs#copyable",
+                    "label": "Network",
+                    "value": "AtmosphereConf"
+                  },
+                  {
+                    "$type": "app.eventside.block.defs#copyable",
+                    "label": "Password",
+                    "value": "stroopwafel2027"
+                  },
+                  {
+                    "$type": "app.eventside.block.defs#context",
+                    "text": "The network is on every floor and in the courtyard."
+                  }
+                ],
+                "sources": [
+                  {
+                    "name": "data",
+                    "ref": {
+                      "$type": "app.eventside.block.defs#viewSource",
+                      "view": "app.eventside.card.data"
+                    }
+                  }
+                ],
+                "timeZone": "Europe/Amsterdam",
+                "fallbackText": "Wifi details",
+                "createdAt": "2027-04-29T08:00:00.000Z"
               }
-            ],
-            "timeZone": "Europe/Amsterdam",
-            "fallbackText": "Ask the keynote",
-            "createdAt": "2027-04-29T08:00:00.000Z"
-          },
-          "reducers": {
-            "ask": "append",
-            "up": "upvote:ask"
-          },
-          "actions": [
-            {
-              "did": "did:plc:sannedevries",
-              "blockId": "ask",
-              "actionId": "ask",
-              "value": {
-                "question": "Will spaces work with existing PDS hosts, or do we all need to upgrade?"
-              },
-              "as": "q1"
-            },
-            {
-              "did": "did:plc:pieterjansen",
-              "blockId": "ask",
-              "actionId": "ask",
-              "value": {
-                "question": "How do you think about moderation for private groups?"
-              },
-              "as": "q2"
-            },
-            {
-              "did": "did:plc:noorsmit",
-              "blockId": "ask",
-              "actionId": "ask",
-              "value": {
-                "question": "Is the talk being recorded?"
-              },
-              "as": "q3"
-            },
-            {
-              "did": "did:plc:jorisbakker",
-              "blockId": "up",
-              "actionId": "up",
-              "value": "up",
-              "on": "q1"
-            },
-            {
-              "did": "did:plc:femkevisser",
-              "blockId": "up",
-              "actionId": "up",
-              "value": "up",
-              "on": "q1"
-            },
-            {
-              "did": "did:plc:noorsmit",
-              "blockId": "up",
-              "actionId": "up",
-              "value": "up",
-              "on": "q1"
-            },
-            {
-              "did": "did:plc:sannedevries",
-              "blockId": "up",
-              "actionId": "up",
-              "value": "up",
-              "on": "q2"
             }
           ]
         }
       ]
     },
     {
-      "slug": "hallway",
-      "name": "Hallway",
-      "cards": [
+      "id": "borrel",
+      "parent": "atmosphereconf",
+      "postTo": "hallway",
+      "title": "Borrel on Friday",
+      "description": "Drinks and bitterballen after the last talk. First round's on whoever loses at dice.",
+      "startsAt": "2027-04-30T17:30:00+02:00",
+      "endsAt": "2027-04-30T20:00:00+02:00",
+      "location": "Café de Sluis, Prinsengracht",
+      "host": "did:plc:jorisbakker",
+      "going": ["did:plc:sannedevries", "did:plc:pieterjansen"],
+      "maybe": ["did:plc:femkevisser"],
+      "feeds": [
         {
-          "ui": {
-            "$type": "app.eventside.block.card",
-            "blocks": [
-              {
-                "$type": "app.eventside.block.defs#header",
-                "text": "Pub quiz: the atmosphere edition"
-              },
-              {
-                "$type": "app.eventside.block.defs#context",
-                "text": "Loading the quiz…"
-              }
-            ],
-            "sources": [
-              {
-                "name": "data",
-                "ref": {
-                  "$type": "app.eventside.block.defs#viewSource",
-                  "view": "app.eventside.card.data"
-                }
-              }
-            ],
-            "timeZone": "Europe/Amsterdam",
-            "fallbackText": "Pub quiz",
-            "createdAt": "2027-04-29T08:00:00.000Z"
-          },
-          "module": "quiz",
-          "reducers": {
-            "score": "leaderboard"
-          },
-          "actions": [
+          "slug": "general",
+          "name": "General",
+          "cards": [
             {
-              "did": "did:plc:jorisbakker",
-              "blockId": "score",
-              "actionId": "score",
-              "value": "4"
-            },
-            {
-              "did": "did:plc:femkevisser",
-              "blockId": "score",
-              "actionId": "score",
-              "value": "3"
-            },
-            {
-              "did": "did:plc:noorsmit",
-              "blockId": "score",
-              "actionId": "score",
-              "value": "5"
-            }
-          ]
-        },
-        {
-          "ui": {
-            "$type": "app.eventside.block.card",
-            "blocks": [
-              {
-                "$type": "app.eventside.block.defs#header",
-                "text": "Who buys the next round?"
-              },
-              {
-                "$type": "app.eventside.block.defs#context",
-                "text": "Loading the dice…"
-              }
-            ],
-            "sources": [
-              {
-                "name": "data",
-                "ref": {
-                  "$type": "app.eventside.block.defs#viewSource",
-                  "view": "app.eventside.card.data"
-                }
-              }
-            ],
-            "timeZone": "Europe/Amsterdam",
-            "fallbackText": "Dice roller",
-            "createdAt": "2027-04-29T08:00:00.000Z"
-          },
-          "module": "dice",
-          "reducers": {
-            "share": "append"
-          },
-          "actions": [
-            {
-              "did": "did:plc:sannedevries",
-              "blockId": "share",
-              "actionId": "share",
-              "value": "⚂ ⚀  rolled 4"
-            },
-            {
-              "did": "did:plc:pieterjansen",
-              "blockId": "share",
-              "actionId": "share",
-              "value": "⚅ ⚄  rolled 11"
-            }
-          ]
-        },
-        {
-          "ui": {
-            "$type": "app.eventside.block.card",
-            "blocks": [
-              {
-                "$type": "app.eventside.block.defs#header",
-                "text": "Borrel on Friday"
-              },
-              {
-                "$type": "app.eventside.block.defs#time",
-                "mode": "countdown",
-                "label": "Bitterballen after the talks",
-                "at": "2027-04-30T19:00:00+02:00",
-                "end": "2027-04-30T21:00:00+02:00"
-              },
-              {
-                "$type": "app.eventside.block.defs#room",
-                "name": "Café de Rozengracht",
-                "detail": "A short walk along the canal"
-              },
-              {
-                "$type": "app.eventside.block.defs#buttonGroup",
-                "id": "rsvp",
-                "label": "Are you coming?",
-                "action": "rsvp",
-                "buttons": [
+              "ui": {
+                "$type": "app.eventside.block.card",
+                "blocks": [
                   {
-                    "label": "Ik kom!",
-                    "value": "yes"
+                    "$type": "app.eventside.block.defs#header",
+                    "text": "What do we order first?"
                   },
                   {
-                    "label": "Can't make it",
-                    "value": "no"
-                  }
-                ]
-              },
-              {
-                "$type": "app.eventside.block.defs#columns",
-                "columns": [
+                    "$type": "app.eventside.block.defs#context",
+                    "text": "One vote each. Joris orders at 17:45."
+                  },
                   {
-                    "blocks": [
+                    "$type": "app.eventside.block.defs#buttonGroup",
+                    "id": "order",
+                    "label": "Pick one",
+                    "action": "order",
+                    "buttons": [
                       {
-                        "$type": "app.eventside.block.defs#stat",
-                        "label": "going",
-                        "bind": {
-                          "value": {
-                            "source": "data",
-                            "path": "/rsvp/counts/yes"
-                          }
-                        }
+                        "label": "Bitterballen",
+                        "value": "bitterballen"
+                      },
+                      {
+                        "label": "Kaasstengels",
+                        "value": "kaasstengels"
+                      },
+                      {
+                        "label": "Nachos",
+                        "value": "nachos"
                       }
                     ]
                   },
                   {
-                    "blocks": [
-                      {
-                        "$type": "app.eventside.block.defs#stat",
-                        "label": "replied",
-                        "bind": {
-                          "value": {
-                            "source": "data",
-                            "path": "/rsvp/total"
-                          }
-                        }
+                    "$type": "app.eventside.block.defs#progress",
+                    "label": "Bitterballen",
+                    "max": 100,
+                    "bind": {
+                      "value": {
+                        "source": "data",
+                        "path": "/order/percent/bitterballen"
                       }
-                    ]
+                    }
+                  },
+                  {
+                    "$type": "app.eventside.block.defs#progress",
+                    "label": "Kaasstengels",
+                    "max": 100,
+                    "bind": {
+                      "value": {
+                        "source": "data",
+                        "path": "/order/percent/kaasstengels"
+                      }
+                    }
+                  },
+                  {
+                    "$type": "app.eventside.block.defs#progress",
+                    "label": "Nachos",
+                    "max": 100,
+                    "bind": {
+                      "value": {
+                        "source": "data",
+                        "path": "/order/percent/nachos"
+                      }
+                    }
+                  },
+                  {
+                    "$type": "app.eventside.block.defs#stat",
+                    "label": "votes",
+                    "bind": {
+                      "value": {
+                        "source": "data",
+                        "path": "/order/total"
+                      }
+                    }
                   }
-                ]
-              }
-            ],
-            "sources": [
-              {
-                "name": "data",
-                "ref": {
-                  "$type": "app.eventside.block.defs#viewSource",
-                  "view": "app.eventside.card.data"
+                ],
+                "sources": [
+                  {
+                    "name": "data",
+                    "ref": {
+                      "$type": "app.eventside.block.defs#viewSource",
+                      "view": "app.eventside.card.data"
+                    }
+                  }
+                ],
+                "timeZone": "Europe/Amsterdam",
+                "fallbackText": "What do we order first?",
+                "createdAt": "2027-04-29T08:00:00.000Z"
+              },
+              "config": {
+                "order": "vote"
+              },
+              "actions": [
+                {
+                  "did": "did:plc:sannedevries",
+                  "type": "order",
+                  "payload": "bitterballen",
+                  "blockId": "order"
+                },
+                {
+                  "did": "did:plc:pieterjansen",
+                  "type": "order",
+                  "payload": "bitterballen",
+                  "blockId": "order"
+                },
+                {
+                  "did": "did:plc:jorisbakker",
+                  "type": "order",
+                  "payload": "kaasstengels",
+                  "blockId": "order"
                 }
+              ]
+            },
+            {
+              "ui": {
+                "$type": "app.eventside.block.card",
+                "blocks": [
+                  {
+                    "$type": "app.eventside.block.defs#header",
+                    "text": "We've got the back room"
+                  },
+                  {
+                    "$type": "app.eventside.block.defs#richText",
+                    "text": "Booked under Joris. Walk through the bar and turn left at the jukebox."
+                  }
+                ],
+                "sources": [
+                  {
+                    "name": "data",
+                    "ref": {
+                      "$type": "app.eventside.block.defs#viewSource",
+                      "view": "app.eventside.card.data"
+                    }
+                  }
+                ],
+                "timeZone": "Europe/Amsterdam",
+                "fallbackText": "We've got the back room",
+                "createdAt": "2027-04-29T08:00:00.000Z"
               }
-            ],
-            "timeZone": "Europe/Amsterdam",
-            "fallbackText": "Borrel RSVP",
-            "createdAt": "2027-04-29T08:00:00.000Z"
-          },
-          "reducers": {
-            "rsvp": "vote"
-          },
-          "actions": [
-            {
-              "did": "did:plc:sannedevries",
-              "blockId": "rsvp",
-              "actionId": "rsvp",
-              "value": "yes"
-            },
-            {
-              "did": "did:plc:jorisbakker",
-              "blockId": "rsvp",
-              "actionId": "rsvp",
-              "value": "yes"
-            },
-            {
-              "did": "did:plc:femkevisser",
-              "blockId": "rsvp",
-              "actionId": "rsvp",
-              "value": "no"
-            },
-            {
-              "did": "did:plc:pieterjansen",
-              "blockId": "rsvp",
-              "actionId": "rsvp",
-              "value": "yes"
             }
           ]
-        },
+        }
+      ]
+    },
+    {
+      "id": "canal",
+      "parent": "atmosphereconf",
+      "postTo": "hallway",
+      "title": "Canal boat tour",
+      "description": "An hour on the canals on Saturday afternoon. The boat takes 12, so say you're going early.",
+      "startsAt": "2027-05-01T14:00:00+02:00",
+      "endsAt": "2027-05-01T15:30:00+02:00",
+      "location": "Centraal Station, pier 5",
+      "host": "did:plc:sannedevries",
+      "going": ["did:plc:noorsmit"],
+      "maybe": ["did:plc:pieterjansen"],
+      "feeds": [
         {
-          "ui": {
-            "$type": "app.eventside.block.card",
-            "blocks": [
-              {
-                "$type": "app.eventside.block.defs#header",
-                "text": "Wifi"
-              },
-              {
-                "$type": "app.eventside.block.defs#copyable",
-                "label": "Network",
-                "value": "AtmosphereConf"
-              },
-              {
-                "$type": "app.eventside.block.defs#copyable",
-                "label": "Password",
-                "value": "stroopwafel2027"
-              },
-              {
-                "$type": "app.eventside.block.defs#context",
-                "text": "The network is on every floor and in the courtyard."
+          "slug": "general",
+          "name": "General",
+          "cards": [
+            {
+              "ui": {
+                "$type": "app.eventside.block.card",
+                "blocks": [
+                  {
+                    "$type": "app.eventside.block.defs#header",
+                    "text": "Bring a jacket"
+                  },
+                  {
+                    "$type": "app.eventside.block.defs#richText",
+                    "text": "It's windy on the water, even in May. We leave at 14:00 sharp."
+                  }
+                ],
+                "sources": [
+                  {
+                    "name": "data",
+                    "ref": {
+                      "$type": "app.eventside.block.defs#viewSource",
+                      "view": "app.eventside.card.data"
+                    }
+                  }
+                ],
+                "timeZone": "Europe/Amsterdam",
+                "fallbackText": "Bring a jacket",
+                "createdAt": "2027-04-29T08:00:00.000Z"
               }
-            ],
-            "sources": [
-              {
-                "name": "data",
-                "ref": {
-                  "$type": "app.eventside.block.defs#viewSource",
-                  "view": "app.eventside.card.data"
-                }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "localfirst",
+      "title": "Local-first Amsterdam",
+      "description": "An evening meetup on local-first software and the atmosphere, two weeks before the conference.",
+      "startsAt": "2027-04-15T19:00:00+02:00",
+      "endsAt": "2027-04-15T21:30:00+02:00",
+      "location": "Studio Noord, Amsterdam-Noord",
+      "host": "did:plc:noorsmit",
+      "going": ["did:plc:femkevisser"],
+      "feeds": [
+        {
+          "slug": "general",
+          "name": "General",
+          "cards": [
+            {
+              "ui": {
+                "$type": "app.eventside.block.card",
+                "blocks": [
+                  {
+                    "$type": "app.eventside.block.defs#header",
+                    "text": "Pizza at 19:00, talks at 19:30"
+                  },
+                  {
+                    "$type": "app.eventside.block.defs#richText",
+                    "text": "Three lightning talks, then hacking until they kick us out."
+                  }
+                ],
+                "sources": [
+                  {
+                    "name": "data",
+                    "ref": {
+                      "$type": "app.eventside.block.defs#viewSource",
+                      "view": "app.eventside.card.data"
+                    }
+                  }
+                ],
+                "timeZone": "Europe/Amsterdam",
+                "fallbackText": "Pizza at 19:00, talks at 19:30",
+                "createdAt": "2027-04-29T08:00:00.000Z"
               }
-            ],
-            "timeZone": "Europe/Amsterdam",
-            "fallbackText": "Wifi details",
-            "createdAt": "2027-04-29T08:00:00.000Z"
-          }
+            }
+          ]
         }
       ]
     }

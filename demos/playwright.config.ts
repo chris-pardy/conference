@@ -12,7 +12,7 @@ export default defineConfig({
   outputDir: '../test-results/demos',
   reporter: 'list',
   // The servers' commands are relative to the repo root, not this directory.
-  // A demo can idle longer than e2e's ten-second sessions (groups.demo.ts
+  // A demo can idle longer than e2e's ten-second sessions (events.demo.ts
   // keeps a second phone open), so the idle timeout comes from DEMO_IDLE_TIMEOUT.
   webServer: [base.webServer ?? []].flat().map((server) => ({
     ...server,

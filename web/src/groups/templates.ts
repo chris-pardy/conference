@@ -1,5 +1,6 @@
 // Starting points for new cards. Each is plain card-kit JSON plus the
-// reducers that say how the server folds its actions into data.
+// config for the standard module: which reducer folds each action type
+// into the card's shared state.
 
 const D = 'app.eventside.block.defs#'
 const b = (type: string, props: Record<string, unknown> = {}) => ({ $type: `${D}${type}`, ...props })
@@ -18,7 +19,7 @@ export interface Template {
   name: string
   description: string
   ui: unknown
-  reducers: Record<string, string>
+  config: Record<string, string>
 }
 
 const options = [
@@ -36,7 +37,7 @@ export const templates: Template[] = [
       b('richText', { text: 'Sandwiches and soup in the courtyard until 13:30. Vegan options on the left table.' }),
       b('badge', { text: 'Now', tone: 'success' }),
     ]),
-    reducers: {},
+    config: {},
   },
   {
     name: 'Poll',
@@ -52,7 +53,7 @@ export const templates: Template[] = [
       ...options.map(([label, value]) => bound(b('progress', { label, max: 100 }), 'value', `/snack/percent/${value}`)),
       bound(b('stat', { label: 'votes' }), 'value', '/snack/total'),
     ]),
-    reducers: { snack: 'vote' },
+    config: { snack: 'vote' },
   },
   {
     name: 'Questions',
@@ -81,7 +82,7 @@ export const templates: Template[] = [
         ],
       }),
     ]),
-    reducers: { ask: 'append', up: 'upvote:ask' },
+    config: { ask: 'append', up: 'upvote:ask' },
   },
   {
     name: 'Sign-up',
@@ -105,7 +106,7 @@ export const templates: Template[] = [
         ],
       }),
     ]),
-    reducers: { going: 'vote' },
+    config: { going: 'vote' },
   },
   {
     name: 'Counter',
@@ -120,6 +121,6 @@ export const templates: Template[] = [
       }),
       b('button', { id: 'coffee', label: '+1 coffee', action: 'coffee', value: '1', variant: 'primary' }),
     ]),
-    reducers: { coffee: 'count' },
+    config: { coffee: 'count' },
   },
 ]

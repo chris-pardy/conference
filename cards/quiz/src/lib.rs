@@ -1,10 +1,19 @@
-//! A five-question pub quiz that runs on the device: answers are checked
-//! locally and instantly. Only the final score is sent to the group.
+//! A five-question pub quiz. Answers are checked on the device, for
+//! instant feedback. Submitting sends the answers, not the score: the
+//! server re-scores them with the same code, so nobody can post a score
+//! they didn't earn. It keeps the leaderboard and tells the player their
+//! verified score (`scored`, to them only).
+//!
+//! - Local state: `{i, score, answers, picked?, right?, posted?, verified?}`
+//! - Shared state: `{best: {did: {score, handle, at}}}`
 
 use eventside_card::blocks::*;
-use eventside_card::{Value, action_id, card_module, event_type, json};
+use eventside_card::{
+    Env, Value, action_type, actor_did, actor_handle, card_module, emit, emit_to, env, json, meta,
+    out, payload, state_or, unchanged,
+};
 
-card_module!(handle);
+card_module! { reduce: reducer, view: render }
 
 struct Question {
     ask: &'static str,
@@ -46,44 +55,88 @@ const QUESTIONS: [Question; 5] = [
     },
 ];
 
-pub fn handle(input: &Value) -> Value {
-    let mut local = input["local"].clone();
-    if !local.is_object() {
-        local = json!({ "i": 0, "score": 0 });
+/// The score for a list of answers, the same on every device and the server.
+pub fn score(answers: &[Value]) -> u64 {
+    QUESTIONS.iter().zip(answers).filter(|(q, a)| a.as_str() == Some(q.options[q.answer])).count()
+        as u64
+}
+
+pub fn reducer(input: &Value) -> Value {
+    match env(input) {
+        Env::Client => client(input),
+        Env::Server => server(input),
     }
+}
+
+fn fresh() -> Value {
+    json!({ "i": 0, "score": 0, "answers": [] })
+}
+
+fn client(input: &Value) -> Value {
+    let mut local = state_or(input, fresh());
+    let from_server = meta(input)["origin"] == "server";
     let i = local["i"].as_u64().unwrap_or(0) as usize;
-    let score = local["score"].as_u64().unwrap_or(0);
-    let forward = match (event_type(input), action_id(input)) {
-        ("action", "answer") if i < QUESTIONS.len() && local["picked"].is_null() => {
-            let picked = input["event"]["value"].as_str().unwrap_or("");
+    match action_type(input) {
+        "@init" => out(local, vec![]),
+        "answer" if !from_server && i < QUESTIONS.len() && local["picked"].is_null() => {
+            let picked = payload(input).as_str().unwrap_or("").to_owned();
+            if !local["answers"].is_array() {
+                local["answers"] = json!([]);
+            }
+            local["answers"].as_array_mut().expect("an array").push(json!(picked));
+            let answers = local["answers"].as_array().cloned().unwrap_or_default();
             let right = QUESTIONS[i].options[QUESTIONS[i].answer] == picked;
             local["picked"] = json!(picked);
             local["right"] = json!(right);
-            if right {
-                local["score"] = json!(score + 1);
-            }
-            false
+            local["score"] = json!(score(&answers));
+            out(local, vec![])
         }
-        ("action", "next") => {
+        "next" if !from_server => {
             local["i"] = json!(i + 1);
             local["picked"] = Value::Null;
-            false
+            out(local, vec![])
         }
-        ("action", "restart") => {
-            local = json!({ "i": 0, "score": 0 });
-            false
-        }
-        ("action", "score") => {
+        "restart" if !from_server => out(fresh(), vec![]),
+        "submit" if !from_server && i >= QUESTIONS.len() && local["posted"] != json!(true) => {
             local["posted"] = json!(true);
-            true
+            let answers = local["answers"].clone();
+            out(local, vec![emit("submit", json!({ "answers": answers }))])
         }
-        ("init", _) => false,
-        _ => return json!({}),
-    };
-    json!({ "ui": render(input, &local), "local": local, "forward": forward })
+        "scored" if from_server => {
+            local["verified"] = payload(input)["score"].clone();
+            out(local, vec![])
+        }
+        _ => unchanged(),
+    }
 }
 
-fn render(input: &Value, local: &Value) -> Value {
+fn server(input: &Value) -> Value {
+    let mut shared = state_or(input, json!({ "best": {} }));
+    match action_type(input) {
+        "@init" => out(shared, vec![]),
+        "submit" => {
+            let answers = payload(input)["answers"].as_array().cloned().unwrap_or_default();
+            let points = score(&answers);
+            let did = actor_did(input);
+            if did.is_empty() {
+                return unchanged();
+            }
+            if !shared["best"].is_object() {
+                shared["best"] = json!({});
+            }
+            let better = shared["best"][did]["score"].as_u64().is_none_or(|old| points > old);
+            if better {
+                shared["best"][did] = json!({ "score": points, "handle": actor_handle(input), "at": meta(input)["at"] });
+            }
+            let total = QUESTIONS.len();
+            out(shared, vec![emit_to(did, "scored", json!({ "score": points, "total": total }))])
+        }
+        _ => unchanged(),
+    }
+}
+
+pub fn render(input: &Value) -> Value {
+    let local = state_or(&json!({ "state": input["local"] }), fresh());
     let i = local["i"].as_u64().unwrap_or(0) as usize;
     let score = local["score"].as_u64().unwrap_or(0) as u32;
     let total = QUESTIONS.len() as u32;
@@ -113,22 +166,58 @@ fn render(input: &Value, local: &Value) -> Value {
         blocks.push(stat("Your score", &format!("{score} / {total}")));
         if local["posted"] == json!(true) {
             blocks.push(badge("Score posted", "success"));
+            match local["verified"].as_u64() {
+                Some(v) => blocks.push(small(&format!("Verified by the server: {v} of {total} ✓"))),
+                None => blocks.push(small("Checking your answers on the server…")),
+            }
         } else {
-            blocks.push(button("score", "Post my score", "score", &score.to_string(), "primary"));
+            blocks.push(button("submit", "Post my score", "submit", &score.to_string(), "primary"));
         }
         blocks.push(button("restart", "Play again", "restart", "", "default"));
     }
     blocks.push(divider());
     blocks.push(header("Leaderboard"));
-    blocks.push(list(
-        "data",
-        "/score/items",
-        "/id",
-        "No scores yet. Be the first.",
-        vec![columns(vec![
-            vec![bound(json!({ "$type": "app.eventside.block.defs#person" }), "did", "$item", "/did")],
-            vec![bound(stat("points", ""), "value", "$item", "/value")],
-        ])],
-    ));
-    card(&input["base"], blocks)
+    let mut best: Vec<(String, u64, i64)> = input["shared"]["best"]
+        .as_object()
+        .map(|b| {
+            b.iter()
+                .map(|(did, e)| {
+                    (did.clone(), e["score"].as_u64().unwrap_or(0), e["at"].as_i64().unwrap_or(0))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    best.sort_by(|a, b| b.1.cmp(&a.1).then(a.2.cmp(&b.2)));
+    if best.is_empty() {
+        blocks.push(small("No scores yet. Be the first."));
+    }
+    for (did, points, _) in best.iter().take(10) {
+        let who = if did.starts_with("did:") { person(did) } else { small(did) };
+        blocks.push(columns(vec![vec![who], vec![stat("points", &points.to_string())]]));
+    }
+    json!({ "ui": card(&input["base"], blocks) })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_server_rescores_the_answers_and_tells_only_the_player() {
+        let answers = [
+            "Authenticated Transfer",
+            "A decentralized identifier",
+            "In your PDS repo",
+            "Zaventem",
+            "Mustard",
+        ];
+        let o = reducer(&json!({ "env": "server", "state": null, "action": {
+            "type": "submit", "payload": { "answers": answers },
+            "meta": { "at": 5, "actor": { "did": "did:x:a", "handle": "a" } } } }));
+        assert_eq!(o["state"]["best"]["did:x:a"]["score"], 4);
+        assert_eq!(
+            o["actions"][0],
+            json!({ "type": "scored", "to": "did:x:a", "payload": { "score": 4, "total": 5 } })
+        );
+    }
 }

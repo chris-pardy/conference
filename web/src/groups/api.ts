@@ -1,64 +1,106 @@
-// The client for groups, feeds and cards. Everything lives on our server;
-// atproto is only how people sign in.
+// The client for events, feeds and cards (see DEMO.md). Everything lives on
+// our server; atproto is only how people sign in.
 
 import { api } from '../api'
 import type { Card as CardUi } from '../blocks/BlockCard'
 
-export interface GroupSummary {
+export type Rsvp = 'going' | 'maybe' | 'no'
+
+/** An event as it appears in lists. */
+export interface EventSummary {
   id: string
-  name: string
+  title: string
   description: string
-  role: string
-  memberCount: number
-  feedCount: number
+  /** Epoch ms. */
+  startsAt: number
+  endsAt: number | null
+  timeZone: string
+  location: string
+  /** The host's DID. */
+  host: string
+  parent: { id: string; title: string } | null
+  going: number
+  maybe: number
+  rsvp: Rsvp | null
+  /** Whether the viewer is going, so can see the event's feeds, people and plans. */
+  canView: boolean
+  subEventCount: number
 }
 
-export interface Group {
-  id: string
-  name: string
-  description: string
-  invite: string
-  role: string
-  memberCount: number
-  members: string[]
+export interface EventDetail extends EventSummary {
+  /** DIDs of people going, at most 24. */
+  attendees: string[]
 }
 
 export interface Feed {
   id: string
   name: string
-  groupId: string
+  eventId: string
 }
 
-/** A card as the server sends it down: its card-kit UI, and its data as this viewer sees it. */
+/** A card as the server sends it down. */
 export interface CardView {
   id: string
   feedId: string
   author: string
   version: number
   createdAt: number
+  /** The card-kit UI as authored: the view's `base`. */
   ui: CardUi
-  reducers: Record<string, string>
-  data: Record<string, unknown>
-  /** Where to fetch the card's wasm module, if it has one. */
+  config: unknown
+  /** The shared state, which only the server reducer changes. */
+  state: unknown
+  /** Platform context for this viewer: `{viewer, event?}`. */
+  context: CardContext
+  /** Where to fetch the card's wasm module. */
   module: string | null
+  eventId: string | null
 }
 
-/** An action, as the generic payload sent up for any block on any card. */
-export interface ActionPayload {
-  cardId: string
-  blockId: string
-  actionId: string
-  value: unknown
-  item?: unknown
+export interface CardContext {
+  viewer?: { did: string; handle: string }
+  event?: {
+    id: string
+    title: string
+    description: string
+    startsAt: number
+    endsAt: number | null
+    timeZone: string
+    location: string
+    host: string
+    going: number
+    maybe: number
+    rsvp: Rsvp | null
+    url: string
+  }
+  [key: string]: unknown
 }
 
-/** An update, as the generic payload sent down a group's stream. */
+/** An action as the client sends it to the server: the server stamps the rest of `meta`. */
+export interface OutgoingAction {
+  type: string
+  payload?: unknown
+  meta?: { blockId?: string; item?: unknown }
+}
+
+/** An action the server's reducer emitted, sent down to clients. */
+export interface ServerAction {
+  type: string
+  payload?: unknown
+  to?: string
+  meta?: Record<string, unknown>
+}
+
+/** An update, as the generic payload sent down an event's stream. */
 export type StreamPayload =
   | { type: 'hello' }
   | { type: 'resync' }
   | { type: 'card'; feedId: string; card: CardView }
   | { type: 'cardRemoved'; feedId: string; cardId: string }
   | { type: 'feed'; feed: Feed }
+  | { type: 'actions'; cardId: string; actions: ServerAction[] }
+  | { type: 'event'; event: EventDetail }
+  | { type: 'subEvent'; event: EventSummary }
 
 export class ApiError extends Error {
   constructor(
@@ -92,14 +134,27 @@ async function answer<T>(res: Response): Promise<T> {
   return body as T
 }
 
-export const groups = {
-  list: () => get<{ groups: GroupSummary[] }>('group.list').then((r) => r.groups),
-  get: (id: string) => get<{ group: Group; feeds: Feed[] }>('group.get', { id }),
-  create: (name: string, description: string) => post<{ id: string }>('group.create', { name, description }),
-  join: (invite: string) => post<{ id: string }>('group.join', { invite }),
-  /** The group's live updates. */
+export interface NewEvent {
+  title: string
+  description?: string
+  startsAt: number
+  endsAt?: number | null
+  timeZone?: string
+  location?: string
+  /** Makes it a sub-event (a plan) of this event. */
+  parentId?: string
+  /** The parent's feed to post the event card in. */
+  feedId?: string
+}
+
+export const events = {
+  list: () => get<{ events: EventSummary[] }>('event.list').then((r) => r.events),
+  get: (id: string) => get<{ event: EventDetail; feeds: Feed[]; subEvents: EventSummary[] }>('event.get', { id }),
+  create: (event: NewEvent) => post<{ event: EventSummary }>('event.create', event).then((r) => r.event),
+  rsvp: (id: string, status: Rsvp) => post<{ event: EventDetail }>('event.rsvp', { id, status }).then((r) => r.event),
+  /** The event's live updates. Needs the viewer to be going. */
   subscribe(id: string, onPayload: (payload: StreamPayload) => void): () => void {
-    const source = new EventSource(`${X}group.subscribe?${new URLSearchParams({ id })}`)
+    const source = new EventSource(`${X}event.subscribe?${new URLSearchParams({ id })}`)
     source.onmessage = (event) => {
       try {
         onPayload(JSON.parse(event.data))
@@ -121,16 +176,19 @@ export const groups = {
 }
 
 export const feeds = {
-  create: (groupId: string, name: string) => post<Feed>('feed.create', { groupId, name }),
+  create: (eventId: string, name: string) => post<Feed>('feed.create', { eventId, name }),
   cards: (id: string) => get<{ cards: CardView[] }>('feed.getCards', { id }).then((r) => r.cards),
 }
 
+/** The default module, for cards without their own: generic reducers named in `config`. */
+export const STD_MODULE = `${X}card.getModule?hash=std`
+
 export const cards = {
-  create: (feedId: string, ui: unknown, reducers: Record<string, string>, module?: string) =>
-    post<{ card: CardView }>('card.create', { feedId, ui, reducers, module }).then((r) => r.card),
-  update: (cardId: string, ui: unknown) => post<{ card: CardView }>('card.update', { cardId, ui }).then((r) => r.card),
+  create: (feedId: string, ui: unknown, config: unknown, module?: string) =>
+    post<{ card: CardView }>('card.create', { feedId, ui, config, module }).then((r) => r.card),
   remove: (cardId: string) => post<object>('card.delete', { cardId }),
-  act: (payload: ActionPayload) => post<{ card: CardView }>('card.action', payload).then((r) => r.card),
+  dispatch: (cardId: string, actions: OutgoingAction[]) =>
+    post<{ card: CardView }>('card.dispatch', { cardId, actions }).then((r) => r.card),
 }
 
 export interface Profile {

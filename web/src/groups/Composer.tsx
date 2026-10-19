@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { validateCard } from '../blocks/validate'
-import { type CardView, cards } from './api'
+import { type CardView, cards, STD_MODULE } from './api'
 import { LiveCard, type Viewer } from './LiveCard'
 import { templates } from './templates'
 
@@ -25,28 +25,36 @@ async function base64(file: File): Promise<string> {
 export function Composer({ feedId, viewer, onClose, onPosted }: ComposerProps) {
   const [chosen, setChosen] = useState(1)
   const [uiText, setUiText] = useState(pretty(templates[1].ui))
-  const [reducersText, setReducersText] = useState(pretty(templates[1].reducers))
+  const [configText, setConfigText] = useState(pretty(templates[1].config))
   const [module, setModule] = useState<File | null>(null)
+  // An uploaded module previews straight from the file.
+  const moduleUrl = useMemo(() => (module ? URL.createObjectURL(module) : null), [module])
+  useEffect(
+    () => () => {
+      if (moduleUrl) URL.revokeObjectURL(moduleUrl)
+    },
+    [moduleUrl],
+  )
   const [posting, setPosting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const choose = (i: number) => {
     setChosen(i)
     setUiText(pretty(templates[i].ui))
-    setReducersText(pretty(templates[i].reducers))
+    setConfigText(pretty(templates[i].config))
   }
 
   const parsed = useMemo(() => {
     try {
       const ui = JSON.parse(uiText)
-      const reducers = JSON.parse(reducersText || '{}')
+      const config = JSON.parse(configText || '{}')
       const check = validateCard(ui)
       if (!check.ok) return { error: `${check.error.path || 'card'}: ${check.error.message}` }
-      return { ui, reducers }
+      return { ui, config }
     } catch (err) {
       return { error: (err as Error).message }
     }
-  }, [uiText, reducersText])
+  }, [uiText, configText])
 
   // The preview is a card with no data yet, as everyone sees it before anyone acts.
   const preview = useMemo<CardView | null>(
@@ -59,12 +67,15 @@ export function Composer({ feedId, viewer, onClose, onPosted }: ComposerProps) {
             version: 0,
             createdAt: 0,
             ui: parsed.ui,
-            reducers: parsed.reducers,
-            data: { viewer },
-            module: null,
+            config: parsed.config,
+            state: null,
+            context: { viewer },
+            // The preview runs the module as client and server, in the browser.
+            module: moduleUrl ?? STD_MODULE,
+            eventId: null,
           }
         : null,
-    [parsed, feedId, viewer],
+    [parsed, feedId, viewer, moduleUrl],
   )
 
   const post = async () => {
@@ -73,7 +84,7 @@ export function Composer({ feedId, viewer, onClose, onPosted }: ComposerProps) {
     setError(null)
     try {
       const wasm = module ? await base64(module) : undefined
-      onPosted(await cards.create(feedId, parsed.ui, parsed.reducers, wasm))
+      onPosted(await cards.create(feedId, parsed.ui, parsed.config, wasm))
     } catch (err) {
       setError((err as Error).message)
     } finally {
@@ -117,19 +128,20 @@ export function Composer({ feedId, viewer, onClose, onPosted }: ComposerProps) {
             value={uiText}
             onChange={(e) => setUiText(e.target.value)}
           />
-          <label className="gx-label" htmlFor="card-reducers">
-            Reducers{' '}
-            <span className="gx-muted">action id → vote · append · count · leaderboard · upvote:&lt;id&gt;</span>
+          <label className="gx-label" htmlFor="card-config">
+            Config{' '}
+            <span className="gx-muted">action → vote · append · count · leaderboard · upvote:&lt;action&gt;</span>
           </label>
           <textarea
-            id="card-reducers"
+            id="card-config"
             className="gx-code gx-code--short"
             spellCheck={false}
-            value={reducersText}
-            onChange={(e) => setReducersText(e.target.value)}
+            value={configText}
+            onChange={(e) => setConfigText(e.target.value)}
           />
           <label className="gx-label" htmlFor="card-module">
-            Wasm module <span className="gx-muted">optional: answers actions on each device</span>
+            Wasm module{' '}
+            <span className="gx-muted">optional: your own reducer and view, run on each device and on the server</span>
           </label>
           <input
             id="card-module"
@@ -139,9 +151,11 @@ export function Composer({ feedId, viewer, onClose, onPosted }: ComposerProps) {
           />
         </div>
         <div className="gx-composer__preview">
-          <p className="gx-label">Preview</p>
+          <p className="gx-label">
+            Preview <span className="gx-muted">the module runs as client and server, right here</span>
+          </p>
           {preview ? (
-            <LiveCard card={preview} viewer={viewer} onUpdate={() => {}} preview />
+            <LiveCard key={`${chosen}:${moduleUrl}`} card={preview} viewer={viewer} onUpdate={() => {}} preview />
           ) : (
             <p className="gx-error">{'error' in parsed ? parsed.error : ''}</p>
           )}

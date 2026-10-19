@@ -1,34 +1,65 @@
-// Runs a card's wasm module. The ABI (see cards/abi/src/lib.rs):
-// exports `memory`, `alloc(len) -> ptr` and `update(ptr, len) -> i64`,
-// JSON in, JSON out, packed as (ptr << 32) | len.
+// Runs a card's wasm module, ABI v2 (see DEMO.md and cards/abi): exports
+// `memory`, `alloc(len) -> ptr`, `reduce(ptr, len) -> i64` and
+// `view(ptr, len) -> i64`. JSON in, JSON out, packed as (ptr << 32) | len.
 
 import type { Card as CardUi } from '../blocks/BlockCard'
 
-export type ModuleEvent =
-  | { type: 'init' }
-  | { type: 'data' }
-  | { type: 'action'; blockId: string; actionId: string; value: unknown; item?: unknown }
+export type Env = 'client' | 'server'
 
-export interface ModuleInput {
-  event: ModuleEvent
-  ui: CardUi
+export interface ActionMeta {
+  id?: string
+  actor?: { did: string; handle: string; displayName?: string | null }
+  at?: number
+  origin?: 'ui' | 'client' | 'server' | 'platform'
+  blockId?: string
+  item?: unknown
+  [key: string]: unknown
+}
+
+export interface Action {
+  type: string
+  payload?: unknown
+  meta?: ActionMeta
+  /** On an action the server emits: the one person it's for. */
+  to?: string
+}
+
+export interface ReduceInput {
+  env: Env
+  state: unknown
+  shared: unknown
+  action: Action
+  config: unknown
   base: CardUi
-  data: unknown
+  context: unknown
+  viewer?: { did: string; handle: string }
+}
+
+export interface ReduceOutput {
+  /** Absent means unchanged. */
+  state?: unknown
+  actions?: Action[]
+}
+
+export interface ViewInput {
+  shared: unknown
   local: unknown
+  config: unknown
+  base: CardUi
+  context: unknown
   viewer: { did: string; handle: string }
 }
 
-export interface ModuleOutput {
+export interface ViewOutput {
   ui?: CardUi
-  local?: unknown
-  /** Whether an action also goes to the server, or what to send instead. */
-  forward?: boolean | { actionId?: string; value?: unknown }
+  data?: unknown
 }
 
 interface Exports {
   memory: WebAssembly.Memory
   alloc(len: number): number
-  update(ptr: number, len: number): bigint
+  reduce(ptr: number, len: number): bigint
+  view(ptr: number, len: number): bigint
 }
 
 export class CardModule {
@@ -40,23 +71,37 @@ export class CardModule {
     // No imports: a module can't reach the network, the DOM or a clock.
     const { instance } = await WebAssembly.instantiate(await res.arrayBuffer(), {})
     const exports = instance.exports as unknown as Exports
-    if (!(exports.memory instanceof WebAssembly.Memory) || typeof exports.update !== 'function') {
-      throw new Error('module: missing memory, alloc or update')
+    if (
+      !(exports.memory instanceof WebAssembly.Memory) ||
+      typeof exports.alloc !== 'function' ||
+      typeof exports.reduce !== 'function' ||
+      typeof exports.view !== 'function'
+    ) {
+      throw new Error('module: missing memory, alloc, reduce or view')
     }
     return new CardModule(exports)
   }
 
-  update(input: ModuleInput): ModuleOutput {
+  reduce(input: ReduceInput): ReduceOutput {
+    return this.call(this.exports.reduce, input)
+  }
+
+  view(input: ViewInput): ViewOutput {
+    return this.call(this.exports.view, input)
+  }
+
+  private call<T>(fn: (ptr: number, len: number) => bigint, input: object): T {
+    // A module has no clock or RNG of its own: the host passes them in.
     const seed = crypto.getRandomValues(new Uint32Array(1))[0]
-    const bytes = new TextEncoder().encode(JSON.stringify({ ...input, seed }))
+    const bytes = new TextEncoder().encode(JSON.stringify({ ...input, seed, now: Date.now() }))
     const ptr = this.exports.alloc(bytes.length)
     new Uint8Array(this.exports.memory.buffer, ptr, bytes.length).set(bytes)
-    const packed = this.exports.update(ptr, bytes.length)
+    const packed = fn(ptr, bytes.length)
     const outPtr = Number(packed >> 32n)
     const outLen = Number(packed & 0xffffffffn)
     const out = new TextDecoder().decode(new Uint8Array(this.exports.memory.buffer, outPtr, outLen))
     const parsed = JSON.parse(out)
-    return parsed && typeof parsed === 'object' ? parsed : {}
+    return (parsed && typeof parsed === 'object' ? parsed : {}) as T
   }
 }
 

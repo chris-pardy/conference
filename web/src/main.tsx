@@ -7,7 +7,7 @@ import Shell from './Shell'
 // The block gallery is a page of its own, loaded only when visited.
 const BlockGallery = lazy(() => import('./routes/dev/blocks'))
 const SignIn = lazy(() => import('./routes/signin'))
-const GroupPage = lazy(() => import('./groups/GroupPage'))
+const EventPage = lazy(() => import('./groups/EventPage'))
 
 createRoot(document.getElementById('root') as HTMLElement).render(
   <StrictMode>
@@ -16,10 +16,10 @@ createRoot(document.getElementById('root') as HTMLElement).render(
         <Route element={<Shell />}>
           <Route path="/" element={<Home />} />
           <Route
-            path="/g/:groupId/:feedId?"
+            path="/e/:eventId/:tab?"
             element={
               <Suspense fallback={null}>
-                <GroupPage />
+                <EventPage />
               </Suspense>
             }
           />

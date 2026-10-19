@@ -10,7 +10,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "card-event"
+version = "0.1.0"
+dependencies = [
+ "eventside-card",
+]
+
+[[package]]
 name = "card-quiz"
+version = "0.1.0"
+dependencies = [
+ "eventside-card",
+]
+
+[[package]]
+name = "card-std"
 version = "0.1.0"
 dependencies = [
  "eventside-card",
