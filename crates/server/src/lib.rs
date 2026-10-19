@@ -8,6 +8,7 @@ use axum::{Json, Router, extract::State, middleware};
 pub mod auth;
 pub mod config;
 pub mod db;
+pub mod groups;
 pub mod identity;
 pub mod keys;
 pub mod net;
@@ -50,6 +51,8 @@ pub struct Inner {
     pub http: net::Http,
     pub oauth: oauth::OAuthClient,
     pub resolver: identity::Resolver,
+    /// Changes to groups, for their live streams.
+    pub events: tokio::sync::broadcast::Sender<groups::Change>,
     probe: reqwest::Client,
 }
 
@@ -66,6 +69,7 @@ impl AppState {
     /// so the server starts even when the network is down.
     pub async fn build(config: Config, public_url: String) -> Result<Self, String> {
         let db = db::connect(&config.database_url).await?;
+        groups::seed::ensure(&db).await?;
         let key = oauth::signing_key(&db, config.signing_key.as_deref()).await?;
         let http = net::Http::new(config.allow_private_network);
         let oauth = oauth::OAuthClient::new(&public_url, &config.scopes, key, http.clone())?;
@@ -78,7 +82,8 @@ impl AppState {
             .timeout(ATPROTO_PROBE_TIMEOUT)
             .build()
             .expect("the HTTP client has a valid static configuration");
-        Ok(Self(Arc::new(Inner { config, db, http, oauth, resolver, probe })))
+        let events = groups::channel();
+        Ok(Self(Arc::new(Inner { config, db, http, oauth, resolver, events, probe })))
     }
 
     /// Cookies are `Secure` and `__Host-` prefixed when the app is served over HTTPS.
@@ -120,6 +125,19 @@ fn routes() -> Router<AppState> {
         .route("/oauth/callback", get(routes::callback))
         .route("/oauth/logout", post(routes::logout))
         .route("/xrpc/app.eventside.auth.getSession", get(routes::get_session))
+        .route("/xrpc/app.eventside.group.list", get(groups::list_groups))
+        .route("/xrpc/app.eventside.group.create", post(groups::create_group))
+        .route("/xrpc/app.eventside.group.join", post(groups::join_group))
+        .route("/xrpc/app.eventside.group.get", get(groups::get_group))
+        .route("/xrpc/app.eventside.group.subscribe", get(groups::subscribe))
+        .route("/xrpc/app.eventside.feed.create", post(groups::create_feed))
+        .route("/xrpc/app.eventside.feed.getCards", get(groups::get_cards))
+        .route("/xrpc/app.eventside.card.create", post(groups::create_card))
+        .route("/xrpc/app.eventside.card.update", post(groups::update_card))
+        .route("/xrpc/app.eventside.card.delete", post(groups::delete_card))
+        .route("/xrpc/app.eventside.card.action", post(groups::act))
+        .route("/xrpc/app.eventside.card.getModule", get(groups::get_module))
+        .route("/xrpc/app.eventside.actor.getProfile", get(groups::get_profile))
 }
 
 /// Wraps a finished set of routes in the CSRF check. `Router::layer` covers

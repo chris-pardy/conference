@@ -1,19 +1,28 @@
 import { lazy, StrictMode, Suspense } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Route, Routes } from 'react-router'
-import App from './App'
+import Home from './groups/Home'
 import Shell from './Shell'
 
 // The block gallery is a page of its own, loaded only when visited.
 const BlockGallery = lazy(() => import('./routes/dev/blocks'))
 const SignIn = lazy(() => import('./routes/signin'))
+const GroupPage = lazy(() => import('./groups/GroupPage'))
 
 createRoot(document.getElementById('root') as HTMLElement).render(
   <StrictMode>
     <BrowserRouter>
       <Routes>
         <Route element={<Shell />}>
-          <Route path="/" element={<App />} />
+          <Route path="/" element={<Home />} />
+          <Route
+            path="/g/:groupId/:feedId?"
+            element={
+              <Suspense fallback={null}>
+                <GroupPage />
+              </Suspense>
+            }
+          />
           <Route
             path="/signin"
             element={

@@ -52,6 +52,14 @@ pub struct CurrentUser {
 }
 
 impl CurrentUser {
+    pub fn display_name(&self) -> Option<&str> {
+        self.session.display_name.as_deref()
+    }
+
+    pub fn avatar(&self) -> Option<&str> {
+        self.session.avatar.as_deref()
+    }
+
     /// An HTTP client for the person's PDS, authenticated as them.
     pub async fn pds_client(&self, state: &AppState) -> Result<pds::PdsClient, pds::PdsError> {
         pds::PdsClient::for_session(state, &self.session.id_hash).await

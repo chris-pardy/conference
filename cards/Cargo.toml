@@ -1,0 +1,11 @@
+# Card modules: wasm bundles a card can carry to answer actions locally.
+# Its own workspace, built for wasm32 by scripts/build-card-modules.sh.
+[workspace]
+resolver = "3"
+members = ["abi", "dice", "quiz"]
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
+panic = "abort"
